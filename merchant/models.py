@@ -146,6 +146,13 @@ class SpendLedgerEntry(SQLModel, table=True):
     amount_minor: int
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+class IdempotencyRecord(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: str = Field(index=True)
+    idempotency_key: str = Field(index=True)
+    response_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 class AuditLogEntry(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     trace_id: str = Field(index=True)

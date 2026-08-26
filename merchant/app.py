@@ -15,6 +15,8 @@ from merchant.models import (
 )
 from merchant.trace import emit
 from merchant.oauth.routes import router as oauth_router
+from merchant.internal_routes import router as internal_router
+from merchant.webhooks import router as webhook_router
 from merchant.mcp_server import mcp
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -44,6 +46,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="OpenStore Merchant Server", lifespan=lifespan)
     app.include_router(oauth_router)
+    app.include_router(internal_router)
+    app.include_router(webhook_router)
     app.mount("/agent/mcp", mcp_http_app)
 
     templates = Jinja2Templates(directory="merchant/storefront")

@@ -89,3 +89,6 @@ dmypy.json
 
 # docs/plan.md
 docs/plan.md
+
+# Merchant signing key
+merchant_signing_key.pem
