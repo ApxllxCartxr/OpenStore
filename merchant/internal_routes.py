@@ -4,16 +4,18 @@ import uuid
 import jwt as pyjwt
 from datetime import datetime
 
+from argon2 import PasswordHasher
 from fastapi import APIRouter, Body, HTTPException, Depends
 from sqlmodel import Session, select
 
 from merchant.db import get_session
 from merchant.models import Checkout, OTPChallenge, Cart, Mandate
 from merchant.mandate import issue_mandate, compute_cart_hash, verify_mandate
-from merchant.checkout import ph, OTP_MAX_ATTEMPTS
 from merchant.trace import emit
 
 router = APIRouter()
+ph = PasswordHasher()
+OTP_MAX_ATTEMPTS = 3
 
 
 @router.post("/internal/otp-verify")

@@ -10,6 +10,7 @@ from merchant.config import settings
 from merchant.db import engine
 from merchant.models import (
     Cart, Checkout, Mandate, Order, IdempotencyRecord, SpendLedgerEntry,
+    IntentPolicyRow,
 )
 from merchant.mcp_auth import get_claims_from_context
 from merchant.policy import check_rate_limit, rolling_spend_minor
@@ -17,10 +18,11 @@ from merchant.audit import audited_tool
 from merchant.trace import emit
 from merchant.checkout import checkout_initiate as _checkout_initiate
 from merchant.mandate import verify_mandate
+from merchant.intent_compiler import verify_cart_against_policy
 from merchant.razorpay_client import create_order_and_payment_link, INJECT_TIMEOUT
 
 mcp = MCPServer("openstore-catalog")
-catalog = YAMLCatalogAdapter(settings.merchant_config_path)
+_catalog = YAMLCatalogAdapter(settings.merchant_config_path)
 
 
 @mcp.tool()
@@ -31,7 +33,7 @@ def search_products(query: str, ctx: Context) -> list[dict]:
     claims = get_claims_from_context(ctx, "catalog:read")
     if not check_rate_limit(claims["sub"], "search_products"):
         raise HTTPException(429, "Rate limit exceeded")
-    results = catalog.search_products(query)
+    results = _catalog.search_products(query)
     return [p.model_dump() for p in results]
 
 
@@ -42,7 +44,7 @@ def get_product(sku: str, ctx: Context) -> dict:
     claims = get_claims_from_context(ctx, "catalog:read")
     if not check_rate_limit(claims["sub"], "get_product"):
         raise HTTPException(429, "Rate limit exceeded")
-    product = catalog.get_product(sku)
+    product = _catalog.get_product(sku)
     if product is None:
         raise HTTPException(404, f"No product with sku {sku}")
     return product.model_dump()
@@ -94,7 +96,7 @@ def _validate_and_price(items: list[dict]) -> list[dict]:
     the cart layer: only sku and qty come from the caller."""
     priced = []
     for item in items:
-        product = catalog.get_product(item["sku"])
+        product = _catalog.get_product(item["sku"])
         if product is None:
             raise HTTPException(400, f"Unknown sku: {item['sku']}")
         priced.append({
@@ -108,9 +110,10 @@ def _validate_and_price(items: list[dict]) -> list[dict]:
 @mcp.tool()
 @audited_tool("checkout_initiate")
 def checkout_initiate(cart_id: int, delivery_address: str, ctx: Context, trace_id: str = None) -> dict:
-    """Initiates checkout for a cart. Recomputes the total from the DB, checks
-    spend caps, freezes an immutable snapshot, and sends an OTP to the human
-    approver via DM. Never touches Razorpay."""
+    """Initiates checkout for a cart. Recomputes the total from the DB,
+    checks spend caps, freezes an immutable snapshot. In the Intent Compiler
+    flow, no OTP is issued — the agent proceeds directly to checkout_confirm,
+    where the Intent Compiler verifies the cart against the signed policy."""
     claims = get_claims_from_context(ctx, "checkout:initiate")
     if not check_rate_limit(claims["sub"], "checkout_initiate"):
         raise HTTPException(429, "Rate limit exceeded")
@@ -123,73 +126,138 @@ ROLLING_CAP_MINOR = 200000
 
 @mcp.tool()
 @audited_tool("checkout_confirm")
-def checkout_confirm(jws: str, idempotency_key: str, ctx: Context, trace_id: str = None) -> dict:
-    """Confirms a checkout given a signed mandate. Runs the full verification
-    ladder — signature, claims, checkout state, cart hash, amount, jti unburned,
-    spend cap re-check, idempotency — before ever calling Razorpay."""
+def checkout_confirm(
+    jws: str = None,               # optional: for OTP/mandate fallback path
+    intent_checkout_id: str = None, # for Intent Compiler path
+    idempotency_key: str = None,
+    ctx: Context = None,
+    trace_id: str = None,
+) -> dict:
+    """Confirms a checkout. In the Intent Compiler path, the cart is
+    verified against the human's signed WebAuthn policy before any
+    Razorpay call. In the fallback OTP path, a signed mandate is used
+    instead (same verification ladder as the original plan)."""
     claims = get_claims_from_context(ctx, "checkout:confirm")
     if not check_rate_limit(claims["sub"], "checkout_confirm"):
         raise HTTPException(429, "Rate limit exceeded")
 
     with Session(engine) as session:
-        existing = session.exec(
-            select(IdempotencyRecord)
-            .where(IdempotencyRecord.client_id == claims["sub"])
-            .where(IdempotencyRecord.idempotency_key == idempotency_key)
-        ).first()
-        if existing is not None:
-            emit("merchant-server", "Idempotent replay — returning cached result", {}, trace_id, "info")
-            return existing.response_json
+        # Idempotency check
+        if idempotency_key is not None:
+            existing = session.exec(
+                select(IdempotencyRecord)
+                .where(IdempotencyRecord.client_id == claims["sub"])
+                .where(IdempotencyRecord.idempotency_key == idempotency_key)
+            ).first()
+            if existing is not None:
+                emit("merchant-server", "Idempotent replay", {}, trace_id, "info")
+                return existing.response_json
 
-        try:
-            mandate_claims = verify_mandate(jws)
-        except Exception as e:
-            emit("merchant-server", "Mandate verification failed", {"error": str(e)}, trace_id, "blocked")
-            raise HTTPException(400, f"Invalid mandate: {e}")
+        # === PATH A: Intent Compiler (primary) ===
+        if intent_checkout_id is not None:
+            checkout = session.exec(
+                select(Checkout).where(Checkout.checkout_id == intent_checkout_id)
+            ).first()
+            if checkout is None or checkout.status != "POLICY_VERIFIED":
+                raise HTTPException(400, "Checkout not in POLICY_VERIFIED state")
 
-        if mandate_claims["exp"] < time.time():
-            emit("merchant-server", "Mandate expired", {}, trace_id, "blocked")
-            raise HTTPException(400, "Mandate expired")
+            policy_row = session.exec(
+                select(IntentPolicyRow)
+                .where(IntentPolicyRow.active == True)
+                .order_by(IntentPolicyRow.created_at.desc())
+            ).first()
+            if policy_row is None:
+                raise HTTPException(403, "No signed Intent Policy found — sign a policy first")
 
-        checkout = session.exec(
-            select(Checkout).where(Checkout.checkout_id == mandate_claims["chk"])
-        ).first()
+            cart = session.get(Cart, checkout.cart_id)
+            if cart is None:
+                raise HTTPException(400, "Cart not found")
 
-        if checkout is None or checkout.status != "MANDATE_ISSUED":
-            emit("merchant-server", "Checkout not in MANDATE_ISSUED state", {}, trace_id, "blocked")
-            raise HTTPException(400, "Checkout not awaiting confirmation")
+            ok, reason = verify_cart_against_policy(
+                cart_items=cart.items_json,
+                policy=policy_row.policy_json,
+                merchant_id="gelateria-roma",
+                product_lookup=_catalog.get_product,
+            )
+            if not ok:
+                emit("merchant-server", "Intent Compiler REJECTED checkout",
+                     {"reason": reason, "checkout_id": intent_checkout_id},
+                     trace_id, "blocked")
+                checkout.status = "REJECTED"
+                session.add(checkout)
+                session.commit()
+                raise HTTPException(403, f"Intent Compiler rejected: {reason}")
 
-        if mandate_claims["cart"]["hash"] != checkout.cart_hash:
-            emit("merchant-server", "Cart hash mismatch — possible tampering", {}, trace_id, "blocked")
-            raise HTTPException(400, "Cart hash mismatch")
+            already_spent = rolling_spend_minor(session, claims["sub"])
+            if already_spent + checkout.total_minor > ROLLING_CAP_MINOR:
+                raise HTTPException(400, "Rolling spend cap exceeded at confirm time")
 
-        if mandate_claims["amt"] != checkout.total_minor:
-            emit("merchant-server", "Amount mismatch", {}, trace_id, "blocked")
-            raise HTTPException(400, "Amount mismatch")
+            if idempotency_key is None:
+                raise HTTPException(400, "idempotency_key required")
 
-        mandate_row = session.exec(select(Mandate).where(Mandate.jti == mandate_claims["jti"])).first()
-        if mandate_row is None or mandate_row.burned:
-            emit("merchant-server", "Mandate replay detected", {"jti": mandate_claims["jti"]}, trace_id, "blocked")
-            raise HTTPException(400, "Mandate already used or unknown")
+            if INJECT_TIMEOUT["enabled"]:
+                rp_result = create_order_and_payment_link(checkout.total_minor, checkout.checkout_id)
+                _persist_confirm_result(session, checkout, claims["sub"], idempotency_key, rp_result, trace_id)
+                INJECT_TIMEOUT["enabled"] = False
+                raise HTTPException(504, "Simulated timeout — response dropped after order creation")
 
-        already_spent = rolling_spend_minor(session, claims["sub"])
-        if already_spent + checkout.total_minor > ROLLING_CAP_MINOR:
-            emit("merchant-server", "Spend cap exceeded at confirm time", {}, trace_id, "blocked")
-            raise HTTPException(400, "Rolling spend cap exceeded")
-
-        mandate_row.burned = True
-        session.add(mandate_row)
-        session.commit()
-
-        if INJECT_TIMEOUT["enabled"]:
             rp_result = create_order_and_payment_link(checkout.total_minor, checkout.checkout_id)
-            _persist_confirm_result(session, checkout, claims["sub"], idempotency_key, rp_result, trace_id)
-            INJECT_TIMEOUT["enabled"] = False
-            raise HTTPException(504, "Simulated timeout — response dropped after order creation")
+            result = _persist_confirm_result(session, checkout, claims["sub"], idempotency_key, rp_result, trace_id)
+            return result
 
-        rp_result = create_order_and_payment_link(checkout.total_minor, checkout.checkout_id)
-        result = _persist_confirm_result(session, checkout, claims["sub"], idempotency_key, rp_result, trace_id)
-        return result
+        # === PATH B: OTP + Mandate (fallback, same as original plan) ===
+        if jws is not None:
+            try:
+                mandate_claims = verify_mandate(jws)
+            except Exception as e:
+                emit("merchant-server", "Mandate verification failed", {"error": str(e)}, trace_id, "blocked")
+                raise HTTPException(400, f"Invalid mandate: {e}")
+
+            if mandate_claims["exp"] < time.time():
+                emit("merchant-server", "Mandate expired", {}, trace_id, "blocked")
+                raise HTTPException(400, "Mandate expired")
+
+            checkout = session.exec(
+                select(Checkout).where(Checkout.checkout_id == mandate_claims["chk"])
+            ).first()
+
+            if checkout is None or checkout.status != "MANDATE_ISSUED":
+                emit("merchant-server", "Checkout not in MANDATE_ISSUED state", {}, trace_id, "blocked")
+                raise HTTPException(400, "Checkout not awaiting confirmation")
+
+            if mandate_claims["cart"]["hash"] != checkout.cart_hash:
+                emit("merchant-server", "Cart hash mismatch — possible tampering", {}, trace_id, "blocked")
+                raise HTTPException(400, "Cart hash mismatch")
+
+            if mandate_claims["amt"] != checkout.total_minor:
+                emit("merchant-server", "Amount mismatch", {}, trace_id, "blocked")
+                raise HTTPException(400, "Amount mismatch")
+
+            mandate_row = session.exec(select(Mandate).where(Mandate.jti == mandate_claims["jti"])).first()
+            if mandate_row is None or mandate_row.burned:
+                emit("merchant-server", "Mandate replay detected", {"jti": mandate_claims["jti"]}, trace_id, "blocked")
+                raise HTTPException(400, "Mandate already used or unknown")
+
+            already_spent = rolling_spend_minor(session, claims["sub"])
+            if already_spent + checkout.total_minor > ROLLING_CAP_MINOR:
+                emit("merchant-server", "Spend cap exceeded at confirm time", {}, trace_id, "blocked")
+                raise HTTPException(400, "Rolling spend cap exceeded")
+
+            mandate_row.burned = True
+            session.add(mandate_row)
+            session.commit()
+
+            if INJECT_TIMEOUT["enabled"]:
+                rp_result = create_order_and_payment_link(checkout.total_minor, checkout.checkout_id)
+                _persist_confirm_result(session, checkout, claims["sub"], idempotency_key, rp_result, trace_id)
+                INJECT_TIMEOUT["enabled"] = False
+                raise HTTPException(504, "Simulated timeout — response dropped after order creation")
+
+            rp_result = create_order_and_payment_link(checkout.total_minor, checkout.checkout_id)
+            result = _persist_confirm_result(session, checkout, claims["sub"], idempotency_key, rp_result, trace_id)
+            return result
+
+        raise HTTPException(400, "Provide intent_checkout_id (Intent Compiler) or jws (mandate fallback)")
 
 
 def _persist_confirm_result(session, checkout, client_id, idempotency_key, rp_result, trace_id) -> dict:

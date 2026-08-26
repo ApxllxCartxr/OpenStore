@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sign Intent Policy — OpenStore</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
+    input, select { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+    button { margin-top: 1.5rem; padding: 0.75rem 2rem; font-size: 1rem; cursor: pointer;
+             background: #2563eb; color: white; border: none; border-radius: 6px; }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    #status { margin-top: 1rem; padding: 1rem; border-radius: 6px; display: none; }
+    #status.ok { display: block; background: #dcfce7; color: #166534; }
+    #status.err { display: block; background: #fee2e2; color: #991b1b; }
+  </style>
+</head>
+<body>
+  <h1>Sign Your Intent Policy</h1>
+  <p>Set the constraints your AI agent must follow. This policy is cryptographically
+     bound to your passkey — once signed, the merchant server will enforce these limits
+     mathematically on every checkout.</p>
+
+  <form id="policyForm">
+    <label for="max_spend">Maximum spend per checkout (₹)</label>
+    <input type="number" id="max_spend" value="500" min="1" max="100000">
+
+    <label for="allowed_tags">Allowed product tags (comma-separated)</label>
+    <input type="text" id="allowed_tags" value="vegan, dairy-free, fruit"
+           placeholder="e.g. vegan, dairy-free, gift">
+
+    <label for="merchant_id">Merchant ID</label>
+    <input type="text" id="merchant_id" value="gelateria-roma">
+
+    <label for="expiry_hours">Policy expires after (hours)</label>
+    <input type="number" id="expiry_hours" value="24" min="1" max="168">
+
+    <button type="submit" id="signBtn">Sign with Passkey</button>
+  </form>
+
+  <div id="status"></div>
+
+  <script>
+    const MERCHANT_URL = window.location.origin;
+
+    document.getElementById("policyForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("signBtn");
+      const status = document.getElementById("status");
+      btn.disabled = true;
+      status.className = ""; status.style.display = "none";
+
+      try {
+        const policy = {
+          max_spend_minor: parseInt(document.getElementById("max_spend").value) * 100,
+          allowed_tags: document.getElementById("allowed_tags").value
+            .split(",").map(t => t.trim()).filter(Boolean),
+          blocked_skus: [],
+          merchant_id: document.getElementById("merchant_id").value,
+          expires_at: Math.floor(Date.now()/1000)
+            + parseInt(document.getElementById("expiry_hours").value) * 3600,
+        };
+
+        // Step 1: Get challenge from server (contains policy hash)
+        const challengeResp = await fetch(`${MERCHANT_URL}/internal/webauthn/challenge`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({checkout_id: "policy-signing", policy: policy}),
+        });
+        if (!challengeResp.ok) throw new Error("Failed to get challenge");
+        const {challenge, challenge_id} = await challengeResp.json();
+
+        // Step 2: Create WebAuthn credential (registration + assertion in one ceremony)
+        const challengeBytes = Uint8Array.from(atob(challenge), c => c.charCodeAt(0));
+
+        const createOptions = {
+          publicKey: {
+            challenge: challengeBytes,
+            rp: {name: "OpenStore Merchant", id: "localhost"},
+            user: {
+              id: new Uint8Array(16),
+              name: "openstore-user",
+              displayName: "OpenStore User",
+            },
+            pubKeyCredParams: [
+              {alg: -7, type: "public-key"},   // ES256
+              {alg: -257, type: "public-key"},  // RS256
+            ],
+            authenticatorSelection: {
+              authenticatorAttachment: "platform",
+              userVerification: "required",
+            },
+            timeout: 60000,
+          },
+        };
+
+        const credential = await navigator.credentials.create(createOptions);
+
+        // Step 3: Register credential + policy on server
+        const regResp = await fetch(`${MERCHANT_URL}/internal/webauthn/register`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            credential: {
+              id: credential.id,
+              rawId: btoa(String.fromCharCode(...new Uint8Array(credential.rawId))),
+              type: credential.type,
+              response: {
+                attestationObject: btoa(String.fromCharCode(
+                  ...new Uint8Array(credential.response.attestationObject))),
+                clientDataJSON: btoa(String.fromCharCode(
+                  ...new Uint8Array(credential.response.clientDataJSON))),
+              },
+            },
+            challenge_id: challenge_id,
+            policy: policy,
+          }),
+        });
+
+        if (!regResp.ok) {
+          const err = await regResp.json();
+          throw new Error(err.detail || "Registration failed");
+        }
+
+        status.className = "ok";
+        status.textContent = "Intent Policy signed and registered. Your agent may now shop.";
+      } catch (err) {
+        status.className = "err";
+        status.textContent = `Error: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

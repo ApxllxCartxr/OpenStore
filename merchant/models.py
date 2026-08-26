@@ -10,6 +10,7 @@ class CheckoutStatus(str, Enum):
     PENDING = "PENDING"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     MANDATE_ISSUED = "MANDATE_ISSUED"
+    POLICY_VERIFIED = "POLICY_VERIFIED"
     ORDER_CREATED = "ORDER_CREATED"
     REJECTED = "REJECTED"
     PAID = "PAID"
@@ -58,6 +59,23 @@ class MandatePayload(BaseModel):
     cur: str = "INR"
     nonce: str
     dlv: str          # sha256 of canonical delivery address
+
+
+class IntentPolicy(BaseModel):
+    """The machine-readable policy a human signs via WebAuthn."""
+    max_spend_minor: int              # maximum total for any single checkout
+    allowed_tags: list[str]           # only items with at least one of these tags are permitted
+    blocked_skus: list[str] = []      # explicitly forbidden items (belt-and-suspenders)
+    merchant_id: str                  # lock to a specific merchant
+    expires_at: int                   # Unix timestamp; policy is invalid after this
+
+class SignedIntentPolicy(BaseModel):
+    """A policy with its WebAuthn binding."""
+    policy: IntentPolicy
+    credential_id: str                # base64url-encoded WebAuthn credential ID
+    signature: str                    # base64url-encoded WebAuthn assertion signature
+    authenticator_data: str           # base64url-encoded authenticatorData
+    client_data_json: str             # base64url-encoded clientDataJSON
 
 
 
@@ -151,6 +169,25 @@ class IdempotencyRecord(SQLModel, table=True):
     client_id: str = Field(index=True)
     idempotency_key: str = Field(index=True)
     response_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class IntentPolicyRow(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    credential_id: str = Field(unique=True, index=True)   # base64url-encoded
+    public_key: str                                         # base64url-encoded COSE public key
+    sign_count: int = Field(default=0)
+    policy_json: dict = Field(default_factory=dict, sa_column=Column(JSON))  # IntentPolicy as dict
+    user_id: str = Field(default="default-user", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    active: bool = Field(default=True)
+
+class PolicyChallenge(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    challenge_id: str = Field(unique=True, index=True)     # base64url-encoded challenge bytes
+    checkout_id: str                                         # bound to a specific checkout
+    policy_hash: str                                         # SHA-256 of the canonical policy JSON
+    expires_at: datetime
+    used: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class AuditLogEntry(SQLModel, table=True):

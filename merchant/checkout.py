@@ -1,29 +1,25 @@
 import uuid
 import hashlib
-import secrets
 from datetime import datetime, timedelta
 
-from argon2 import PasswordHasher
 from fastapi import HTTPException
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from merchant.db import engine
-from merchant.models import Cart, Checkout, OTPChallenge
+from merchant.models import Cart, Checkout
 from merchant.policy import rolling_spend_minor
 from merchant.trace import emit
 from merchant.mandate import compute_cart_hash
 
-ph = PasswordHasher()
 PER_TX_CAP_MINOR = 50000
 ROLLING_CAP_MINOR = 200000
-OTP_TTL_MINUTES = 5
-OTP_MAX_ATTEMPTS = 3
 
 
 def checkout_initiate(cart_id: int, delivery_address: str, client_id: str, trace_id: str = None) -> dict:
-    """Initiates checkout for a cart. Recomputes the total from the DB, checks
-    spend caps, freezes an immutable snapshot, and sends an OTP to the human
-    approver via DM. Never touches Razorpay."""
+    """Initiates checkout for a cart. Recomputes the total from the DB,
+    checks spend caps, freezes an immutable snapshot. In the Intent Compiler
+    flow, no OTP is issued — the agent proceeds directly to checkout_confirm,
+    where the Intent Compiler verifies the cart against the signed policy."""
     with Session(engine) as session:
         cart = session.get(Cart, cart_id)
         if cart is None or cart.client_id != client_id:
@@ -44,36 +40,25 @@ def checkout_initiate(cart_id: int, delivery_address: str, client_id: str, trace
 
         checkout_id = str(uuid.uuid4())
         cart_hash = compute_cart_hash(cart.items_json)
-        dlv_hash = hashlib.sha256(delivery_address.encode()).hexdigest()
 
         checkout = Checkout(
             checkout_id=checkout_id,
             cart_id=cart.id,
             client_id=client_id,
-            status="AWAITING_APPROVAL",
+            status="POLICY_VERIFIED",  # Intent Compiler flow: no approval wait
             cart_hash=cart_hash,
             total_minor=total_minor,
             delivery_address=delivery_address,
-            expires_at=datetime.utcnow() + timedelta(minutes=OTP_TTL_MINUTES),
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
         )
         session.add(checkout)
-
-        otp = "".join(secrets.choice("0123456789") for _ in range(6))
-        otp_hash = ph.hash(otp)
-        session.add(OTPChallenge(checkout_id=checkout_id, otp_hash=otp_hash))
         session.commit()
 
-        from merchant.notifier import send_approval_dm
-        send_approval_dm(
-            checkout_id=checkout_id,
-            items=cart.items_json,
-            total_minor=total_minor,
-            delivery_address=delivery_address,
-            otp=otp,
-            expires_at=checkout.expires_at,
-        )
-
-        emit("merchant-server", "Checkout initiated",
+        emit("merchant-server", "Checkout initiated (Intent Compiler path)",
              {"checkout_id": checkout_id, "total": total_minor}, trace_id, "gate")
-        return {"checkout_id": checkout_id, "status": "AWAITING_APPROVAL",
-                "expires_in_seconds": OTP_TTL_MINUTES * 60}
+        return {
+            "checkout_id": checkout_id,
+            "status": "POLICY_VERIFIED",
+            "expires_in_seconds": 300,
+            "next_step": "checkout_confirm — the Intent Compiler will verify your cart against the signed policy",
+        }
