@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ merchant_name }}</title>
+</head>
+<body>
+  <h1>{{ merchant_name }}</h1>
+  <ul>
+  {% for product in products %}
+    <li>
+      <h2>{{ product.name }}</h2>
+      <p>{{ product.description }}</p>
+      <p>₹{{ "%.2f"|format(product.price_minor / 100) }}</p>
+      <script type="application/ld+json">
+      {
+        "@context": "https://schema.org/",
+        "@type": "Product",
+        "name": {{ product.name|tojson }},
+        "sku": {{ product.sku|tojson }},
+        "description": {{ product.description|tojson }},
+        "offers": {
+          "@type": "Offer",
+          "price": "{{ "%.2f"|format(product.price_minor / 100) }}",
+          "priceCurrency": "INR"
+        }
+      }
+      </script>
+    </li>
+  {% endfor %}
+  </ul>
+</body>
+</html>

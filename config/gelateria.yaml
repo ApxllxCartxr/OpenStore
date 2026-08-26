@@ -1,0 +1,74 @@
+merchant:
+  name: "Gelateria Roma"
+  id: "gelateria-roma"
+
+products:
+  - sku: "gel-001"
+    name: "Pistachio Gelato (500ml)"
+    description: "Sicilian pistachio, no artificial color."
+    price_minor: 25000
+    related_skus: ["gel-002", "top-001"]
+    tags: ["nuts", "classic", "gift"]
+
+  - sku: "gel-002"
+    name: "Stracciatella Gelato (500ml)"
+    description: "Sweet cream base with dark chocolate shavings."
+    price_minor: 24000
+    related_skus: ["gel-001", "top-002"]
+    tags: ["chocolate", "classic"]
+
+  - sku: "gel-003"
+    name: "Mango Sorbetto (500ml)"
+    description: "Dairy-free, Alphonso mango."
+    price_minor: 26000
+    related_skus: ["gel-004"]
+    tags: ["fruit", "dairy-free", "vegan"]
+
+  - sku: "gel-004"
+    name: "Raspberry Sorbetto (500ml)"
+    description: "Dairy-free, tart and bright."
+    price_minor: 26000
+    related_skus: ["gel-003"]
+    tags: ["fruit", "dairy-free", "vegan"]
+
+  - sku: "gel-005"
+    name: "Tiramisu Gelato (500ml)"
+    description: "Espresso-soaked ladyfinger swirl."
+    price_minor: 27000
+    related_skus: ["top-002"]
+    tags: ["coffee", "gift", "occasion:birthday"]
+
+  - sku: "gel-006"
+    name: "Hazelnut Gelato (500ml)"
+    description: "Piedmont hazelnut, rich and smooth."
+    price_minor: 25500
+    related_skus: ["gel-001"]
+    tags: ["nuts", "classic"]
+
+  - sku: "gel-007"
+    name: "Lemon Sorbetto (500ml)"
+    description: "Amalfi lemon, dairy-free."
+    price_minor: 23000
+    related_skus: ["gel-003"]
+    tags: ["fruit", "dairy-free", "vegan"]
+
+  - sku: "top-001"
+    name: "Toasted Pistachio Topping (100g)"
+    description: "Crushed toasted pistachio, add-on."
+    price_minor: 9000
+    related_skus: ["gel-001"]
+    tags: ["nuts", "topping"]
+
+  - sku: "top-002"
+    name: "Dark Chocolate Shavings (100g)"
+    description: "70% cocoa shavings, add-on."
+    price_minor: 8000
+    related_skus: ["gel-002", "gel-005"]
+    tags: ["chocolate", "topping"]
+
+  - sku: "box-001"
+    name: "Gift Box (holds 2 pints)"
+    description: "Insulated gift packaging, holds two 500ml tubs."
+    price_minor: 15000
+    related_skus: []
+    tags: ["gift", "occasion:birthday", "occasion:anniversary"]

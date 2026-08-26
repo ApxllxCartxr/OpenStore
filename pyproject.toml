@@ -1,0 +1,36 @@
+[project]
+name = "openstore"
+version = "0.1.0"
+description = "An Open-(Pseudo) Standard for Merchants to make their websites transactable to AI Agents"
+readme = "README.md"
+authors = [
+    { name = "Joseph Fernando", email = "josephfernando05@proton.me" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "cryptography>=50.0.1",
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "mcp>=2.1.1",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.13.0",
+    "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
+    "pyyaml>=6.0.3",
+    "razorpay>=2.0.1",
+    "sqlmodel>=0.0.39",
+    "uvicorn>=0.52.4",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]

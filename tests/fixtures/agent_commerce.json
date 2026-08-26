@@ -1,0 +1,19 @@
+{
+  "version": "0.1",
+  "merchant": { "name": "Gelateria Roma", "id": "gelateria-roma" },
+  "storefront": "http://localhost:8000/",
+  "catalog_endpoint": "http://localhost:8000/agent/catalog",
+  "mcp_endpoint": "http://localhost:8000/agent/mcp",
+  "a2a_agent_card": "http://localhost:8001/.well-known/agent-card.json",
+  "auth": {
+    "type": "oauth2",
+    "authorization_server": "http://localhost:8000/.well-known/oauth-authorization-server",
+    "scopes_supported": ["catalog:read", "cart:write", "checkout:initiate", "checkout:confirm"]
+  },
+  "policy": {
+    "currency": "INR",
+    "max_unconfirmed_spend_minor": 0,
+    "requires_human_approval": true,
+    "default_per_tx_cap_minor": 50000
+  }
+}
