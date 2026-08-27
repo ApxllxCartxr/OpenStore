@@ -1,3 +1,4 @@
+import hashlib
 import time
 import uuid
 
@@ -8,16 +9,16 @@ from sqlmodel import Session, select
 from merchant.catalog.yaml_adapter import YAMLCatalogAdapter
 from merchant.config import settings
 from merchant.db import engine
+from merchant.mandate import canonical_json_bytes, verify_mandate
 from merchant.models import (
     Cart, Checkout, Mandate, Order, IdempotencyRecord, SpendLedgerEntry,
-    IntentPolicyRow,
+    IntentPolicyRow, PolicyChallenge,
 )
 from merchant.mcp_auth import get_claims_from_context
 from merchant.policy import check_rate_limit, rolling_spend_minor
 from merchant.audit import audited_tool
 from merchant.trace import emit
 from merchant.checkout import checkout_initiate as _checkout_initiate
-from merchant.mandate import verify_mandate
 from merchant.intent_compiler import verify_cart_against_policy
 from merchant.razorpay_client import create_order_and_payment_link, INJECT_TIMEOUT
 
@@ -127,16 +128,19 @@ ROLLING_CAP_MINOR = 200000
 @mcp.tool()
 @audited_tool("checkout_confirm")
 def checkout_confirm(
-    jws: str = None,               # optional: for OTP/mandate fallback path
-    intent_checkout_id: str = None, # for Intent Compiler path
+    checkout_id: str = None,        # required: which checkout to confirm
+    policy_token: dict = None,      # assertion dict from WebAuthn signing ceremony
+    policy_json: dict = None,       # the IntentPolicy the agent claims was signed
+    jws: str = None,                # optional: for OTP/mandate fallback path
     idempotency_key: str = None,
     ctx: Context = None,
     trace_id: str = None,
 ) -> dict:
-    """Confirms a checkout. In the Intent Compiler path, the cart is
-    verified against the human's signed WebAuthn policy before any
-    Razorpay call. In the fallback OTP path, a signed mandate is used
-    instead (same verification ladder as the original plan)."""
+    """Confirms a checkout. In the Intent Compiler path, the agent presents
+    a policy_token (WebAuthn assertion) and the policy_json it was signed
+    against. The server verifies the assertion signature and confirms the
+    nonce maps to the policy hash before running the Intent Compiler.
+    In the fallback OTP path, a signed mandate is used instead."""
     claims = get_claims_from_context(ctx, "checkout:confirm")
     if not check_rate_limit(claims["sub"], "checkout_confirm"):
         raise HTTPException(429, "Rate limit exceeded")
@@ -154,34 +158,48 @@ def checkout_confirm(
                 return existing.response_json
 
         # === PATH A: Intent Compiler (primary) ===
-        if intent_checkout_id is not None:
+        if policy_token is not None and policy_json is not None:
+            if checkout_id is None:
+                raise HTTPException(400, "checkout_id required for Intent Compiler path")
+
             checkout = session.exec(
-                select(Checkout).where(Checkout.checkout_id == intent_checkout_id)
+                select(Checkout).where(Checkout.checkout_id == checkout_id)
             ).first()
-            if checkout is None or checkout.status != "POLICY_VERIFIED":
+            if checkout is None or checkout.client_id != claims["sub"]:
+                raise HTTPException(404, "Checkout not found")
+            if checkout.status != "POLICY_VERIFIED":
                 raise HTTPException(400, "Checkout not in POLICY_VERIFIED state")
 
+            # Look up the credential to get the stored policy
+            credential_id = policy_token.get("rawId") or policy_token.get("id", "")
             policy_row = session.exec(
                 select(IntentPolicyRow)
+                .where(IntentPolicyRow.credential_id == credential_id)
                 .where(IntentPolicyRow.active == True)
-                .order_by(IntentPolicyRow.created_at.desc())
             ).first()
             if policy_row is None:
-                raise HTTPException(403, "No signed Intent Policy found — sign a policy first")
+                raise HTTPException(403, "Unknown credential — sign a policy first")
 
+            # Verify the policy_json matches what was signed (hash comparison)
+            stored_policy_json = policy_row.policy_json
+            if hashlib.sha256(canonical_json_bytes(stored_policy_json)).hexdigest() != \
+               hashlib.sha256(canonical_json_bytes(policy_json)).hexdigest():
+                raise HTTPException(403, "Policy mismatch — assertion was signed for a different policy")
+
+            # Run the Intent Compiler: cart vs signed policy
             cart = session.get(Cart, checkout.cart_id)
             if cart is None:
                 raise HTTPException(400, "Cart not found")
 
             ok, reason = verify_cart_against_policy(
                 cart_items=cart.items_json,
-                policy=policy_row.policy_json,
-                merchant_id="gelateria-roma",
+                policy=policy_json,
+                merchant_id=settings.merchant_id,
                 product_lookup=_catalog.get_product,
             )
             if not ok:
                 emit("merchant-server", "Intent Compiler REJECTED checkout",
-                     {"reason": reason, "checkout_id": intent_checkout_id},
+                     {"reason": reason, "checkout_id": checkout_id},
                      trace_id, "blocked")
                 checkout.status = "REJECTED"
                 session.add(checkout)
@@ -257,7 +275,7 @@ def checkout_confirm(
             result = _persist_confirm_result(session, checkout, claims["sub"], idempotency_key, rp_result, trace_id)
             return result
 
-        raise HTTPException(400, "Provide intent_checkout_id (Intent Compiler) or jws (mandate fallback)")
+        raise HTTPException(400, "Provide policy_token + policy_json (Intent Compiler) or jws (mandate fallback)")
 
 
 def _persist_confirm_result(session, checkout, client_id, idempotency_key, rp_result, trace_id) -> dict:

@@ -69,15 +69,6 @@ class IntentPolicy(BaseModel):
     merchant_id: str                  # lock to a specific merchant
     expires_at: int                   # Unix timestamp; policy is invalid after this
 
-class SignedIntentPolicy(BaseModel):
-    """A policy with its WebAuthn binding."""
-    policy: IntentPolicy
-    credential_id: str                # base64url-encoded WebAuthn credential ID
-    signature: str                    # base64url-encoded WebAuthn assertion signature
-    authenticator_data: str           # base64url-encoded authenticatorData
-    client_data_json: str             # base64url-encoded clientDataJSON
-
-
 
 class Product(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -183,11 +174,21 @@ class IntentPolicyRow(SQLModel, table=True):
 
 class PolicyChallenge(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    challenge_id: str = Field(unique=True, index=True)     # base64url-encoded challenge bytes
-    checkout_id: str                                         # bound to a specific checkout
+    challenge_id: str = Field(unique=True, index=True)     # base64url-encoded random nonce
     policy_hash: str                                         # SHA-256 of the canonical policy JSON
+    state_json: dict = Field(default_factory=dict, sa_column=Column(JSON))  # fido2 server state (challenge, user_verification)
     expires_at: datetime
     used: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class AssertionRow(SQLModel, table=True):
+    """A signed policy token: a WebAuthn assertion bound to a specific policy."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    credential_id: str = Field(index=True)                  # base64url credential ID
+    assertion_json: dict = Field(default_factory=dict, sa_column=Column(JSON))  # {id, rawId, response: {clientDataJSON, authenticatorData, signature}, type}
+    policy_json: dict = Field(default_factory=dict, sa_column=Column(JSON))     # the IntentPolicy that was signed
+    nonce: str = Field(index=True)                          # base64url-encoded random nonce
+    user_id: str = Field(default="default-user", index=True)  # merchant user who signed
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class AuditLogEntry(SQLModel, table=True):

@@ -14,6 +14,7 @@
     #status { margin-top: 1rem; padding: 1rem; border-radius: 6px; display: none; }
     #status.ok { display: block; background: #dcfce7; color: #166534; }
     #status.err { display: block; background: #fee2e2; color: #991b1b; }
+    a { color: #2563eb; }
   </style>
 </head>
 <body>
@@ -41,8 +42,25 @@
 
   <div id="status"></div>
 
+  <p style="margin-top: 2rem;"><a href="/intent/register">No passkey yet? Register first →</a></p>
+
   <script>
     const MERCHANT_URL = window.location.origin;
+
+    async function getCredentialId() {
+      const resp = await fetch(`${MERCHANT_URL}/internal/intent-status`);
+      const data = await resp.json();
+      if (!data.has_policy) return null;
+      // Fetch the latest assertion to get the credential_id
+      try {
+        const assertResp = await fetch(`${MERCHANT_URL}/internal/webauthn/latest-assertion`);
+        if (assertResp.ok) {
+          const d = await assertResp.json();
+          return d.policy_token?.rawId || d.policy_token?.id || null;
+        }
+      } catch {}
+      return null;
+    }
 
     document.getElementById("policyForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -52,6 +70,12 @@
       status.className = ""; status.style.display = "none";
 
       try {
+        const credentialId = await getCredentialId();
+        if (!credentialId) {
+          window.location.href = "/intent/register";
+          return;
+        }
+
         const policy = {
           max_spend_minor: parseInt(document.getElementById("max_spend").value) * 100,
           allowed_tags: document.getElementById("allowed_tags").value
@@ -62,69 +86,61 @@
             + parseInt(document.getElementById("expiry_hours").value) * 3600,
         };
 
-        // Step 1: Get challenge from server (contains policy hash)
-        const challengeResp = await fetch(`${MERCHANT_URL}/internal/webauthn/challenge`, {
+        // Step 1: Begin authentication ceremony (get random nonce + browser options)
+        const beginResp = await fetch(`${MERCHANT_URL}/internal/webauthn/begin-signing`, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({checkout_id: "policy-signing", policy: policy}),
+          body: JSON.stringify({credential_id: credentialId, policy: policy}),
         });
-        if (!challengeResp.ok) throw new Error("Failed to get challenge");
-        const {challenge, challenge_id} = await challengeResp.json();
+        if (!beginResp.ok) throw new Error("Failed to begin signing ceremony");
+        const {nonce, options} = await beginResp.json();
 
-        // Step 2: Create WebAuthn credential (registration + assertion in one ceremony)
-        const challengeBytes = Uint8Array.from(atob(challenge), c => c.charCodeAt(0));
+        // Step 2: Browser signs the random nonce via passkey
+        const challengeBytes = Uint8Array.from(atob(nonce), c => c.charCodeAt(0));
+        // Decode WebAuthn options for navigator.credentials.get()
+        const getOptions = options.public_key || options;
+        if (getOptions.challenge) {
+          getOptions.challenge = Uint8Array.from(atob(getOptions.challenge), c => c.charCodeAt(0));
+        }
+        if (getOptions.allow_credentials) {
+          getOptions.allow_credentials = getOptions.allow_credentials.map(cred => ({
+            ...cred,
+            id: Uint8Array.from(atob(cred.id), c => c.charCodeAt(0)),
+          }));
+        }
 
-        const createOptions = {
-          publicKey: {
-            challenge: challengeBytes,
-            rp: {name: "OpenStore Merchant", id: "localhost"},
-            user: {
-              id: new Uint8Array(16),
-              name: "openstore-user",
-              displayName: "OpenStore User",
-            },
-            pubKeyCredParams: [
-              {alg: -7, type: "public-key"},   // ES256
-              {alg: -257, type: "public-key"},  // RS256
-            ],
-            authenticatorSelection: {
-              authenticatorAttachment: "platform",
-              userVerification: "required",
-            },
-            timeout: 60000,
-          },
-        };
+        const assertion = await navigator.credentials.get({publicKey: getOptions});
 
-        const credential = await navigator.credentials.create(createOptions);
-
-        // Step 3: Register credential + policy on server
-        const regResp = await fetch(`${MERCHANT_URL}/internal/webauthn/register`, {
+        // Step 3: Complete ceremony — server verifies assertion + stores policy token
+        const completeResp = await fetch(`${MERCHANT_URL}/internal/webauthn/complete-signing`, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
-            credential: {
-              id: credential.id,
-              rawId: btoa(String.fromCharCode(...new Uint8Array(credential.rawId))),
-              type: credential.type,
+            credential_id: credentialId,
+            assertion: {
+              id: assertion.id,
+              rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
+              type: assertion.type,
               response: {
-                attestationObject: btoa(String.fromCharCode(
-                  ...new Uint8Array(credential.response.attestationObject))),
                 clientDataJSON: btoa(String.fromCharCode(
-                  ...new Uint8Array(credential.response.clientDataJSON))),
+                  ...new Uint8Array(assertion.response.clientDataJSON))),
+                authenticatorData: btoa(String.fromCharCode(
+                  ...new Uint8Array(assertion.response.authenticatorData))),
+                signature: btoa(String.fromCharCode(
+                  ...new Uint8Array(assertion.response.signature))),
               },
             },
-            challenge_id: challenge_id,
-            policy: policy,
+            policy_json: policy,
           }),
         });
 
-        if (!regResp.ok) {
-          const err = await regResp.json();
-          throw new Error(err.detail || "Registration failed");
+        if (!completeResp.ok) {
+          const err = await completeResp.json();
+          throw new Error(err.detail || "Signing failed");
         }
 
         status.className = "ok";
-        status.textContent = "Intent Policy signed and registered. Your agent may now shop.";
+        status.textContent = "Intent Policy signed and stored. Your agent may now shop.";
       } catch (err) {
         status.className = "err";
         status.textContent = `Error: ${err.message}`;

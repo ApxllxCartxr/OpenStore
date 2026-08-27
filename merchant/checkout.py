@@ -1,5 +1,4 @@
 import uuid
-import hashlib
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException
