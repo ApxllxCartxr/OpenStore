@@ -128,6 +128,33 @@ Each test spins up a fresh `TestClient` against an in-memory SQLite DB. `tests/t
 | `MERCHANT_CONFIG_PATH` | Path to the catalog YAML (default `config/gelateria.yaml`) |
 | `GEMINI_API_KEY` | LLM key for the buyer agent's conversation graph |
 
+## Where this goes next
+
+`docs/PROOF_CARRYING_COMMERCE.md` — a brutal audit of this project against the agentic-commerce specs
+that already exist (AP2, ACP, Visa TAP, W3C SPC), and the layer none of them define: portable,
+offline-verifiable evidence for adjudicating an agent transaction after it is disputed.
+
+`docs/DELEGATION_AND_ORCHESTRATION.md` — verifiable sub-budget delegation across agents, and multi-merchant
+sourcing with saga compensation. The unsolved part of every current mandate spec.
+
+`docs/GROWTH_AGENTS.md` — the merchant-side growth stack for when the customer is a machine: a synthetic
+buyer swarm, blocked-cart recovery, headroom upsell, and an agent-experience optimization loop.
+
+`docs/INTEROP_SPEC.md` — protocol-free commerce core plus adapters (MCP, ACP, AP2, A2A), and the
+maximum evidence tier each protocol's authorization actually supports.
+
+`docs/AGENT_LAYER.md` — the eval harness, adversarial red-team campaign, and agent-reasoning capture
+that the deterministic core makes possible.
+
+`docs/IMPLEMENTATION_SPEC.md` — the normative build contract for that layer: exact canonicalisation,
+the closed reason-code and predicate sets, route-by-route request/response shapes, the pinned compiler
+digest, and a test manifest. Written so an implementer never has to guess.
+
+`docs/PRODUCTION_READINESS.md` is a self-review of the money path: six defects found by red-teaming
+this repo's own `checkout_confirm` (with exploits and fixes), plus the payments-engineering work a real
+deployment needs — idempotency semantics, the dual-write problem, a double-entry spend ledger, webhook
+ordering, reconciliation, key management, and how the Intent Compiler maps onto RBI's e-mandate model.
+
 ## What's not done
 
 - No linting/typecheck configured (ruff/mypy caches gitignored, no config committed)

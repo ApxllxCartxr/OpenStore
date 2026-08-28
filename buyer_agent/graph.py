@@ -139,18 +139,59 @@ def search_node(state: ConversationState) -> dict:
 
 def consult_merchant_agent_node(state: ConversationState) -> dict:
     """Call the merchant reasoning agent over A2A for a cross-sell suggestion.
-    STUBBED today — returns a fixed placeholder; wired to real A2A on Day 6."""
-    cart = state.get("cart_summary", "")
-    if cart:
-        suggestion = (
-            "Based on your cart, you might also enjoy our Mango Sorbetto "
-            "(dairy-free, fruit) — a perfect complement."
-        )
+
+    Sends a JSON-RPC task to the merchant agent's A2A endpoint (discovered
+    from the a2a_agent_card URL in agent-commerce.json) requesting the
+    cross_sell skill with the current search results as cart context.
+    Returns {'cross_sell_suggestion': str} for summarize_cart_node to surface.
+    """
+    search_results = state.get("search_results", [])
+    merchant_url = state.get("merchant_url", "http://localhost:8000")
+
+    # Derive A2A endpoint from merchant_url (agent card is at :8001)
+    a2a_endpoint = f"http://localhost:8001/a2a"
+
+    cart_items = [
+        {"sku": p.get("sku", ""), "qty": 1, "unit_minor": p.get("price_minor", 0)}
+        for p in search_results
+    ]
+
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": str(__import__("uuid").uuid4()),
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": json.dumps({
+                                "skill_id": "cross_sell",
+                                "params": {"cart_items": cart_items},
+                            }),
+                        }
+                    ],
+                },
+            },
+        }
+        resp = httpx.post(a2a_endpoint, json=payload, timeout=10.0)
+        resp.raise_for_status()
+        result = resp.json()
+        result_data = result.get("result", {})
+        artifacts = result_data.get("artifacts", [])
+        if artifacts:
+            text = artifacts[0].get("parts", [{}])[0].get("text", "{}")
+            parsed = json.loads(text)
+            return {"cross_sell_suggestion": parsed.get("reason", "")}
+    except Exception:
+        pass
+
+    # Fallback suggestion
+    if cart_items:
+        suggestion = "You might also enjoy our Mango Sorbetto — a perfect complement."
     else:
-        suggestion = (
-            "Our most popular item is the Pistachio Gelato — "
-            "Sicilian pistachio, no artificial color."
-        )
+        suggestion = "Our most popular item is the Pistachio Gelato — Sicilian pistachio, no artificial color."
     return {"cross_sell_suggestion": suggestion}
 
 
