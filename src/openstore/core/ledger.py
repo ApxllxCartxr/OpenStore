@@ -34,7 +34,7 @@ def create_reserve_entry(
     INV-5: Create RESERVE entry (double-entry: customer_hold <-> merchant_pending).
     """
     if amount_minor <= 0:
-        raise LedgerError("qty_invalid", "Reserve amount must be positive")
+        raise LedgerError("policy.qty_invalid", "Reserve amount must be positive")
 
     idempotency_key = generate_idempotency_key("reserve", trace_id, client_id, checkout_id)
 
@@ -98,7 +98,7 @@ def create_capture_entry(
     Reverses RESERVE and creates revenue entry.
     """
     if amount_minor <= 0:
-        raise LedgerError("qty_invalid", "Capture amount must be positive")
+        raise LedgerError("policy.qty_invalid", "Capture amount must be positive")
 
     idempotency_key = generate_idempotency_key("capture", trace_id, client_id, checkout_id)
 
@@ -190,7 +190,7 @@ def create_release_entry(
     Returns funds to customer, cancels merchant_pending.
     """
     if amount_minor <= 0:
-        raise LedgerError("qty_invalid", "Release amount must be positive")
+        raise LedgerError("policy.qty_invalid", "Release amount must be positive")
 
     idempotency_key = generate_idempotency_key("release", trace_id, client_id, checkout_id)
 
@@ -252,7 +252,7 @@ def create_refund_entry(
     Moves from merchant_revenue back to customer.
     """
     if amount_minor <= 0:
-        raise LedgerError("qty_invalid", "Refund amount must be positive")
+        raise LedgerError("policy.qty_invalid", "Refund amount must be positive")
 
     idempotency_key = generate_idempotency_key("refund", trace_id, client_id, checkout_id)
 
@@ -338,22 +338,37 @@ def get_ledger_balance(
 
 def verify_ledger_balances(session: Session, reference_id: str) -> bool:
     """
-    INV-5: Verify double-entry balances for a checkout.
-    Sum of all entries for a reference_id should be zero (balanced).
+    INV-5a (Q-002): verify the double-entry ledger for one checkout.
+
+    At every terminal order state, the ESCROW accounts (customer_hold,
+    merchant_pending) MUST net to zero per reference_id, and the ECONOMIC accounts
+    (merchant_revenue, platform) MUST be non-negative. Naive "all accounts == 0" is
+    wrong: economic accounts are legitimately positive after CAPTURE (INV-5a).
+
+    Ledger convention (both legs stored with positive amount_minor):
+      RESERVE/CAPTURE  -> + on the account leg
+      RELEASE/REFUND   -> - on the account leg
     """
     entries = session.exec(
         select(LedgerEntry).where(LedgerEntry.reference_id == reference_id)
     ).all()
 
-    account_balances: dict[str, int] = {}
+    balances: dict[str, int] = {}
     for entry in entries:
-        if entry.account not in account_balances:
-            account_balances[entry.account] = 0
-
+        balances.setdefault(entry.account, 0)
         if entry.entry_type in (LedgerEntryType.RESERVE, LedgerEntryType.CAPTURE):
-            account_balances[entry.account] += entry.amount_minor
+            balances[entry.account] += entry.amount_minor
         else:
-            account_balances[entry.account] -= entry.amount_minor
+            balances[entry.account] -= entry.amount_minor
 
-    # All accounts should balance to zero
-    return all(balance == 0 for balance in account_balances.values())
+    # Escrow accounts must net to zero per reference_id.
+    escrow = {"customer_hold", "merchant_pending"}
+    if not all(balances.get(acct, 0) == 0 for acct in escrow):
+        return False
+
+    # Economic accounts must be non-negative (excluded from the zero-invariant).
+    economic = {"merchant_revenue", "platform"}
+    if any(balances.get(acct, 0) < 0 for acct in economic):
+        return False
+
+    return True

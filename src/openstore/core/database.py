@@ -9,10 +9,10 @@ from typing import Any
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine, select, text
+from sqlmodel import Session, SQLModel, and_, create_engine, func, select, text
 
 from openstore.config import Settings
-from openstore.models import Checkout, LedgerEntry, OrderState
+from openstore.models import Checkout, LedgerEntry, LedgerEntryType, OrderState
 
 _engine: Engine | None = None
 
@@ -112,27 +112,53 @@ def check_spend_cap(
     Must be called within an IMMEDIATE transaction.
     Returns (allowed, reason_code).
     """
-    from sqlmodel import and_, func
-
     # Check per-transaction limit
     if amount_minor > max_spend_per_tx_minor:
-        return False, "spend_per_tx_exceeded"
+        return False, "policy.spend_per_tx_exceeded"
 
-    # Check cumulative spend (only CAPTURE entries count)
-    result = session.exec(
-        select(func.sum(LedgerEntry.amount_minor)).where(
+    # Check cumulative spend (only CAPTURE legs, minus REFUND, for this policy).
+    # §3.2c (Q-003): scope via LedgerEntry.reference_id -> Checkout.policy_id join,
+    # restricted to Checkout rows whose policy_id equals the policy under evaluation.
+    # No new LedgerEntry columns.
+    spent_minor = compute_policy_spend(session, policy_id)
+    if spent_minor + amount_minor > max_spend_total_minor:
+        return False, "policy.spend_cumulative_exceeded"
+
+    return True, ""
+
+
+def compute_policy_spend(session: Session, policy_id: str) -> int:
+    """
+    §3.2c (Q-003): sum of CAPTURE legs (minus REFUND/RELEASE) for a policy,
+    via LedgerEntry.reference_id -> Checkout.policy_id.
+    Only CAPTURE moves value into merchant_revenue; RELEASE touches escrow only,
+    so it never decreases the economic spend. Doctrine: calculate server-side (R0.8).
+    """
+    policy_checkout_ids = select(Checkout.id).where(Checkout.policy_id == policy_id)
+
+    captured = session.exec(
+        select(func.coalesce(func.sum(LedgerEntry.amount_minor), 0)).where(
             and_(
                 LedgerEntry.account == "merchant_revenue",
                 LedgerEntry.currency == "INR",
+                LedgerEntry.entry_type == LedgerEntryType.CAPTURE,
+                LedgerEntry.reference_id.in_(policy_checkout_ids),  # type: ignore[attr-defined]
             )
         )
-    ).first()
+    ).one()
 
-    current_spend = result or 0
-    if current_spend + amount_minor > max_spend_total_minor:
-        return False, "spend_cumulative_exceeded"
+    refunded = session.exec(
+        select(func.coalesce(func.sum(LedgerEntry.amount_minor), 0)).where(
+            and_(
+                LedgerEntry.account == "merchant_revenue",
+                LedgerEntry.currency == "INR",
+                LedgerEntry.entry_type == LedgerEntryType.REFUND,
+                LedgerEntry.reference_id.in_(policy_checkout_ids),  # type: ignore[attr-defined]
+            )
+        )
+    ).one()
 
-    return True, ""
+    return int(captured) - int(refunded)
 
 
 def get_or_create_checkout(

@@ -104,17 +104,10 @@ def create_checkout(
                     },
                 }
 
-    # Compute cumulative spend for this policy
-    from sqlmodel import func
-
-    from openstore.models import LedgerEntry
-    spend_sum = session.exec(
-        select(func.sum(LedgerEntry.amount_minor)).where(
-            LedgerEntry.account == "merchant_revenue",
-            LedgerEntry.currency == policy.currency,
-        )
-    ).first()
-    cumulative_spend = spend_sum or 0
+    # Compute cumulative spend for this policy (§3.2c / Q-003: per-policy via
+    # reference_id -> Checkout.policy_id; server-side R0.8)
+    from openstore.core.database import compute_policy_spend
+    cumulative_spend = compute_policy_spend(session, policy_id)
 
     # Count checkouts for this policy
     checkout_count = len(list(session.exec(

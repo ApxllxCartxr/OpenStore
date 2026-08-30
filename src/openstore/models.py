@@ -23,6 +23,8 @@ class OrderState(str, enum.Enum):
     HELD = "HELD"
     RELEASED = "RELEASED"
     CANCELLED = "CANCELLED"
+    PAID = "PAID"
+    FAILED = "FAILED"
     REFUNDED = "REFUNDED"
 
 

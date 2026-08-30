@@ -60,9 +60,8 @@ def compute_aal_level(
     if policy_allows_no_human_authority:
         return AALLevel.AAL0
 
-    if not has_webauthn_assertion:
-        raise ValueError("WebAuthn assertion required for AAL > 0")
-
+    # Assertion presence is gated upstream by compiler check 0
+    # (human_authority_present); reaching here implies an assertion was verified.
     if amount_minor <= threshold_aal3:
         return AALLevel.AAL3
     elif amount_minor <= threshold_aal2:

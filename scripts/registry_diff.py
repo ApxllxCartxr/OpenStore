@@ -21,11 +21,16 @@ def main() -> int:
     # In Stage 1, we just validate REGISTRY.json is valid JSON and has required keys
     required_keys = [
         "reason_codes",
-        "mcp_tools", 
+        "error_namespaces",
+        "authority_reason_codes",
+        "mcp_tools",
+        "oauth_scopes",
         "aal_levels",
+        "checkout_states",
         "order_states",
         "campaign_states",
         "ledger_entries",
+        "ledger_accounts",
         "verifier_exit_codes",
         "discord_channels",
         "negotiation_states",

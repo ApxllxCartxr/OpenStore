@@ -1,0 +1,62 @@
+{
+  "account_balances": {
+    "customer_hold": 0,
+    "customer_refund": -10000,
+    "merchant_pending": 0,
+    "merchant_revenue": 0,
+    "platform": 10000
+  },
+  "entries": [
+    {
+      "account": "merchant_revenue",
+      "amount_minor": 10000,
+      "counterparty_account": "platform",
+      "entry_type": "CAPTURE"
+    },
+    {
+      "account": "platform",
+      "amount_minor": 10000,
+      "counterparty_account": "merchant_revenue",
+      "entry_type": "CAPTURE"
+    },
+    {
+      "account": "merchant_revenue",
+      "amount_minor": 10000,
+      "counterparty_account": "customer_refund",
+      "entry_type": "REFUND"
+    },
+    {
+      "account": "customer_refund",
+      "amount_minor": 10000,
+      "counterparty_account": "merchant_revenue",
+      "entry_type": "REFUND"
+    },
+    {
+      "account": "customer_hold",
+      "amount_minor": 10000,
+      "counterparty_account": "merchant_pending",
+      "entry_type": "RELEASE"
+    },
+    {
+      "account": "merchant_pending",
+      "amount_minor": 10000,
+      "counterparty_account": "customer_hold",
+      "entry_type": "RELEASE"
+    },
+    {
+      "account": "customer_hold",
+      "amount_minor": 10000,
+      "counterparty_account": "merchant_pending",
+      "entry_type": "RESERVE"
+    },
+    {
+      "account": "merchant_pending",
+      "amount_minor": 10000,
+      "counterparty_account": "customer_hold",
+      "entry_type": "RESERVE"
+    }
+  ],
+  "lifecycle": "reserve_capture_refund",
+  "reference_id": "chk_reserve_capture_refund",
+  "verify_ledger_balances": true
+}

@@ -1,0 +1,35 @@
+{
+  "account_balances": {
+    "customer_hold": 0,
+    "merchant_pending": 0
+  },
+  "entries": [
+    {
+      "account": "customer_hold",
+      "amount_minor": 10000,
+      "counterparty_account": "merchant_pending",
+      "entry_type": "RELEASE"
+    },
+    {
+      "account": "merchant_pending",
+      "amount_minor": 10000,
+      "counterparty_account": "customer_hold",
+      "entry_type": "RELEASE"
+    },
+    {
+      "account": "customer_hold",
+      "amount_minor": 10000,
+      "counterparty_account": "merchant_pending",
+      "entry_type": "RESERVE"
+    },
+    {
+      "account": "merchant_pending",
+      "amount_minor": 10000,
+      "counterparty_account": "customer_hold",
+      "entry_type": "RESERVE"
+    }
+  ],
+  "lifecycle": "reserve_release",
+  "reference_id": "chk_reserve_release",
+  "verify_ledger_balances": true
+}

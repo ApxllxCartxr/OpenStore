@@ -36,23 +36,23 @@ class CompilerResult:
     effective_amount_minor: int  # after campaign discounts
 
 
-# Reason codes (closed set from REGISTRY.json)
+# Reason codes (closed set from REGISTRY.json, Part 7 — policy.* namespaced)
 REASON_CODES = {
-    "currency_mismatch",
-    "merchant_mismatch",
-    "policy_not_yet_valid",
-    "policy_expired",
-    "tx_count_exceeded",
-    "qty_invalid",
-    "sku_duplicate",
-    "sku_blocked",
-    "tag_violation",
-    "spend_per_tx_exceeded",
-    "spend_envelope_exceeded",
-    "spend_cumulative_exceeded",
-    "campaign_inactive",
-    "campaign_outside_window",
-    "policy.no_human_authority",
+    "assertion_required",
+    "policy.currency_mismatch",
+    "policy.merchant_mismatch",
+    "policy.policy_not_yet_valid",
+    "policy.policy_expired",
+    "policy.tx_count_exceeded",
+    "policy.qty_invalid",
+    "policy.sku_duplicate",
+    "policy.sku_blocked",
+    "policy.tag_violation",
+    "policy.spend_per_tx_exceeded",
+    "policy.spend_envelope_exceeded",
+    "policy.spend_cumulative_exceeded",
+    "policy.campaign_inactive",
+    "policy.campaign_outside_window",
 }
 
 
@@ -63,6 +63,7 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
     Stops at first failure. Returns CompilerResult with full transcript.
 
     Per PRD Part 3.2:
+    0. human_authority_present (assertion_required)
     1. currency_match
     2. merchant_lock
     3. policy_not_before
@@ -101,49 +102,62 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
             effective_amount_minor=0,
         )
 
+    # 0. human_authority_present (Q-004, §3.2)
+    # Runs BEFORE check 1. When the policy requires human authority and no valid
+    # WebAuthn assertion accompanies the cart, deny with assertion_required —
+    # returned, never raised (R0.5). One no_human_authority field does not exist on
+    # the policy model; treat authority as required (matches the hardcoded False in
+    # the AAL path below).
+    if not ctx.has_webauthn_assertion:
+        add_check(0, "human_authority_present", False, "assertion_required", {
+            "has_webauthn_assertion": ctx.has_webauthn_assertion,
+        })
+        return fail("assertion_required")
+    add_check(0, "human_authority_present", True, details={"has_webauthn_assertion": True})
+
     # 1. currency_match
     if ctx.currency != ctx.policy.currency:
-        add_check(1, "currency_match", False, "currency_mismatch", {
+        add_check(1, "currency_match", False, "policy.currency_mismatch", {
             "expected": ctx.policy.currency,
             "actual": ctx.currency,
         })
-        return fail("currency_mismatch")
+        return fail("policy.currency_mismatch")
     add_check(1, "currency_match", True, details={"currency": ctx.currency})
 
     # 2. merchant_lock
     if ctx.merchant_id != ctx.policy.merchant_id:
-        add_check(2, "merchant_lock", False, "merchant_mismatch", {
+        add_check(2, "merchant_lock", False, "policy.merchant_mismatch", {
             "allowed_merchant": ctx.policy.merchant_id,
             "actual_merchant": ctx.merchant_id,
         })
-        return fail("merchant_mismatch")
+        return fail("policy.merchant_mismatch")
     add_check(2, "merchant_lock", True, details={"merchant_id": ctx.merchant_id})
 
     # 3. policy_not_before
     if ctx.now_unix < ctx.policy.not_before:
-        add_check(3, "policy_not_before", False, "policy_not_yet_valid", {
+        add_check(3, "policy_not_before", False, "policy.policy_not_yet_valid", {
             "not_before": ctx.policy.not_before,
             "now": ctx.now_unix,
         })
-        return fail("policy_not_yet_valid")
+        return fail("policy.policy_not_yet_valid")
     add_check(3, "policy_not_before", True, details={"not_before": ctx.policy.not_before})
 
     # 4. policy_expiry
     if ctx.now_unix > ctx.policy.expires_at:
-        add_check(4, "policy_expiry", False, "policy_expired", {
+        add_check(4, "policy_expiry", False, "policy.policy_expired", {
             "expires_at": ctx.policy.expires_at,
             "now": ctx.now_unix,
         })
-        return fail("policy_expired")
+        return fail("policy.policy_expired")
     add_check(4, "policy_expiry", True, details={"expires_at": ctx.policy.expires_at})
 
     # 5. transaction_count
     if ctx.checkout_count >= ctx.policy.max_transactions:
-        add_check(5, "transaction_count", False, "tx_count_exceeded", {
+        add_check(5, "transaction_count", False, "policy.tx_count_exceeded", {
             "max_transactions": ctx.policy.max_transactions,
             "current_count": ctx.checkout_count,
         })
-        return fail("tx_count_exceeded")
+        return fail("policy.tx_count_exceeded")
     add_check(5, "transaction_count", True, details={
         "max_transactions": ctx.policy.max_transactions,
         "current_count": ctx.checkout_count,
@@ -155,17 +169,17 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
     for item in ctx.cart_items:
         qty = item.get("qty", 0)
         if qty <= 0:
-            add_check(6, "item_qty", False, "qty_invalid", {
+            add_check(6, "item_qty", False, "policy.qty_invalid", {
                 "sku": item.get("sku"),
                 "qty": qty,
             })
-            return fail("qty_invalid")
+            return fail("policy.qty_invalid")
         total_qty += qty
 
         sku = item.get("sku")
         if sku in seen_skus:
-            add_check(6, "item_qty", False, "sku_duplicate", {"sku": sku})
-            return fail("sku_duplicate")
+            add_check(6, "item_qty", False, "policy.sku_duplicate", {"sku": sku})
+            return fail("policy.sku_duplicate")
         seen_skus.add(sku)
 
     add_check(6, "item_qty", True, details={"total_qty": total_qty, "unique_skus": len(seen_skus)})
@@ -174,8 +188,8 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
     for item in ctx.cart_items:
         sku = item.get("sku")
         if sku in ctx.policy.blocked_skus:
-            add_check(7, "item_blocked_sku", False, "sku_blocked", {"sku": sku})
-            return fail("sku_blocked")
+            add_check(7, "item_blocked_sku", False, "policy.sku_blocked", {"sku": sku})
+            return fail("policy.sku_blocked")
     add_check(7, "item_blocked_sku", True, details={"blocked_skus": ctx.policy.blocked_skus})
 
     # 8. item_tag_allowlist
@@ -188,23 +202,23 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
             if ctx.policy.tag_mode == "all":
                 # All tags must be in allowed_tags
                 if not tags.issubset(allowed):
-                    add_check(8, "item_tag_allowlist", False, "tag_violation", {
+                    add_check(8, "item_tag_allowlist", False, "policy.tag_violation", {
                         "sku": sku,
                         "tags": list(tags),
                         "allowed_tags": ctx.policy.allowed_tags,
                         "mode": "all",
                     })
-                    return fail("tag_violation")
+                    return fail("policy.tag_violation")
             else:  # "any"
                 # At least one tag must be in allowed_tags
                 if not tags & allowed:
-                    add_check(8, "item_tag_allowlist", False, "tag_violation", {
+                    add_check(8, "item_tag_allowlist", False, "policy.tag_violation", {
                         "sku": sku,
                         "tags": list(tags),
                         "allowed_tags": ctx.policy.allowed_tags,
                         "mode": "any",
                     })
-                    return fail("tag_violation")
+                    return fail("policy.tag_violation")
     add_check(8, "item_tag_allowlist", True, details={
         "allowed_tags": ctx.policy.allowed_tags,
         "tag_mode": ctx.policy.tag_mode,
@@ -226,12 +240,12 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
                 effective_total -= discount
 
     if effective_total > ctx.policy.max_spend_per_tx_minor:
-        add_check(9, "spend_per_tx", False, "spend_per_tx_exceeded", {
+        add_check(9, "spend_per_tx", False, "policy.spend_per_tx_exceeded", {
             "max_spend_per_tx_minor": ctx.policy.max_spend_per_tx_minor,
             "cart_total_minor": cart_total,
             "effective_total_minor": effective_total,
         })
-        return fail("spend_per_tx_exceeded")
+        return fail("policy.spend_per_tx_exceeded")
     add_check(9, "spend_per_tx", True, details={
         "max_spend_per_tx_minor": ctx.policy.max_spend_per_tx_minor,
         "cart_total_minor": cart_total,
@@ -245,13 +259,13 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
 
     # 11. spend_cumulative (root budget)
     if ctx.cumulative_spend_minor + effective_total > ctx.policy.max_spend_total_minor:
-        add_check(11, "spend_cumulative", False, "spend_cumulative_exceeded", {
+        add_check(11, "spend_cumulative", False, "policy.spend_cumulative_exceeded", {
             "max_spend_total_minor": ctx.policy.max_spend_total_minor,
             "current_cumulative_minor": ctx.cumulative_spend_minor,
             "this_tx_effective_minor": effective_total,
             "would_exceed_by": (ctx.cumulative_spend_minor + effective_total) - ctx.policy.max_spend_total_minor,
         })
-        return fail("spend_cumulative_exceeded")
+        return fail("policy.spend_cumulative_exceeded")
     add_check(11, "spend_cumulative", True, details={
         "max_spend_total_minor": ctx.policy.max_spend_total_minor,
         "current_cumulative_minor": ctx.cumulative_spend_minor,
@@ -264,16 +278,16 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
         campaign_id = item.get("campaign_id")
         if campaign_id:
             if campaign_id not in ctx.campaign_lookup:
-                add_check(12, "campaign_validity", False, "campaign_inactive", {"campaign_id": campaign_id})
-                return fail("campaign_inactive")
+                add_check(12, "campaign_validity", False, "policy.campaign_inactive", {"campaign_id": campaign_id})
+                return fail("policy.campaign_inactive")
 
             campaign = ctx.campaign_lookup[campaign_id]
             if campaign.get("state") != "ACTIVE":
-                add_check(12, "campaign_validity", False, "campaign_inactive", {
+                add_check(12, "campaign_validity", False, "policy.campaign_inactive", {
                     "campaign_id": campaign_id,
                     "state": campaign.get("state"),
                 })
-                return fail("campaign_inactive")
+                return fail("policy.campaign_inactive")
 
             # Check window
             starts_at = campaign.get("offer_terms", {}).get("starts_at")
@@ -283,13 +297,13 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
                 end_ts = int(datetime.fromisoformat(ends_at.replace("Z", "+00:00")).timestamp())
 
                 if ctx.now_unix < start_ts or ctx.now_unix >= end_ts:
-                    add_check(12, "campaign_validity", False, "campaign_outside_window", {
+                    add_check(12, "campaign_validity", False, "policy.campaign_outside_window", {
                         "campaign_id": campaign_id,
                         "starts_at": starts_at,
                         "ends_at": ends_at,
                         "now": ctx.now_unix,
                     })
-                    return fail("campaign_outside_window")
+                    return fail("policy.campaign_outside_window")
 
     add_check(12, "campaign_validity", True, details={"campaigns_checked": len([i for i in ctx.cart_items if i.get("campaign_id")])})
 

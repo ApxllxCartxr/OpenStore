@@ -19,11 +19,16 @@ def test_registry_json_valid():
     
     required_keys = [
         "reason_codes",
+        "error_namespaces",
+        "authority_reason_codes",
         "mcp_tools",
+        "oauth_scopes",
         "aal_levels",
+        "checkout_states",
         "order_states",
         "campaign_states",
         "ledger_entries",
+        "ledger_accounts",
         "verifier_exit_codes",
         "discord_channels",
         "negotiation_states",
@@ -50,23 +55,29 @@ def test_registry_reason_codes_complete():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
     
-    # From PRD Part 3.2 - all 12 checks + policy.no_human_authority
+    # From PRD Part 3.2 + Part 7 (policy.* namespaced; assertion_required unprefixed)
     expected = {
-        "currency_mismatch",
-        "merchant_mismatch",
-        "policy_not_yet_valid",
-        "policy_expired",
-        "tx_count_exceeded",
-        "qty_invalid",
-        "sku_duplicate",
-        "sku_blocked",
-        "tag_violation",
-        "spend_per_tx_exceeded",
-        "spend_envelope_exceeded",
-        "spend_cumulative_exceeded",
-        "campaign_inactive",
-        "campaign_outside_window",
+        "assertion_required",
+        "policy.currency_mismatch",
+        "policy.merchant_mismatch",
+        "policy.policy_not_yet_valid",
+        "policy.policy_expired",
+        "policy.tx_count_exceeded",
+        "policy.qty_invalid",
+        "policy.sku_duplicate",
+        "policy.sku_blocked",
+        "policy.tag_violation",
+        "policy.spend_per_tx_exceeded",
+        "policy.spend_envelope_exceeded",
+        "policy.spend_cumulative_exceeded",
         "policy.no_human_authority",
+        "policy.aggregate_cap_exceeded",
+        "policy.campaign_inactive",
+        "policy.campaign_outside_window",
+        "idempotency_key_reuse_with_different_payload",
+        "webauthn_unsupported_alg",
+        "unsupported_compiler_digest",
+        "request_in_progress",
     }
     
     actual = set(registry["reason_codes"])
@@ -109,8 +120,50 @@ def test_registry_order_states():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
     
-    expected = ["CREATED", "HELD", "RELEASED", "CANCELLED", "REFUNDED"]
+    expected = ["CREATED", "HELD", "RELEASED", "CANCELLED", "PAID", "FAILED", "REFUNDED"]
     assert registry["order_states"] == expected
+
+
+def test_registry_error_namespaces():
+    with open("REGISTRY.json") as f:
+        registry = json.load(f)
+    assert registry["error_namespaces"] == [
+        "auth.*", "policy.*", "checkout.*", "psp.*", "ratelimit.*",
+        "agent.*", "hold.*", "authority.*", "orchestration.*",
+    ]
+
+
+def test_registry_authority_reason_codes():
+    with open("REGISTRY.json") as f:
+        registry = json.load(f)
+    assert registry["authority_reason_codes"] == [
+        "authority.unknown_scheme", "authority.scheme_capped_native_webauthn",
+        "authority.scheme_capped_ap2_intent_mandate", "authority.scheme_capped_ap2_cart_mandate",
+        "authority.scheme_capped_acp_delegated_token", "authority.scheme_capped_none",
+    ]
+
+
+def test_registry_oauth_scopes():
+    with open("REGISTRY.json") as f:
+        registry = json.load(f)
+    assert registry["oauth_scopes"] == [
+        "catalog:read", "cart:write", "checkout:initiate", "checkout:confirm",
+    ]
+
+
+def test_registry_checkout_states():
+    with open("REGISTRY.json") as f:
+        registry = json.load(f)
+    assert registry["checkout_states"] == ["PENDING", "POLICY_VERIFIED", "ORDER_CREATED", "REJECTED"]
+
+
+def test_registry_ledger_accounts():
+    with open("REGISTRY.json") as f:
+        registry = json.load(f)
+    assert registry["ledger_accounts"] == {
+        "escrow": ["customer_hold", "merchant_pending"],
+        "economic": ["merchant_revenue", "platform"],
+    }
 
 
 def test_registry_campaign_states():

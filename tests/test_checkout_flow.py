@@ -58,8 +58,8 @@ def test_active_policy_lookup_returns_policy(settings, session):
     assert policy.id == "pol_active"
 
 
-@pytest.mark.skip(reason="blocked by Q-004: no closed-set reason code to deny when a "
-                         "required WebAuthn assertion is missing")
+@pytest.mark.skip(reason="needs a valid WebAuthn assertion fixture (INV-2) — Stage 3 (compiler-webauthn) scope; "
+                         "under compiler check 0 this path now denies with assertion_required when no assertion is provided")
 def test_create_checkout_happy_path(settings, session):
     """Policy lookup must succeed (active policy found) and a reserve ledger created."""
     _seed_policy(session)
