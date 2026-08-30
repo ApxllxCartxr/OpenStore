@@ -6,10 +6,9 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-from sqlmodel import Session, select
-
 from openstore.core.api import create_checkout
 from openstore.models import Checkout, IntentPolicy, LedgerEntry
+from sqlmodel import Session, select
 
 
 def _seed_policy(session: Session) -> IntentPolicy:

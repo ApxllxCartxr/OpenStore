@@ -1,0 +1,10 @@
+{
+  "alg": -7,
+  "authenticator_data": "kHbPkMa48LBBPntSzP0_1t-ITFZAH2xq9lTdIECtUbYFAAAABA",
+  "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsIm9yaWdpbiI6Imh0dHBzOi8vb3BlbnN0b3JlLnRlc3QiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+  "credential_id": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "label": "es256",
+  "public_key_cose": "pQECAyYgASFYIF2oemr13_fodgB1MI2bjBwczOfC4c1yGuE553HaYMVHIlggBH1fIOD9t61-EeG_gZJ1--gRFcP6Y40aC_1v3r9BVvY",
+  "sign_count": 4,
+  "signature": "MEQCICGYII_DQj9EY-nx4ZfCYtsFFMby76TWW4hnNUHuMWerAiBExrbcWJWbXAdxFGJXvt0TAXMIefmFClMYLvCcnFdCOg"
+}

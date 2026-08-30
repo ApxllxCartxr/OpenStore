@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pytest
-
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,
@@ -15,8 +14,7 @@ from openstore.config import (
     Settings,
     WebAuthnConfig,
 )
-from openstore.core.database import init_database
-from openstore.core.database import get_session
+from openstore.core.database import get_session, init_database
 
 
 @pytest.fixture()

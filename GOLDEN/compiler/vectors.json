@@ -1,0 +1,4040 @@
+[
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "allow_happy_path",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": false,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "assertion_required",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": "assertion_required",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "assertion_required",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "USD",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.currency_mismatch",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": "policy.currency_mismatch",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.currency_mismatch",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_other",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.merchant_mismatch",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": "policy.merchant_mismatch",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.merchant_mismatch",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.policy_not_yet_valid",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": "policy.policy_not_yet_valid",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.policy_not_yet_valid",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 1893459600,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.policy_expired",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": "policy.policy_expired",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.policy_expired",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 1893455999,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 10,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.tx_count_exceeded",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": "policy.tx_count_exceeded",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.tx_count_exceeded",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 10,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 0,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.qty_invalid",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": "policy.qty_invalid",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.qty_invalid",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 2,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.sku_duplicate",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": "policy.sku_duplicate",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.sku_duplicate",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.sku_blocked",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": "policy.sku_blocked",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.sku_blocked",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [
+        "SKU_B"
+      ],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [
+          "snack"
+        ],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.tag_violation",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": "policy.tag_violation",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.tag_violation_all",
+    "policy": {
+      "allowed_tags": [
+        "beverage"
+      ],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [
+          "savoury"
+        ],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.tag_violation",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": "policy.tag_violation",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.tag_violation_any",
+    "policy": {
+      "allowed_tags": [
+        "beverage",
+        "confection"
+      ],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "any",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 60000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.spend_per_tx_exceeded",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": "policy.spend_per_tx_exceeded",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.spend_per_tx_exceeded",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 50000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 45000,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.spend_cumulative_exceeded",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": "policy.spend_cumulative_exceeded",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.spend_cumulative_exceeded",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 50000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": "CAMP_X",
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.campaign_inactive",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": "policy.campaign_inactive",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.campaign_inactive",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": "CAMP_X",
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {
+        "CAMP_X": {
+          "id": "CAMP_X",
+          "offer_terms": {
+            "applies_to_skus": [
+              "SKU_A"
+            ],
+            "discount_bps": 500,
+            "ends_at": "2031-01-01T00:00:00Z",
+            "starts_at": "2030-01-01T00:00:00Z"
+          },
+          "state": "PAUSED"
+        }
+      },
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.campaign_inactive",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": "policy.campaign_inactive",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.campaign_inactive_state",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": "CAMP_X",
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {
+        "CAMP_X": {
+          "id": "CAMP_X",
+          "offer_terms": {
+            "applies_to_skus": [
+              "SKU_A"
+            ],
+            "discount_bps": 500,
+            "ends_at": "2033-01-01T00:00:00Z",
+            "starts_at": "2032-01-01T00:00:00Z"
+          },
+          "state": "ACTIVE"
+        }
+      },
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.campaign_outside_window",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": "policy.campaign_outside_window",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "policy.campaign_outside_window",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 6000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.policy_expired",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": "policy.policy_expired",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "ordering_check4_before_check9",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 1893455999,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 5000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": "CAMP_X",
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "USD",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.currency_mismatch",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": "policy.currency_mismatch",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "ordering_check1_before_check12",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "two_policy_cumulative_isolation",
+    "note": "Policy B's per-policy cumulative spend is scoped to 0 (PRD \u00a73.2c); check 11 passes even though policy A had prior CAPTURE legs.",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-B",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 20000,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.spend_cumulative_exceeded",
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": "policy.spend_cumulative_exceeded",
+          "result": "fail"
+        }
+      ]
+    },
+    "name": "two_policy_cumulative_spent_A",
+    "note": "Policy A evaluated with its own scoped cumulative independent of B.",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-A",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 25000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.spend_envelope_exceeded",
+      "transcript": []
+    },
+    "name": "policy.spend_envelope_exceeded",
+    "note": "Check 10 spend_envelope is delegated-only and skipped on the root path (PRD \u00a73.2). The root compiler cannot reach this code this stage; expected is authored so the closed-set coverage list is complete.",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": false,
+      "reason_code": "policy.aggregate_cap_exceeded",
+      "transcript": []
+    },
+    "name": "aggregate_cap_exceeded",
+    "note": "Aggregate cap is enforced at policy signing time (PRD \u00a73.2a, S3.5), not inside the compiler check ladder. Behavioral gate lives in policy_signing.py.",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [
+          "beverage",
+          "x"
+        ],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_tag_any_intersection",
+    "policy": {
+      "allowed_tags": [
+        "beverage"
+      ],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "any",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [
+          "beverage",
+          "x"
+        ],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_tag_all_subset",
+    "policy": {
+      "allowed_tags": [
+        "beverage",
+        "x"
+      ],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [
+          "anything"
+        ],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_tag_unconstrained",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_blocked_empty",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_cumulative_room",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 50000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 50000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_per_tx_exact",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 50000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 2,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 3,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_multiline_skus",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_then_valid_window_large",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": "CAMP_X",
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {
+        "CAMP_X": {
+          "id": "CAMP_X",
+          "offer_terms": {
+            "applies_to_skus": [
+              "SKU_A"
+            ],
+            "discount_bps": 500,
+            "ends_at": "2031-01-01T00:00:00Z",
+            "starts_at": "2029-01-01T00:00:00Z"
+          },
+          "state": "ACTIVE"
+        }
+      },
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_campaign_active_in_window",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pol-golden",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_extra_0",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-extra-0",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_extra_1",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-extra-1",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_extra_2",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-extra-2",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_extra_3",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-extra-3",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_extra_4",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-extra-4",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_extra_5",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-extra-5",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 4,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 50000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_large_single_sku",
+    "policy": {
+      "allowed_tags": [],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-large-single",
+      "is_active": true,
+      "max_spend_per_tx_minor": 2000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  },
+  {
+    "cart": [
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_A",
+        "tags": [],
+        "unit_minor": 10000
+      },
+      {
+        "campaign_id": null,
+        "qty": 1,
+        "sku": "SKU_B",
+        "tags": [],
+        "unit_minor": 20000
+      }
+    ],
+    "context": {
+      "campaign_lookup": {},
+      "checkout_count": 0,
+      "cumulative_spend_minor": 0,
+      "currency": "INR",
+      "has_webauthn_assertion": true,
+      "merchant_id": "m_test",
+      "now_unix": 1893456000
+    },
+    "expected": {
+      "allowed": true,
+      "reason_code": null,
+      "transcript": [
+        {
+          "check": "human_authority_present",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "currency_match",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "merchant_lock",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_not_before",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "policy_expiry",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "transaction_count",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_qty",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_blocked_sku",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "item_tag_allowlist",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_per_tx",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_envelope",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "spend_cumulative",
+          "reason_code": null,
+          "result": "pass"
+        },
+        {
+          "check": "campaign_validity",
+          "reason_code": null,
+          "result": "pass"
+        }
+      ]
+    },
+    "name": "pass_equal_tags",
+    "policy": {
+      "allowed_tags": [
+        "beverage",
+        "snack"
+      ],
+      "assertion_max_age_seconds": 86400,
+      "blocked_skus": [],
+      "currency": "INR",
+      "expires_at": 4102444800,
+      "fulfilment_mode": "all_or_nothing",
+      "id": "pass-equal-tags",
+      "is_active": true,
+      "max_spend_per_tx_minor": 1000000,
+      "max_spend_total_minor": 5000000,
+      "max_transactions": 50,
+      "merchant_id": "m_test",
+      "not_before": 0,
+      "policy_hash": "golden-hash",
+      "policy_version": 2,
+      "required_skus": [],
+      "signed_at": "2030-01-01T00:00:00+00:00",
+      "tag_mode": "all",
+      "webauthn_credential_id": "cred-es256",
+      "webauthn_sign_count": 0
+    }
+  }
+]

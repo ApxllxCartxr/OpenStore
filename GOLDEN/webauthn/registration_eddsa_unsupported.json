@@ -1,0 +1,9 @@
+{
+  "alg": -8,
+  "attestation_object": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YViBkHbPkMa48LBBPntSzP0_1t-ITFZAH2xq9lTdIECtUbZFAAAAAQAAAAAAAAAAAAAAAAAAAAAAIBAgggggggggggggggggggggggggggggggggggggggggpAEBAycgBiFYIDlrG8HDAcLRWZ1AZ1RJCcHz_KW5sN-t5MqESNCnNA49",
+  "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoiQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQSIsIm9yaWdpbiI6Imh0dHBzOi8vb3BlbnN0b3JlLnRlc3QiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+  "credential_id": "ECCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA",
+  "expected_reason_code": "webauthn_unsupported_alg",
+  "label": "eddsa-unsupported",
+  "public_key_cose": "pAEBAycgBiFYIDlrG8HDAcLRWZ1AZ1RJCcHz_KW5sN-t5MqESNCnNA49"
+}

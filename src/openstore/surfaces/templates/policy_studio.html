@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Policy Studio — OpenStore</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#5b6570; --line:#e3e6e8; --accent:#0b5c; }
+  * { box-sizing:border-box; }
+  body { font-family:system-ui,sans-serif; color:var(--ink); max-width:760px;
+         margin:0 auto; padding:2rem 1.25rem; line-height:1.5; }
+  h1 { font-size:1.5rem; margin:0 0 .25rem; }
+  p.lede { color:var(--muted); margin:0 0 1.5rem; }
+  .panel { border:1px solid var(--line); border-radius:10px; padding:1.25rem;
+           margin:1rem 0; }
+  .panel h2 { font-size:1.05rem; margin:0 0 .75rem; }
+  .field { margin:.85rem 0; }
+  label { display:block; font-size:.85rem; font-weight:600; margin-bottom:.3rem; }
+  input, select { width:100%; padding:.5rem; border:1px solid var(--line);
+                  border-radius:6px; font-size:.95rem; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  button { padding:.65rem 1.1rem; border:0; border-radius:6px; cursor:pointer;
+           font-size:.95rem; font-weight:600; }
+  .primary { background:var(--accent); color:#fff; }
+  .ghost { background:#f2f4f5; color:var(--ink); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); }
+  pre { background:#f6f7f8; padding:.75rem; border-radius:6px; overflow:auto;
+        font-size:.8rem; white-space:pre-wrap; }
+  .meta { color:var(--muted); font-size:.85rem; }
+  .banner { padding:.75rem; border-radius:6px; margin:1rem 0; font-size:.9rem; }
+  .banner.ok { background:#e7f6ec; color:#14532d; }
+  .banner.err { background:#fdecea; color:#7f1d1d; }
+  .cap-note { border-left:4px solid #f0b429; background:#fff8e1; padding:.6rem .8rem;
+              margin:1rem 0; font-size:.9rem; }
+</style>
+</head>
+<body>
+<h1>Policy Studio</h1>
+<p class="lede">Create and sign an IntentPolicy with a passkey. The hold table and
+aggregate cap render here before you sign — the numbers below are normative.</p>
+
+<div class="banner err" id="mismatch" style="display:none">Operator session missing.
+This studio is behind the merchant-operator session (INV-10); reload after signing in.</div>
+<noscript><div class="banner err">This studio requires JavaScript for the WebAuthn ceremony.</div></noscript>
+
+<div class="panel" id="enrolment-panel">
+  <h2>1. Enrol your passkey (one-time)</h2>
+  <div class="row">
+    <div class="field">
+      <label for="reg-name">Display name</label>
+      <input id="reg-name" value="Merchant Operator">
+    </div>
+  </div>
+  <button class="primary" id="enrol-btn">Register passkey</button>
+  <div id="enrol-status" class="meta" style="margin-top:.75rem"></div>
+</div>
+
+<div class="panel">
+  <h2>2. HOLD_SECONDS (before you sign)</h2>
+  <table id="hold-table">
+    <thead><tr><th>Level</th><th>Hold duration</th><th>Meaning</th></tr></thead>
+    <tbody>__HOLD_TABLE_ROWS__</tbody>
+  </table>
+  <div class="cap-note" id="cap-note">__CAP_NOTE_HTML__</div>
+</div>
+
+<div class="panel">
+  <h2>3. Configure the IntentPolicy</h2>
+  <form id="policy-form">
+    <div class="row">
+      <div class="field"><label>Max spend per transaction (rupees)</label>
+        <input type="number" id="max_spend_per_tx" value="500" min="1" step="1"></div>
+      <div class="field"><label>Max spend total (rupees)</label>
+        <input type="number" id="max_spend_total" value="2000" min="1" step="1"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Max transactions</label>
+        <input type="number" id="max_transactions" value="10" min="1" step="1"></div>
+      <div class="field"><label>Assertion max age (seconds)</label>
+        <input type="number" id="assertion_max_age" value="86400" min="1"></div>
+    </div>
+    <div class="field"><label>Allowed tags (comma-separated; empty = unconstrained)</label>
+      <input type="text" id="allowed_tags" value="vegan,gelato"></div>
+    <div class="row">
+      <div class="field"><label>Tag mode</label>
+        <select id="tag_mode">
+          <option value="all">all</option>
+          <option value="any">any</option>
+        </select></div>
+      <div class="field"><label>Fulfilment mode</label>
+        <select id="fulfilment_mode">
+          <option value="all_or_nothing">all_or_nothing</option>
+          <option value="required_subset">required_subset</option>
+        </select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Blocked SKUs (comma-separated)</label>
+        <input type="text" id="blocked_skus"></div>
+      <div class="field"><label>Required SKUs (comma-separated)</label>
+        <input type="text" id="required_skus"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Not before (Unix seconds; 0 = now)</label>
+        <input type="number" id="not_before" value="0" min="0"></div>
+      <div class="field"><label>Expires at (Unix seconds; 0 = none)</label>
+        <input type="number" id="expires_at" value="0" min="0"></div>
+    </div>
+    <p class="meta">policy_version is fixed at 2 server-side. Currency is fixed at INR.</p>
+    <button class="ghost" type="button" id="preview-btn">Preview policy JSON</button>
+    <button class="primary" type="submit" id="sign-btn">Sign with passkey</button>
+  </form>
+  <pre id="preview" style="display:none"></pre>
+  <div id="sign-status" class="meta" style="margin-top:.75rem"></div>
+</div>
+
+<script>
+"use strict";
+const OPERATOR = __OPERATOR_ID__;
+
+const headers = {
+  "Content-Type": "application/json",
+  "X-Operator-Id": OPERATOR,
+};
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const code = (data && data.reason_code) ? data.reason_code : ("http_" + res.status);
+    const err = new Error(code);
+    err.code = code;
+    throw err;
+  }
+  return data;
+}
+
+function _placeholder() { return; }
+
+function minor() { return 100; } // rupees-to-paise factor (money is integer paise only)
+
+function collectPolicy() {
+  const split = (id) => {
+    const v = document.getElementById(id).value.split(",").map(s => s.trim()).filter(Boolean);
+    return v;
+  };
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    policy_version: 2,
+    currency: "INR",
+    max_spend_per_tx_minor: parseInt(document.getElementById("max_spend_per_tx").value) * minor(),
+    max_spend_total_minor: parseInt(document.getElementById("max_spend_total").value) * minor(),
+    max_transactions: parseInt(document.getElementById("max_transactions").value),
+    allowed_tags: split("allowed_tags"),
+    tag_mode: document.getElementById("tag_mode").value,
+    blocked_skus: split("blocked_skus"),
+    not_before: parseInt(document.getElementById("not_before").value) || now,
+    expires_at: parseInt(document.getElementById("expires_at").value) || (now + 365 * 24 * 3600),
+    assertion_max_age_seconds: parseInt(document.getElementById("assertion_max_age").value),
+    fulfilment_mode: document.getElementById("fulfilment_mode").value,
+    required_skus: split("required_skus"),
+  };
+}
+
+document.getElementById("preview-btn").addEventListener("click", () => {
+  const p = collectPolicy();
+  const pre = document.getElementById("preview");
+  pre.textContent = JSON.stringify(p, null, 2);
+  pre.style.display = "block";
+});
+
+async function enforceUserVerified(options) {
+  if (options.authenticatorSelection) {
+    options.authenticatorSelection.userVerification = "required";
+  }
+  options.userVerification = "required";
+  return options;
+}
+
+async function register() {
+  const status = document.getElementById("enrol-status");
+  status.textContent = "Requesting registration challenge…";
+  const begin = await api("/internal/webauthn/register/begin", {
+    user_name: OPERATOR,
+    display_name: document.getElementById("reg-name").value,
+  });
+  await enforceUserVerified(begin);
+  const cred = await navigator.credentials.create({ publicKey: begin });
+  const res = await api("/internal/webauthn/register/complete", {
+    credential_id: cred.id,
+    client_data_json: cred.response.clientDataJSON ? b64url(new Uint8Array(cred.response.clientDataJSON)) : "",
+    attestation_object: b64url(new Uint8Array(cred.response.attestationObject)),
+    challenge: begin.challenge,
+  });
+  status.textContent = "Registered credential " + res.credential_id + " (sign_count " + res.sign_count + ").";
+}
+
+async function sign(event) {
+  event.preventDefault();
+  const status = document.getElementById("sign-status");
+  status.textContent = "Requesting policy-signing challenge (mode=policy)…";
+  const begin = await api("/internal/webauthn/assertion/begin", { mode: "policy" });
+  const opts = {
+    challenge: b64d(begin.challenge),
+    rpId: begin.rpId,
+    allowCredentials: [],
+    userVerification: "required",
+  };
+  const assert = await navigator.credentials.get({ publicKey: opts });
+  status.textContent = "Verifying assertion and signing policy…";
+  const body = {
+    credential_id: assert.id,
+    client_data_json: b64url(new Uint8Array(assert.response.clientDataJSON)),
+    authenticator_data: b64url(new Uint8Array(assert.response.authenticatorData)),
+    signature: b64url(new Uint8Array(assert.response.signature)),
+    challenge: begin.challenge,
+    policy: collectPolicy(),
+  };
+  const res = await api("/internal/webauthn/assertion/complete", body);
+  status.textContent = "Signed policy " + res.policy_id + " (policy_hash " +
+    res.policy_hash + ", sign_count " + res.sign_count + ").";
+}
+
+document.getElementById("enrol-btn").addEventListener("click", register);
+document.getElementById("policy-form").addEventListener("submit", sign);
+
+function b64url(bytes) {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64d(s) {
+  const pad = s.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(pad + "===".slice((pad.length + 3) % 4));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+_placeholder();
+if (!OPERATOR) { document.getElementById("mismatch").style.display = "block"; }
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "authenticator_data": "kHbPkMa48LBBPntSzP0_1t-ITFZAH2xq9lTdIECtUbYFAAAABQ",
+  "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsIm9yaWdpbiI6Imh0dHBzOi8vb3BlbnN0b3JlLnRlc3QiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+  "credential_id": "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "label": "es256-sign-count-regression",
+  "public_key_cose": "pQECAyYgASFYIF2oemr13_fodgB1MI2bjBwczOfC4c1yGuE553HaYMVHIlggBH1fIOD9t61-EeG_gZJ1--gRFcP6Y40aC_1v3r9BVvY",
+  "sign_count": 5,
+  "signature": "MEUCIF7XNH_9RbzEuR6So4LkanpPTaI1LWSXaVnyLEA7UDOkAiEA-yDiSUMwdNydwKHJeYu1MOC5GNLms5zQP2QgZ7rQnAo",
+  "stored_sign_count": 5
+}

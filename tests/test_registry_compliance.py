@@ -16,7 +16,7 @@ def test_registry_json_exists():
 def test_registry_json_valid():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     required_keys = [
         "reason_codes",
         "error_namespaces",
@@ -35,17 +35,17 @@ def test_registry_json_valid():
         "enums_are_exhaustive",
         "routes",
     ]
-    
+
     for key in required_keys:
         assert key in registry, f"Missing required key: {key}"
-    
+
     assert registry["enums_are_exhaustive"] is True
 
 
 def test_registry_no_duplicates():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     for key, value in registry.items():
         if isinstance(value, list):
             assert len(value) == len(set(value)), f"Duplicates found in {key}"
@@ -54,7 +54,7 @@ def test_registry_no_duplicates():
 def test_registry_reason_codes_complete():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     # From PRD Part 3.2 + Part 7 (policy.* namespaced; assertion_required unprefixed)
     expected = {
         "assertion_required",
@@ -79,7 +79,7 @@ def test_registry_reason_codes_complete():
         "unsupported_compiler_digest",
         "request_in_progress",
     }
-    
+
     actual = set(registry["reason_codes"])
     assert actual == expected, f"reason_codes mismatch: missing={expected - actual}, extra={actual - expected}"
 
@@ -87,7 +87,7 @@ def test_registry_reason_codes_complete():
 def test_registry_mcp_tools_complete():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     expected = {
         "search_products",
         "get_product",
@@ -104,7 +104,7 @@ def test_registry_mcp_tools_complete():
         "list_campaigns",
         "get_campaign",
     }
-    
+
     actual = set(registry["mcp_tools"])
     assert actual == expected, f"mcp_tools mismatch: missing={expected - actual}, extra={actual - expected}"
 
@@ -112,14 +112,14 @@ def test_registry_mcp_tools_complete():
 def test_registry_aal_levels():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     assert registry["aal_levels"] == [0, 1, 2, 3]
 
 
 def test_registry_order_states():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     expected = ["CREATED", "HELD", "RELEASED", "CANCELLED", "PAID", "FAILED", "REFUNDED"]
     assert registry["order_states"] == expected
 
@@ -169,7 +169,7 @@ def test_registry_ledger_accounts():
 def test_registry_campaign_states():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     expected = ["DRAFT", "PENDING_APPROVAL", "ACTIVE", "PAUSED", "EXPIRED", "REJECTED"]
     assert registry["campaign_states"] == expected
 
@@ -177,7 +177,7 @@ def test_registry_campaign_states():
 def test_registry_ledger_entries():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     expected = ["RESERVE", "CAPTURE", "RELEASE", "REFUND"]
     assert registry["ledger_entries"] == expected
 
@@ -185,14 +185,14 @@ def test_registry_ledger_entries():
 def test_registry_verifier_exit_codes():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     assert registry["verifier_exit_codes"] == [0, 1, 2, 3, 4]
 
 
 def test_registry_discord_channels():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     expected = ["#buyer-trace", "#merchant-trace", "#money-trace", "#alerts"]
     assert registry["discord_channels"] == expected
 
@@ -200,7 +200,7 @@ def test_registry_discord_channels():
 def test_registry_negotiation_states():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     expected = ["PROPOSED", "COUNTERED", "ACCEPTED", "NO_COMPLIANT_PATH", "AMENDMENT_REQUESTED"]
     assert registry["negotiation_states"] == expected
 
@@ -208,7 +208,7 @@ def test_registry_negotiation_states():
 def test_registry_routes_complete():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    
+
     # Core routes from PRD Part 6
     expected_routes = {
         "/.well-known/agent-commerce.json",
@@ -235,7 +235,7 @@ def test_registry_routes_complete():
         "/internal/policy/blast-radius",
         "/admin/*",
     }
-    
+
     actual = set(registry["routes"])
     assert expected_routes.issubset(actual), f"Missing routes: {expected_routes - actual}"
 

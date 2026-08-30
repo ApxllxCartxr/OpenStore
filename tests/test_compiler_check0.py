@@ -58,20 +58,18 @@ def test_missing_assertion_denies_assertion_required():
     assert isinstance(result, CompilerResult)
     assert result.allowed is False
     assert result.reason_code == "assertion_required"
-    assert result.transcript[0]["check"] == 0
-    assert result.transcript[0]["name"] == "human_authority_present"
-    assert result.transcript[0]["passed"] is False
+    assert result.transcript[0]["check"] == "human_authority_present"
+    assert result.transcript[0]["result"] == "fail"
+    assert result.transcript[0]["reason_code"] == "assertion_required"
 
 
 def test_present_assertion_passes_check0_and_proceeds():
     result = compile_decision(_ctx(has_assertion=True))
     assert result.transcript[0] == {
-        "check": 0,
-        "name": "human_authority_present",
-        "passed": True,
+        "check": "human_authority_present",
+        "result": "pass",
         "reason_code": None,
-        "details": {"has_webauthn_assertion": True},
     }
     # With authority present, the compiler proceeds: this cart passes checks 0-11.
     assert result.allowed is True
-    assert result.transcript[-1]["check"] == 12
+    assert result.transcript[-1]["check"] == "campaign_validity"

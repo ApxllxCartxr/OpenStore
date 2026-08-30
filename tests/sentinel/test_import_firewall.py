@@ -7,6 +7,7 @@ import ast
 import sys
 from pathlib import Path
 
+import pytest
 
 FORBIDDEN_IMPORTS = {
     # LLM SDKs
@@ -78,16 +79,16 @@ def check_file(filepath: Path) -> list[str]:
 def test_import_firewall():
     """Assert core/ and verify/ never import LLM SDKs or agents."""
     all_errors = []
-    
+
     for allowed_dir in ALLOWED_DIRS:
         dir_path = Path(allowed_dir)
         if not dir_path.exists():
             continue
-        
+
         for py_file in dir_path.rglob("*.py"):
             errors = check_file(py_file)
             all_errors.extend(errors)
-    
+
     if all_errors:
         print("IMPORT FIREWALL VIOLATIONS:", file=sys.stderr)
         for err in all_errors:
