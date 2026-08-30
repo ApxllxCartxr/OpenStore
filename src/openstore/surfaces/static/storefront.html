@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenStore Demo Storefront</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }
+        .product { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+        .product h3 { margin: 0 0 0.5rem; }
+        .price { color: #666; }
+        .tags { font-size: 0.85rem; color: #888; }
+        button { background: #0066cc; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0052a3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #cart { border-top: 2px solid #eee; padding-top: 1rem; margin-top: 2rem; }
+    </style>
+</head>
+<body>
+    <h1>OpenStore Demo Storefront</h1>
+    <p>Merchant: <span id="merchant-name">Loading...</span></p>
+    
+    <div id="products">Loading catalog...</div>
+    
+    <div id="cart">
+        <h2>Cart</h2>
+        <div id="cart-items">Empty</div>
+        <div id="cart-total">Total: ₹0.00</div>
+        <button id="checkout-btn" disabled>Checkout</button>
+    </div>
+
+    <script>
+        async function loadCatalog() {
+            try {
+                const res = await fetch('/agent/catalog');
+                const data = await res.json();
+                document.getElementById('merchant-name').textContent = 'Demo Merchant';
+                renderProducts(data.items || []);
+            } catch (e) {
+                document.getElementById('products').innerHTML = '<p>Error loading catalog</p>';
+            }
+        }
+
+        function renderProducts(items) {
+            const container = document.getElementById('products');
+            if (items.length === 0) {
+                container.innerHTML = '<p>No products available</p>';
+                return;
+            }
+            container.innerHTML = items.map(item => `
+                <div class="product" data-sku="${item.sku}">
+                    <h3>${item.name}</h3>
+                    <div class="price">₹${(item.price_minor / 100).toFixed(2)}</div>
+                    <div class="tags">${item.tags?.join(', ') || ''}</div>
+                    <button onclick="addToCart('${item.sku}', ${item.price_minor}, '${item.name}')">Add to Cart</button>
+                </div>
+            `).join('');
+        }
+
+        let cart = [];
+        function addToCart(sku, priceMinor, name) {
+            cart.push({sku, priceMinor, name});
+            renderCart();
+        }
+
+        function renderCart() {
+            const itemsDiv = document.getElementById('cart-items');
+            const totalDiv = document.getElementById('cart-total');
+            const btn = document.getElementById('checkout-btn');
+            
+            if (cart.length === 0) {
+                itemsDiv.innerHTML = 'Empty';
+                totalDiv.textContent = 'Total: ₹0.00';
+                btn.disabled = true;
+                return;
+            }
+            
+            itemsDiv.innerHTML = cart.map(item => `
+                <div>${item.name} — ₹${(item.priceMinor / 100).toFixed(2)}</div>
+            `).join('');
+            
+            const total = cart.reduce((sum, item) => sum + item.priceMinor, 0);
+            totalDiv.textContent = `Total: ₹${(total / 100).toFixed(2)}`;
+            btn.disabled = false;
+        }
+
+        document.getElementById('checkout-btn').addEventListener('click', async () => {
+            alert('Checkout not yet implemented — Stage 1 skeleton');
+        });
+
+        loadCatalog();
+    </script>
+</body>
+</html>

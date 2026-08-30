@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaign Studio — OpenStore</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }
+        .form-group { margin: 1rem 0; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        input, textarea, select { width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 1rem; }
+        button { background: #0066cc; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; font-size: 1rem; }
+        button:hover { background: #0052a3; }
+        .campaign-list { margin-top: 2rem; }
+        .campaign { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+        .campaign h3 { margin: 0 0 0.5rem; }
+        .campaign .meta { color: #666; font-size: 0.9rem; }
+        .campaign .state { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+        .state-DRAFT { background: #fff3cd; color: #856404; }
+        .state-PENDING_APPROVAL { background: #cce5ff; color: #004085; }
+        .state-ACTIVE { background: #d4edda; color: #155724; }
+        .state-PAUSED { background: #e2e3e5; color: #383d41; }
+        .state-EXPIRED { background: #f8d7da; color: #721c24; }
+        .state-REJECTED { background: #f8d7da; color: #721c24; }
+        .step { padding: 1rem; border-left: 4px solid #0066cc; margin: 1rem 0; background: #f0f7ff; }
+    </style>
+</head>
+<body>
+    <h1>Campaign Studio</h1>
+    <p>Draft, approve, and publish agent-discoverable campaigns.</p>
+
+    <div class="step">
+        <h3>Create New Campaign</h3>
+        <form id="campaign-form">
+            <div class="form-group">
+                <label>Title</label>
+                <input type="text" id="campaign_title" placeholder="Weekend Vegan Bundle" required>
+            </div>
+            <div class="form-group">
+                <label>Rationale</label>
+                <textarea id="campaign_rationale" rows="3" placeholder="Boost weekend sales on vegan items..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>Discount (basis points, e.g., 1000 = 10%)</label>
+                <input type="number" id="discount_bps" value="1000" min="500" max="3000" step="100">
+            </div>
+            <div class="form-group">
+                <label>Applies to SKUs (comma-separated)</label>
+                <input type="text" id="applies_to_skus" placeholder="gelato_vanilla,gelato_chocolate" required>
+            </div>
+            <div class="form-group">
+                <label>Starts at (ISO 8601, e.g., 2026-09-01T00:00:00Z)</label>
+                <input type="text" id="starts_at" placeholder="2026-09-01T00:00:00Z" required>
+            </div>
+            <div class="form-group">
+                <label>Ends at (ISO 8601, e.g., 2026-09-07T23:59:59Z)</label>
+                <input type="text" id="ends_at" placeholder="2026-09-07T23:59:59Z" required>
+            </div>
+            <button type="submit">Save as Draft</button>
+        </form>
+    </div>
+
+    <div class="campaign-list">
+        <h2>Campaigns</h2>
+        <div id="campaigns-container">Loading...</div>
+    </div>
+
+    <script>
+        async function loadCampaigns() {
+            try {
+                const res = await fetch('/agent/campaigns');
+                const data = await res.json();
+                renderCampaigns(data.campaigns || []);
+            } catch (e) {
+                document.getElementById('campaigns-container').innerHTML = '<p>Error loading campaigns</p>';
+            }
+        }
+
+        function renderCampaigns(campaigns) {
+            const container = document.getElementById('campaigns-container');
+            if (campaigns.length === 0) {
+                container.innerHTML = '<p>No campaigns yet</p>';
+                return;
+            }
+            container.innerHTML = campaigns.map(c => `
+                <div class="campaign">
+                    <h3>${c.title}</h3>
+                    <div class="meta">${c.rationale}</div>
+                    <div class="meta">
+                        Discount: ${c.offer_terms?.discount_bps / 100}% | 
+                        SKUs: ${c.offer_terms?.applies_to_skus?.join(', ')} | 
+                        Window: ${c.offer_terms?.starts_at} to ${c.offer_terms?.ends_at}
+                    </div>
+                    <span class="state state-${c.state}">${c.state}</span>
+                    ${c.state === 'PENDING_APPROVAL' ? '<button onclick="approveCampaign(\'' + c.campaign_id + '\')">Approve with Passkey</button>' : ''}
+                    ${c.state === 'PENDING_APPROVAL' ? '<button onclick="rejectCampaign(\'' + c.campaign_id + '\')">Reject</button>' : ''}
+                </div>
+            `).join('');
+        }
+
+        document.getElementById('campaign-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const campaign = {
+                title: document.getElementById('campaign_title').value,
+                rationale: document.getElementById('campaign_rationale').value,
+                discount_bps: parseInt(document.getElementById('discount_bps').value),
+                applies_to_skus: document.getElementById('applies_to_skus').value.split(',').map(s => s.trim()).filter(Boolean),
+                starts_at: document.getElementById('starts_at').value,
+                ends_at: document.getElementById('ends_at').value,
+            };
+            
+            alert('Campaign draft creation not yet implemented — Stage 8');
+        });
+
+        async function approveCampaign(id) {
+            alert('WebAuthn approval not yet implemented — Stage 8');
+        }
+
+        async function rejectCampaign(id) {
+            alert('Rejection not yet implemented — Stage 8');
+        }
+
+        loadCampaigns();
+    </script>
+</body>
+</html>
