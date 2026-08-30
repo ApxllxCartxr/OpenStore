@@ -2,7 +2,7 @@ import base64
 import hashlib
 import secrets
 from fastapi.testclient import TestClient
-from merchant.app import app
+from reference.merchant.app import app
 
 client = TestClient(app)
 

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenStore — WebAuthn checkout</title>
+</head>
+<body>
+  <h1>OpenStore WebAuthn checkout</h1>
+  <button id="register">Register authenticator</button>
+  <button id="buy">Buy 2× Gelato (AAL 3)</button>
+  <pre id="log"></pre>
+
+  <script>
+    const log = (...a) => { document.getElementById("log").textContent += a.join(" ") + "\n"; };
+    const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const fromB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+
+    // The merchant's RP id/origin must match what the server was configured with.
+    const RP_ID = location.hostname;
+    const ORIGIN = location.origin;
+
+    async function post(path, body) {
+      const r = await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return r.json();
+    }
+
+    // ---------- Registration ----------
+    document.getElementById("register").onclick = async () => {
+      const begin = await post("/webauthn/register/begin", {});
+      const cred = await navigator.credentials.create({
+        publicKey: {
+          challenge: fromB64url(begin.challenge),
+          rp: { name: "OpenStore", id: RP_ID },
+          user: { id: fromB64url(b64url(crypto.getRandomValues(new Uint8Array(16)))), name: "buyer", displayName: "Buyer" },
+          pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+          timeout: 60000,
+          attestation: "none",
+        },
+      });
+      const res = await post("/webauthn/register/complete", {
+        session_id: begin.session_id,
+        attestation_object: b64url(cred.response.attestationObject),
+        client_data_json: b64url(cred.response.clientDataJSON),
+      });
+      log("registered credential:", res.credential_id);
+    };
+
+    // ---------- Purchase (authentication) ----------
+    document.getElementById("buy").onclick = async () => {
+      const quote = await post("/quote", { items: [{ sku: "GELATO", title: "Gelato", quantity: 2, unit_price_paise: 5000, tax_paise: 0 }] });
+      const begin = await post("/webauthn/begin", { quote });
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: fromB64url(begin.challenge),
+          rpId: RP_ID,
+          timeout: 60000,
+          userVerification: "required",
+        },
+      });
+      const authority = await post("/webauthn/complete", {
+        session_id: begin.session_id,
+        quote,
+        assertion: {
+          rawId: b64url(assertion.rawId),
+          response: {
+            clientDataJSON: b64url(assertion.response.clientDataJSON),
+            authenticatorData: b64url(assertion.response.authenticatorData),
+            signature: b64url(assertion.response.signature),
+          },
+        },
+      });
+      log("verified authority (UV=" + authority.webauthn.uv + ")");
+      // The PoAI `authority` above is the human-auth leg. To place the order the
+      // buyer agent supplies a payer-signed Mandate (JWS) and POSTs:
+      //   POST /order { quote, mandate, authority }
+      // then POST /verify { receipt_id } to confirm AAL 3. Mandate signing uses
+      // the payer's Ed25519 key and is performed by the agent, not the browser.
+      log("authority ready — hand off to buyer agent to sign mandate + POST /order");
+    };
+  </script>
+</body>
+</html>

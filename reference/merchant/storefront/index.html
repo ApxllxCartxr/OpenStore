@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ merchant_name }}</title>
+  <style>
+    :root { --ink: #1f2937; --muted: #6b7280; --accent: #2563eb; --bg: #f8fafc; --card: #ffffff; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           max-width: 900px; margin: 0 auto; padding: 2rem 1rem; color: var(--ink);
+           background: var(--bg); }
+    h1 { font-size: 1.8rem; margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); margin: 0 0 2rem; font-size: 0.95rem; }
+    ul { list-style: none; padding: 0; display: grid; gap: 1rem;
+         grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    li { background: var(--card); border: 1px solid #e5e7eb; border-radius: 10px;
+         padding: 1.1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    li h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+    li p { margin: 0.25rem 0; color: var(--muted); font-size: 0.9rem; line-height: 1.4; }
+    .price { color: var(--accent); font-weight: 700; font-size: 1rem; }
+    .tags { margin-top: 0.5rem; }
+    .tag { display: inline-block; background: #eff6ff; color: #1d4ed8; font-size: 0.7rem;
+           padding: 0.15rem 0.5rem; border-radius: 999px; margin: 0.15rem 0.15rem 0 0; }
+  </style>
+</head>
+<body>
+  <h1>{{ merchant_name }}</h1>
+  <p class="sub">Autonomous agent storefront — every checkout is verified against a signed intent policy.</p>
+  <ul>
+  {% for product in products %}
+    <li>
+      <h2>{{ product.name }}</h2>
+      <p>{{ product.description }}</p>
+      <p class="price">₹{{ "%.2f"|format(product.price_minor / 100) }}</p>
+      <div class="tags">
+        {% for t in product.tags %}
+        <span class="tag">{{ t }}</span>
+        {% endfor %}
+      </div>
+      <script type="application/ld+json">
+      {
+        "@context": "https://schema.org/",
+        "@type": "Product",
+        "name": {{ product.name|tojson }},
+        "sku": {{ product.sku|tojson }},
+        "description": {{ product.description|tojson }},
+        "offers": {
+          "@type": "Offer",
+          "price": "{{ "%.2f"|format(product.price_minor / 100) }}",
+          "priceCurrency": "INR"
+        }
+      }
+      </script>
+    </li>
+  {% endfor %}
+  </ul>
+</body>
+</html>

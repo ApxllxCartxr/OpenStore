@@ -1,0 +1,70 @@
+# Swarm personas (GROWTH_AGENTS.md §2.1). Each persona is a (policy, goals) pair.
+# `weight` values MUST sum to 1.0 (R2.1a); asserted in
+# tests/test_growth.py::test_persona_weights_sum_to_one.
+#
+# Note on tag_mode: the compiler's `all` mode is a *subset* check
+# (item_tags ⊆ allowed_tags), so a multi-tag `all` policy rejects any product
+# that carries an extra tag. To express "I want vegan products" we use `any`
+# (product carries at least one wanted tag) — the mode that yields the
+# reachability the growth thesis describes.
+- persona_id: vegan_gifter
+  policy:
+    max_spend_per_tx_minor: 50000
+    max_spend_total_minor: 200000
+    allowed_tags: [vegan]
+    tag_mode: any
+  goals:
+    - "a vegan gift for a colleague"
+    - "something dairy-free to bring to a dinner"
+  weight: 0.25
+- persona_id: gluten_free_shopper
+  policy:
+    max_spend_per_tx_minor: 60000
+    max_spend_total_minor: 180000
+    allowed_tags: [gluten-free]
+    tag_mode: any
+  goals:
+    - "gluten-free dessert for myself"
+    - "a safe treat I can eat"
+  weight: 0.20
+- persona_id: nut_free_parent
+  policy:
+    max_spend_per_tx_minor: 55000
+    max_spend_total_minor: 150000
+    allowed_tags: [nut-free]
+    tag_mode: any
+  goals:
+    - "a nut-free ice cream for my kid"
+    - "something safe from nuts"
+  weight: 0.20
+- persona_id: budget_dairy_free
+  policy:
+    max_spend_per_tx_minor: 47000
+    max_spend_total_minor: 100000
+    allowed_tags: [dairy-free]
+    tag_mode: any
+  goals:
+    - "the cheapest dairy-free option"
+    - "a dairy-free pint under budget"
+  weight: 0.15
+- persona_id: unrestricted_foodie
+  policy:
+    max_spend_per_tx_minor: 120000
+    max_spend_total_minor: 400000
+    allowed_tags: []
+    tag_mode: any
+  goals:
+    - "the most interesting flavour available"
+    - "something new to try"
+  weight: 0.10
+- persona_id: skeptical_ignore_all
+  # Always ignores advisory offers — required by R7.1c so the measured lift
+  # does not assume compliance the real world will not supply.
+  policy:
+    max_spend_per_tx_minor: 50000
+    max_spend_total_minor: 200000
+    allowed_tags: [vegan]
+    tag_mode: any
+  goals:
+    - "a vegan gift for a colleague"
+  weight: 0.10

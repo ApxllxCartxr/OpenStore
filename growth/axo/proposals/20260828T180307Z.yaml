@@ -1,0 +1,14 @@
+draft: true
+generated_at: 20260828T180307Z
+metric: agent_conversion_rate
+lift:
+  delta: 0.0
+  ci_95:
+  - 0.0
+  - 0.0
+  measurable: true
+  label: '+0.0000'
+  n_per_arm: 40
+tag_proposals: []
+notes: []
+dropped_by_injection_screen: []

@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openstore.dev/schemas/poai-0.1.schema.json",
+  "title": "PoAI Evidence Bundle v0.1",
+  "description": "Proof-carrying commerce evidence bundle (IMPLEMENTATION_SPEC §6 / §7).",
+  "type": "object",
+  "required": [
+    "poai_version",
+    "bundle_id",
+    "transaction",
+    "human_intent",
+    "authority",
+    "goods",
+    "agent",
+    "adjudication",
+    "notification",
+    "aal",
+    "chain"
+  ],
+  "properties": {
+    "poai_version": { "const": "0.1" },
+    "bundle_id": { "type": "string", "pattern": "^poai_" },
+    "transaction": {
+      "type": "object",
+      "required": ["merchant_id", "checkout_id", "cart_created_at", "amount_minor", "currency"],
+      "properties": {
+        "merchant_id": { "type": "string" },
+        "checkout_id": { "type": "string" },
+        "cart_created_at": { "type": "string" },
+        "amount_minor": { "type": "integer", "minimum": 0 },
+        "currency": { "type": "string" },
+        "psp": { "type": "object" }
+      }
+    },
+    "human_intent": {
+      "type": ["object", "null"],
+      "required": ["request_digest", "request_text"],
+      "properties": {
+        "request_digest": { "type": "string" },
+        "request_text": { "type": "string" },
+        "captured_at": { "type": "string" },
+        "channel": { "type": "string" },
+        "channel_message_id": { "type": "string" },
+        "agent_plan": {
+          "type": ["object", "null"],
+          "properties": {
+            "model": { "type": "string" },
+            "interpretation": { "type": "string" },
+            "constraints_extracted": { "type": "array", "items": { "type": "string" } },
+            "candidates_considered": { "type": "array", "items": { "type": "object" } },
+            "plan_digest": { "type": "string", "pattern": "^sha256:" }
+          }
+        }
+      }
+    },
+    "authority": {
+      "type": ["object", "null"],
+      "required": ["policy", "policy_hash"],
+      "properties": {
+        "policy": { "type": "object" },
+        "policy_hash": { "type": "string", "pattern": "^sha256:" },
+        "webauthn": { "type": "object" },
+        "enrolment": { "type": "object" }
+      }
+    },
+    "goods": {
+      "type": "object",
+      "required": ["cart_hash", "items"],
+      "properties": {
+        "cart_hash": { "type": "string", "pattern": "^sha256:" },
+        "cart_version": { "type": "integer" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sku", "qty", "unit_minor", "catalog_attestation"],
+            "properties": {
+              "sku": { "type": "string" },
+              "qty": { "type": "integer", "minimum": 1 },
+              "unit_minor": { "type": "integer", "minimum": 0 },
+              "tags": { "type": "array", "items": { "type": "string" } },
+              "catalog_attestation": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["client_id", "scopes"],
+      "properties": {
+        "client_id": { "type": "string" },
+        "display_name": { "type": "string" },
+        "token_jti": { "type": "string" },
+        "scopes": { "type": "array", "items": { "type": "string" } },
+        "consent_granted_at": { "type": "string" }
+      }
+    },
+    "adjudication": {
+      "type": "object",
+      "required": [
+        "compiler_version",
+        "compiler_digest",
+        "policy_schema_version",
+        "evaluated_at",
+        "context",
+        "verdict",
+        "reason_code",
+        "transcript"
+      ],
+      "properties": {
+        "compiler_version": { "type": "string" },
+        "compiler_digest": { "type": "string", "pattern": "^sha256:" },
+        "policy_schema_version": { "type": "integer" },
+        "evaluated_at": { "type": "string" },
+        "context": {
+          "type": "object",
+          "required": ["spent_minor", "transactions_count", "currency", "merchant_id", "evaluated_at_unix"],
+          "properties": {
+            "spent_minor": { "type": "integer" },
+            "transactions_count": { "type": "integer" },
+            "currency": { "type": "string" },
+            "merchant_id": { "type": "string" },
+            "evaluated_at_unix": { "type": "integer" }
+          }
+        },
+        "verdict": { "type": "string", "enum": ["ALLOW", "DENY"] },
+        "reason_code": { "type": ["string", "null"] },
+        "transcript": { "type": "array" }
+      }
+    },
+    "notification": {
+      "type": ["object", "null"],
+      "required": ["sent_at", "channel", "receipt_digest"],
+      "properties": {
+        "sent_at": { "type": "string" },
+        "channel": { "type": "string" },
+        "receipt_digest": { "type": "string", "pattern": "^sha256:" }
+      }
+    },
+    "aal": {
+      "type": "object",
+      "required": ["level", "predicates", "reasons"],
+      "properties": {
+        "level": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "predicates": {
+          "type": "object",
+          "required": [
+            "e1_agent_authenticated", "e2_policy_signature_valid", "e3_assertion_fresh",
+            "e4_user_verified", "e5_cart_bound", "e6_catalog_attested",
+            "e7_compiler_allow", "e8_intent_recorded", "e9_notified"
+          ],
+          "properties": {
+            "e1_agent_authenticated": { "type": "boolean" },
+            "e2_policy_signature_valid": { "type": "boolean" },
+            "e3_assertion_fresh": { "type": "boolean" },
+            "e4_user_verified": { "type": "boolean" },
+            "e5_cart_bound": { "type": "boolean" },
+            "e6_catalog_attested": { "type": "boolean" },
+            "e7_compiler_allow": { "type": "boolean" },
+            "e8_intent_recorded": { "type": "boolean" },
+            "e9_notified": { "type": "boolean" }
+          }
+        },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "chain": {
+      "type": "object",
+      "required": ["links", "root", "merchant_signature"],
+      "properties": {
+        "links": { "type": "array", "items": { "type": "string", "pattern": "^sha256:" }, "minItems": 8, "maxItems": 8 },
+        "root": { "type": "string", "pattern": "^sha256:" },
+        "merchant_signature": { "type": "string" },
+        "time_anchor": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

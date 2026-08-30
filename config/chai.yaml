@@ -1,0 +1,53 @@
+merchant:
+  name: "Chai Wala"
+  id: "chai-wala"
+
+products:
+  - sku: "chai-001"
+    name: "Masala Chai (250ml)"
+    description: "Assam black tea with cardamom, ginger, and spices."
+    price_minor: 4000
+    related_skus: ["chai-002", "snack-001"]
+    tags: ["hot", "caffeinated", "vegan"]
+
+  - sku: "chai-002"
+    name: "Ginger Chai (250ml)"
+    description: "Sharp ginger-forward black tea, no dairy."
+    price_minor: 4000
+    related_skus: ["chai-001", "snack-002"]
+    tags: ["hot", "caffeinated", "vegan"]
+
+  - sku: "chai-003"
+    name: "Rose Cardamom Chai (250ml)"
+    description: "Delicate rose and cardamom, made with milk."
+    price_minor: 5000
+    related_skus: ["snack-001"]
+    tags: ["hot", "caffeinated", "dairy"]
+
+  - sku: "chai-004"
+    name: "Iced Lemongrass Tea (300ml)"
+    description: "Caffeine-free, chilled, dairy-free."
+    price_minor: 4500
+    related_skus: ["snack-002"]
+    tags: ["cold", "caffeine-free", "vegan"]
+
+  - sku: "snack-001"
+    name: "Whole Wheat Khari (100g)"
+    description: "Flaky savoury biscuit, vegetarian."
+    price_minor: 3000
+    related_skus: ["chai-001"]
+    tags: ["snack", "vegetarian"]
+
+  - sku: "snack-002"
+    name: "Millet Namkeen (100g)"
+    description: "Crunchy roasted millet mix, vegan."
+    price_minor: 3500
+    related_skus: ["chai-002", "chai-004"]
+    tags: ["snack", "vegan"]
+
+  - sku: "box-001"
+    name: "Chai Sampler Hamper"
+    description: "Six assorted chai sticks, gift packaging."
+    price_minor: 24000
+    related_skus: []
+    tags: ["gift", "occasion:festival"]

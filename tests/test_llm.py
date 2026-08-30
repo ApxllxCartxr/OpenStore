@@ -6,7 +6,7 @@ Fallback paths are explicitly exercised.
 
 from unittest.mock import patch
 
-from buyer_agent.graph import (
+from reference.buyer_agent.graph import (
     IntentClassification,
     classify_node,
     explain_node,
@@ -31,7 +31,7 @@ def _state(**overrides):
 # --- classify_node ---
 
 
-@patch("buyer_agent.graph.call_gemini_structured")
+@patch("reference.buyer_agent.graph.call_gemini_structured")
 def test_classify_node_uses_gemini_when_available(mock_gemini):
     mock_gemini.return_value = IntentClassification(intent="browse")
     result = classify_node(_state(last_user_message="what flavors do you have"))
@@ -39,21 +39,21 @@ def test_classify_node_uses_gemini_when_available(mock_gemini):
     mock_gemini.assert_called_once()
 
 
-@patch("buyer_agent.graph.call_gemini_structured")
+@patch("reference.buyer_agent.graph.call_gemini_structured")
 def test_classify_node_falls_back_on_api_failure(mock_gemini):
     mock_gemini.return_value = None
     result = classify_node(_state(last_user_message="buy me some gelato"))
     assert result == {"intent": "checkout"}
 
 
-@patch("buyer_agent.graph.call_gemini_structured")
+@patch("reference.buyer_agent.graph.call_gemini_structured")
 def test_classify_node_falls_back_on_invalid_intent(mock_gemini):
     mock_gemini.return_value = IntentClassification(intent=" INVALID ")
     result = classify_node(_state(last_user_message="add pistachio to cart"))
     assert result == {"intent": "add_to_cart"}
 
 
-@patch("buyer_agent.graph.call_gemini_structured")
+@patch("reference.buyer_agent.graph.call_gemini_structured")
 def test_classify_node_passes_cart_context(mock_gemini):
     mock_gemini.return_value = IntentClassification(intent="checkout")
     state = _state(
@@ -81,7 +81,7 @@ def test_keyword_classify_detects_checkout():
 # --- explain_node ---
 
 
-@patch("buyer_agent.graph.call_gemini_text")
+@patch("reference.buyer_agent.graph.call_gemini_text")
 def test_explain_node_uses_gemini_when_available(mock_gemini):
     mock_gemini.return_value = "Great news! Your order is confirmed."
     state = _state(
@@ -93,7 +93,7 @@ def test_explain_node_uses_gemini_when_available(mock_gemini):
     mock_gemini.assert_called_once()
 
 
-@patch("buyer_agent.graph.call_gemini_text")
+@patch("reference.buyer_agent.graph.call_gemini_text")
 def test_explain_node_falls_back_on_api_failure(mock_gemini):
     mock_gemini.return_value = None
     state = _state(
@@ -103,7 +103,7 @@ def test_explain_node_falls_back_on_api_failure(mock_gemini):
     assert "rzp.io/abc123" in result["reply_text"]
 
 
-@patch("buyer_agent.graph.call_gemini_text")
+@patch("reference.buyer_agent.graph.call_gemini_text")
 def test_explain_node_falls_back_on_empty_response(mock_gemini):
     mock_gemini.return_value = "   "
     state = _state(order_result={"error": "something broke"})
@@ -116,7 +116,7 @@ def test_explain_node_returns_early_when_no_order_result():
     assert result == {"reply_text": "Something went wrong — no result to report."}
 
 
-@patch("buyer_agent.graph.call_gemini_text")
+@patch("reference.buyer_agent.graph.call_gemini_text")
 def test_explain_node_rejection_fallback(mock_gemini):
     mock_gemini.return_value = None
     state = _state(
@@ -139,7 +139,7 @@ def test_fallback_explain_rejection_path():
     assert "over budget" in text
 
 
-@patch("buyer_agent.graph.call_gemini_text")
+@patch("reference.buyer_agent.graph.call_gemini_text")
 def test_explain_node_includes_cart_and_cross_sell_in_prompt(mock_gemini):
     mock_gemini.return_value = "Your cart is ready!"
     state = _state(

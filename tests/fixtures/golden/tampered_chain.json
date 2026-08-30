@@ -1,0 +1,207 @@
+{
+  "poai_version": "0.1",
+  "bundle_id": "poai_AAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "transaction": {
+    "merchant_id": "gelateria-roma",
+    "checkout_id": "chk-1",
+    "cart_created_at": "2026-08-27T09:14:22Z",
+    "amount_minor": 42000,
+    "currency": "INR",
+    "psp": {
+      "provider": "razorpay",
+      "order_id": "o1",
+      "payment_link_id": "p1"
+    }
+  },
+  "human_intent": {
+    "request_digest": "sha256:d0809fbed910390670d6b8a75b01a044d63b2fd0868992e69d99e73be98d7370",
+    "request_text": "buy ice cream",
+    "captured_at": "2026-08-27T09:14:10Z",
+    "channel": "web",
+    "channel_message_id": "m1"
+  },
+  "authority": {
+    "policy": {
+      "policy_version": 2,
+      "merchant_id": "gelateria-roma",
+      "currency": "INR",
+      "max_spend_per_tx_minor": 50000,
+      "max_spend_total_minor": 200000,
+      "max_transactions": 10,
+      "allowed_tags": [
+        "dairy-free",
+        "vegan"
+      ],
+      "tag_mode": "all",
+      "blocked_skus": [],
+      "not_before": 1787000000,
+      "expires_at": 1788000000,
+      "assertion_max_age_seconds": 86400
+    },
+    "policy_hash": "sha256:6931076613ecb0aa0c22fbdf0c8430b988b130670aced2cc5047aa6fc05c77e9",
+    "webauthn": {
+      "credential_id": "Y3JlZDE",
+      "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiOEpqZHptVy1KNG5LSEtQdnhMUVVkT2FwWklsRmlBdDFFLTFxU1ZNWDRHRSIsIm9yaWdpbiI6Imh0dHBzOi8vbG9jYWxob3N0In0",
+      "authenticator_data": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAA",
+      "signature": "hvdUG7dpAMf9XngsDlItjgVxWjji7gaBjNQ-z5GSG1mLoHudYdQMkkeJoYTRhY2TjaGYWS9g1O7upQ5loidUmg",
+      "uv": true,
+      "sign_count": 0,
+      "signed_at": "2026-08-27T09:14:22Z",
+      "challenge_binding": {
+        "mode": "cart",
+        "policy_hash": "sha256:6931076613ecb0aa0c22fbdf0c8430b988b130670aced2cc5047aa6fc05c77e9",
+        "cart_hash": "sha256:aa"
+      }
+    },
+    "enrolment": {
+      "public_key": "pAECIAEhWCAScSjOSaavC6DalW0vEVeDD-ZX97S2CEAyF56ye8G8lyJYIO5vNRFPWcodBtmpCVIOY2BxqWQpJlex4IV-JoBiwiKE",
+      "aaguid": "AAAAAAAAAAAAAAAAAAAAAA",
+      "attestation_format": "none",
+      "enrolled_at": "2026-08-27T09:00:00Z"
+    }
+  },
+  "goods": {
+    "cart_hash": "sha256:aa",
+    "cart_version": 1,
+    "items": [
+      {
+        "sku": "TAMPERED",
+        "qty": 2,
+        "unit_minor": 21000,
+        "tags": [
+          "dairy-free",
+          "vegan"
+        ],
+        "catalog_attestation": "eyJhbGciOiJFUzI1NiIsImtpZCI6InBvYWktZXMyNTYtZ29sZGVuIn0.eyJjYXRhbG9nX2RpZ2VzdCI6InNoYTI1NjphYSIsImlhdCI6MTc4NzAwMDAwMCwibWVyY2hhbnRfaWQiOiJnZWxhdGVyaWEtcm9tYSIsInByaWNlX21pbm9yIjoyMTAwMCwic2t1IjoiR0VMLVZBTi01MDAiLCJ0YWdzIjpbImRhaXJ5LWZyZWUiLCJ2ZWdhbiJdfQ.kBkiPjlJizCZR7wyo1IgTtNCSy1dYZ7_ZgzKrAmzlhTu4DpNclMJ2hST-vyfVeV2cqOrQL5J4zeBn_D6uteGEg"
+      }
+    ]
+  },
+  "agent": {
+    "client_id": "client",
+    "display_name": "Buyer",
+    "token_jti": "jti",
+    "scopes": [
+      "checkout:confirm"
+    ],
+    "consent_granted_at": "2026-08-27T09:14:00Z"
+  },
+  "adjudication": {
+    "compiler_version": "1.0.0",
+    "compiler_digest": "sha256:96543354c15751ccfdd7700c1cf9d1e0735559cdc166313186d593adcee9b03b",
+    "policy_schema_version": 2,
+    "evaluated_at": "2026-08-27T09:14:22Z",
+    "context": {
+      "spent_minor": 0,
+      "transactions_count": 0,
+      "currency": "INR",
+      "merchant_id": "gelateria-roma",
+      "evaluated_at_unix": 1787000900
+    },
+    "verdict": "ALLOW",
+    "reason_code": null,
+    "transcript": [
+      {
+        "check": "currency_match",
+        "result": "pass",
+        "policy_currency": "INR",
+        "context_currency": "INR"
+      },
+      {
+        "check": "merchant_lock",
+        "result": "pass",
+        "expected": "gelateria-roma",
+        "actual": "gelateria-roma"
+      },
+      {
+        "check": "policy_not_before",
+        "result": "pass",
+        "not_before": 1787000000,
+        "evaluated_at": 1787000900
+      },
+      {
+        "check": "policy_expiry",
+        "result": "pass",
+        "expires_at": 1788000000,
+        "evaluated_at": 1787000900
+      },
+      {
+        "check": "transaction_count",
+        "result": "pass",
+        "completed": 0,
+        "limit": 10
+      },
+      {
+        "check": "item_qty",
+        "result": "pass",
+        "sku": "GEL-VAN-500",
+        "qty": 2
+      },
+      {
+        "check": "item_blocked_sku",
+        "result": "pass",
+        "sku": "GEL-VAN-500"
+      },
+      {
+        "check": "item_tag_allowlist",
+        "result": "pass",
+        "sku": "GEL-VAN-500",
+        "mode": "all",
+        "item_tags": [
+          "dairy-free",
+          "vegan"
+        ],
+        "allowed": [
+          "dairy-free",
+          "vegan"
+        ]
+      },
+      {
+        "check": "spend_per_tx",
+        "result": "pass",
+        "total_minor": 42000,
+        "limit_minor": 50000
+      },
+      {
+        "check": "spend_cumulative",
+        "result": "pass",
+        "spent_minor": 0,
+        "total_minor": 42000,
+        "limit_minor": 200000
+      }
+    ]
+  },
+  "notification": {
+    "sent_at": "2026-08-27T09:14:30Z",
+    "channel": "discord",
+    "receipt_digest": "sha256:5a9370b5ee5191ebf195f818394724e4c58c72a568b09b72b886a74e29032aac"
+  },
+  "aal": {
+    "level": 3,
+    "predicates": {
+      "e1_agent_authenticated": true,
+      "e2_policy_signature_valid": true,
+      "e3_assertion_fresh": true,
+      "e4_user_verified": true,
+      "e5_cart_bound": true,
+      "e6_catalog_attested": true,
+      "e7_compiler_allow": true,
+      "e8_intent_recorded": true,
+      "e9_notified": true
+    },
+    "reasons": []
+  },
+  "chain": {
+    "links": [
+      "sha256:51bb68d6df4cf7764259ca89ca68c4304b4c5f1bcef3c952f059e36f68c5ba42",
+      "sha256:b9ff6d5c0625e311724b161d2c0549c1269f1f0c41e1c9f584db3d53cf86a153",
+      "sha256:f7436eef336d9eeebc0cb4e1fab939c3e0ac94aeb0c6404220530efd3cb211b4",
+      "sha256:ccd13fad3e83e72a83bd9bc288b79c28252e7b1752af7bddfbe392ca5359d440",
+      "sha256:97053cef5ccb43162ef12a27d59820a13197b9280259bc62068ee7673a897cf7",
+      "sha256:1eb6eeede84e50af9552a7044e8d0d11b1916ca8f0aab92f7dc7bf223db60064",
+      "sha256:17b2243c3a2d17a0f10afe5c7327c0fbed197bb8b07cacdab129a08ffaedb8f4",
+      "sha256:b6ce4024ccd2f557b4966d67f34092dd572890bd94a04ffa0e60664c17e419eb"
+    ],
+    "root": "sha256:b6ce4024ccd2f557b4966d67f34092dd572890bd94a04ffa0e60664c17e419eb",
+    "merchant_signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6InBvYWktZXMyNTYtZ29sZGVuIn0.eyJidW5kbGVfaWQiOiJwb2FpX0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwiaXNzdWVkX2F0IjoiMjAyNi0wOC0yN1QwOToxNTowNFoiLCJyb290Ijoic2hhMjU2OmI2Y2U0MDI0Y2NkMmY1NTdiNDk2NmQ2N2YzNDA5MmRkNTcyODkwYmQ5NGEwNGZmYTBlNjA2NjRjMTdlNDE5ZWIifQ.KZyETsTqRvEhWZt79ZBskg97Ssi5Moa2lwsj_sH0Mf8xIXHvCzip5PtKH0XCTzUAWhRK-O172od59iNbjqL7Ig"
+  }
+}

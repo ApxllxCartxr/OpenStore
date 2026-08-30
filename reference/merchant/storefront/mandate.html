@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><title>OpenStore — Mandate Issuance</title></head>
+<body style="font-family:system-ui;max-width:720px;margin:2rem auto;">
+  <h1>Issue a spending mandate</h1>
+  <p>A <b>mandate</b> is a payer-signed authorization an AI agent presents to a merchant.
+     For this demo the server generates a payer key, signs the mandate, and shows you both.</p>
+  <form method="post">
+    <label>Scope <input name="scope" value="global" size="20"></label><br>
+    <label>Max amount (paise) <input name="max_amount" value="10000000" size="14"></label><br>
+    <label>Currency <input name="currency" value="INR" size="6"></label><br>
+    <label>Valid for (minutes) <input name="expires_in" value="1440" size="8"></label><br>
+    <button type="submit">Issue mandate</button>
+  </form>
+  {% if result %}
+    <h2>Issued</h2>
+    <p><b>Payer DID:</b> <code>{{ result.payer_did }}</code></p>
+    <p><b>Mandate JSON:</b></p>
+    <pre>{{ result.mandate_json }}</pre>
+    <p><b>Demo payer private key (JWK-like, do NOT use in production):</b></p>
+    <pre>{{ result.private_key_pem }}</pre>
+  {% endif %}
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "active_work_id": "secure-money-authority-a4d0a800",
+  "works": {
+    "secure-money-authority-a4d0a800": {
+      "work_id": "secure-money-authority-a4d0a800",
+      "active_plan": "/home/apollo/projects/OpenStore/.omo/plans/secure-money-authority.md",
+      "plan_name": "secure-money-authority",
+      "status": "active",
+      "started_at": "2026-08-29T07:18:26.710Z",
+      "updated_at": "2026-08-29T07:52:29.304Z",
+      "session_ids": [
+        "opencode:ses_fb3b905a8ffeUtDKYiB23odWHa"
+      ],
+      "session_origins": {
+        "opencode:ses_fb3b905a8ffeUtDKYiB23odWHa": "direct"
+      },
+      "agent": "atlas",
+      "task_sessions": {
+        "todo:1": {
+          "task_key": "todo:1",
+          "task_label": "1",
+          "task_title": "Extract the three WebAuthn verifier helpers into `openstore/core/authority/webauthn_verify.py`",
+          "session_id": "opencode:ses_fb39a5f21ffe5DXfxUzUHPdUA2",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-08-29T07:52:29.304Z",
+          "started_at": "2026-08-29T07:22:05.287Z",
+          "status": "completed",
+          "ended_at": "2026-08-29T07:52:29.304Z",
+          "elapsed_ms": 1824017
+        }
+      }
+    }
+  },
+  "active_plan": "/home/apollo/projects/OpenStore/.omo/plans/secure-money-authority.md",
+  "started_at": "2026-08-29T07:18:26.710Z",
+  "status": "active",
+  "updated_at": "2026-08-29T07:52:29.304Z",
+  "session_ids": [
+    "opencode:ses_fb3b905a8ffeUtDKYiB23odWHa"
+  ],
+  "session_origins": {
+    "opencode:ses_fb3b905a8ffeUtDKYiB23odWHa": "direct"
+  },
+  "plan_name": "secure-money-authority",
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "Extract the three WebAuthn verifier helpers into `openstore/core/authority/webauthn_verify.py`",
+      "session_id": "opencode:ses_fb39a5f21ffe5DXfxUzUHPdUA2",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-08-29T07:52:29.304Z",
+      "started_at": "2026-08-29T07:22:05.287Z",
+      "status": "completed",
+      "ended_at": "2026-08-29T07:52:29.304Z",
+      "elapsed_ms": 1824017
+    }
+  },
+  "agent": "atlas"
+}

@@ -1,0 +1,42 @@
+draft: true
+generated_at: 20260828T180730Z
+metric: agent_conversion_rate
+lift:
+  delta: 0.0
+  ci_95:
+  - 0.0
+  - 0.0
+  measurable: false
+  label: NO_MEASURABLE_LIFT
+  n_per_arm: 40
+tag_proposals:
+- sku: GEL-VEG-500
+  add_tag: nut-free
+  evidence: no nuts
+  confidence: 0.92
+- sku: GEL-VEG-500
+  add_tag: nut
+  evidence: nuts
+  confidence: 0.7
+- sku: GEL-VEG-CHOC
+  add_tag: dairy-free
+  evidence: oat-milk
+  confidence: 0.92
+- sku: GEL-BERRY
+  add_tag: nut-free
+  evidence: no nuts
+  confidence: 0.92
+- sku: GEL-BERRY
+  add_tag: nut
+  evidence: nuts
+  confidence: 0.7
+- sku: GEL-MANGO
+  add_tag: nut-free
+  evidence: no nuts
+  confidence: 0.92
+- sku: GEL-MANGO
+  add_tag: nut
+  evidence: nuts
+  confidence: 0.7
+notes: []
+dropped_by_injection_screen: []

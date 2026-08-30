@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign Intent Policy — OpenStore</title>
+  <style>
+    :root { --ink: #1f2937; --muted: #6b7280; --accent: #2563eb; --card: #fff;
+            --ok-bg: #dcfce7; --ok-ink: #166534; --err-bg: #fee2e2; --err-ink: #991b1b; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           max-width: 600px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); }
+    h1 { font-size: 1.5rem; margin: 0 0 0.5rem; }
+    p.lead { color: var(--muted); font-size: 0.95rem; line-height: 1.5; }
+    label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
+    input { width: 100%; padding: 0.55rem; font-size: 1rem; box-sizing: border-box;
+            border: 1px solid #d1d5db; border-radius: 6px; }
+    button { margin-top: 1.5rem; padding: 0.75rem 2rem; font-size: 1rem; cursor: pointer;
+             background: var(--accent); color: white; border: none; border-radius: 6px;
+             display: inline-flex; align-items: center; gap: 0.6rem; }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.5);
+               border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #status { margin-top: 1rem; padding: 1rem; border-radius: 6px; display: none; }
+    #status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+    #status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+    .summary { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+               padding: 1rem 1.2rem; margin-top: 1rem; }
+    .summary div { display: flex; justify-content: space-between; padding: 0.35rem 0;
+                   border-bottom: 1px solid #f1f5f9; font-size: 0.9rem; }
+    .summary div:last-child { border-bottom: none; }
+    .summary b { color: var(--ink); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1>Sign Your Intent Policy</h1>
+  <p class="lead">Set the constraints your AI agent must follow. This policy is cryptographically
+     bound to your passkey — once signed, the merchant server enforces these limits mathematically
+     on every checkout.</p>
+
+  <form id="policyForm">
+    <label for="max_spend">Maximum spend per checkout (₹)</label>
+    <input type="number" id="max_spend" value="500" min="1" max="100000">
+
+    <label for="allowed_tags">Allowed product tags (comma-separated)</label>
+    <input type="text" id="allowed_tags" value="vegan, dairy-free, fruit"
+           placeholder="e.g. vegan, dairy-free, gift">
+
+    <label for="merchant_id">Merchant ID</label>
+    <input type="text" id="merchant_id" value="gelateria-roma">
+
+    <label for="expiry_hours">Policy expires after (hours)</label>
+    <input type="number" id="expiry_hours" value="24" min="1" max="168">
+
+    <button type="submit" id="signBtn">Sign with Passkey</button>
+  </form>
+
+  <div id="status"></div>
+
+  <p style="margin-top: 2rem;"><a href="/intent/register">No passkey yet? Register first →</a></p>
+
+  <script>
+    const MERCHANT_URL = window.location.origin;
+
+    // Decode a base64url string (what the server emits) into bytes. atob() alone
+    // rejects the url-safe `-`/`_` characters.
+    function b64urlToBytes(str) {
+      str = String(str).replace(/-/g, "+").replace(/_/g, "/");
+      const pad = str.length % 4 ? "=".repeat(4 - (str.length % 4)) : "";
+      const bin = atob(str + pad);
+      return Uint8Array.from(bin, c => c.charCodeAt(0));
+    }
+    // Encode bytes as base64url (no padding). fido2 compares the id and rawId
+    // strings for equality, so both must use the same encoding.
+    function bytesToB64url(bytes) {
+      return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
+
+    async function getCredentialId() {
+      const resp = await fetch(`${MERCHANT_URL}/internal/intent-status`);
+      const data = await resp.json();
+      if (!data.has_policy || !data.credential_id) return null;
+      return data.credential_id;
+    }
+
+    function readableError(err) {
+      const name = err && err.name;
+      if (name === "NotAllowedError" || name === "AbortError")
+        return "Passkey cancelled — you dismissed the biometric prompt. Try again when ready.";
+      if (name === "SecurityError")
+        return "Passkey not available — WebAuthn requires HTTPS or localhost. Serve this page over a secure origin.";
+      if (typeof navigator === "undefined" || !navigator.credentials)
+        return "Passkey not available — this browser does not support WebAuthn.";
+      return `Server error: ${err && err.message ? err.message : "unknown failure"}`;
+    }
+
+    function showSuccess(policy) {
+      const form = document.getElementById("policyForm");
+      form.style.display = "none";
+      const status = document.getElementById("status");
+      status.className = "ok";
+      const tags = policy.allowed_tags.join(", ") || "(none)";
+      const spend = (policy.max_spend_minor / 100).toFixed(2);
+      const exp = new Date(policy.expires_at * 1000).toLocaleString();
+      status.innerHTML = `
+        <strong>Intent Policy registered.</strong> Your agent may now shop within these bounds.
+        <div class="summary">
+          <div><span>Merchant</span><b>${policy.merchant_id}</b></div>
+          <div><span>Max spend</span><b>₹${spend}</b></div>
+          <div><span>Allowed tags</span><b>${tags}</b></div>
+          <div><span>Expires</span><b>${exp}</b></div>
+        </div>`;
+    }
+
+    document.getElementById("policyForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("signBtn");
+      const status = document.getElementById("status");
+      btn.disabled = true;
+      status.className = "";
+      btn.innerHTML = `<span class="spinner"></span> Awaiting passkey…`;
+
+      try {
+        if (!navigator.credentials) throw { name: "SecurityError" };
+
+        const credentialId = await getCredentialId();
+        if (!credentialId) { window.location.href = "/intent/register"; return; }
+
+        const policy = {
+          max_spend_minor: parseInt(document.getElementById("max_spend").value) * 100,
+          allowed_tags: document.getElementById("allowed_tags").value
+            .split(",").map(t => t.trim()).filter(Boolean),
+          blocked_skus: [],
+          merchant_id: document.getElementById("merchant_id").value,
+          expires_at: Math.floor(Date.now()/1000)
+            + parseInt(document.getElementById("expiry_hours").value) * 3600,
+        };
+
+        const beginResp = await fetch(`${MERCHANT_URL}/internal/webauthn/begin-signing`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({credential_id: credentialId, policy: policy}),
+        });
+        if (!beginResp.ok) throw { name: "Server", message: "Failed to begin signing ceremony" };
+        const {nonce, options} = await beginResp.json();
+
+        const challengeBytes = b64urlToBytes(nonce);
+        const getOptions = options.public_key || options;
+        if (getOptions.challenge)
+          getOptions.challenge = b64urlToBytes(getOptions.challenge);
+        if (getOptions.allow_credentials)
+          getOptions.allow_credentials = getOptions.allow_credentials.map(cred => ({
+            ...cred, id: b64urlToBytes(cred.id),
+          }));
+
+        const assertion = await navigator.credentials.get({publicKey: getOptions});
+
+        const aIdB64url = bytesToB64url(assertion.rawId);
+        const completeResp = await fetch(`${MERCHANT_URL}/internal/webauthn/complete-signing`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            credential_id: credentialId,
+            assertion: {
+              id: aIdB64url,
+              rawId: aIdB64url,
+              type: assertion.type,
+              response: {
+                clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
+                authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
+                signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
+              },
+            },
+            policy_json: policy,
+          }),
+        });
+
+        if (!completeResp.ok) {
+          const err = await completeResp.json();
+          throw { name: "Server", message: err.detail || "Signing failed" };
+        }
+
+        showSuccess(policy);
+      } catch (err) {
+        status.className = "err";
+        status.textContent = readableError(err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Sign with Passkey";
+      }
+    });
+  </script>
+</body>
+</html>

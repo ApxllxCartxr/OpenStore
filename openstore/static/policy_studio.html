@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Policy Studio — OpenStore</title>
+<style>
+  :root { --accent: #2563eb; --danger: #dc2626; --success: #16a34a; --bg: #f8fafc; --card: #fff; --border: #e2e8f0; --text: #1e293b; --muted: #64748b; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+  .card h2 { font-size: 1rem; margin-bottom: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.25rem; }
+  input[type=range] { width: 100%; margin: 0.25rem 0 0.75rem; }
+  input[type=number], input[type=date], select { width: 100%; padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.9rem; }
+  .range-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .range-val { font-size: 0.85rem; font-weight: 600; color: var(--accent); min-width: 5rem; text-align: right; }
+  .tag-group { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+  .tag-group label { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+  .tag-group label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tag-group input { display: none; }
+  .radio-group { display: flex; gap: 1rem; margin-bottom: 0.75rem; }
+  .radio-group label { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .blocked-list { max-height: 6rem; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; }
+  .blocked-list label { display: block; font-size: 0.8rem; }
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .summary-item { font-size: 0.85rem; }
+  .summary-item .val { font-weight: 600; color: var(--accent); }
+  .summary-item .lbl { color: var(--muted); }
+  .basket { margin-top: 1rem; }
+  .basket h3 { font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .basket-item { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+  .diff-panel { margin-top: 1rem; }
+  .diff-panel h3 { font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .diff-item { font-size: 0.8rem; padding: 0.2rem 0; }
+  .diff-add { color: var(--success); }
+  .diff-remove { color: var(--danger); }
+  .loading { color: var(--muted); font-style: italic; }
+  .error { color: var(--danger); font-size: 0.85rem; }
+  .digest { font-family: monospace; font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>Policy Studio</h1>
+<p class="subtitle">Configure an intent policy and see its blast radius against the live catalog in real time.</p>
+
+<div class="grid">
+  <!-- LEFT: Controls -->
+  <div>
+    <div class="card">
+      <h2>Spending Limits</h2>
+      <label>Per-transaction cap (₹)
+        <div class="range-row"><input type="range" id="perTx" min="0" max="100000" step="500" value="50000"><span class="range-val" id="perTxVal">₹500</span></div>
+      </label>
+      <label>Total cap (₹)
+        <div class="range-row"><input type="range" id="totalCap" min="0" max="1000000" step="1000" value="200000"><span class="range-val" id="totalCapVal">₹2,000</span></div>
+      </label>
+      <label>Max transactions
+        <div class="range-row"><input type="range" id="maxTx" min="1" max="100" value="10"><span class="range-val" id="maxTxVal">10</span></div>
+      </label>
+      <label>Assertion max age (seconds)
+        <div class="range-row"><input type="range" id="assertionAge" min="60" max="604800" step="60" value="86400"><span class="range-val" id="assertionAgeVal">86400</span></div>
+      </label>
+      <label>Step-up above (₹) <span style="color:var(--muted);font-weight:normal">0 = disabled</span>
+        <div class="range-row"><input type="range" id="stepUp" min="0" max="100000" step="500" value="0"><span class="range-val" id="stepUpVal">disabled</span></div>
+      </label>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h2>Tag Constraints</h2>
+      <div class="radio-group">
+        <label><input type="radio" name="tagMode" value="all" checked> <b>all</b> — item must have only allowed tags</label>
+        <label><input type="radio" name="tagMode" value="any"> <b>any</b> — item must have at least one allowed tag</label>
+      </div>
+      <div class="tag-group" id="tagCheckboxes"></div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h2>Blocked SKUs</h2>
+      <div class="blocked-list" id="blockedSkus"></div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h2>Expiry</h2>
+      <label>Expires at
+        <input type="date" id="expiryDate">
+      </label>
+    </div>
+  </div>
+
+  <!-- RIGHT: Results -->
+  <div>
+    <div class="card">
+      <h2>Blast Radius</h2>
+      <div id="blastResult"><p class="loading">Adjust controls to see results…</p></div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h2>Example Basket (An example basket this policy permits)</h2>
+      <div id="basketResult" class="basket"><p class="loading">—</p></div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h2>Diff vs. Active Policy</h2>
+      <div id="diffResult" class="diff-panel"><p class="loading">No active policy to compare against.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="digest" id="digestDisplay"></div>
+
+<script>
+const CATALOG = window.__CATALOG__ || [];
+const ACTIVE_POLICY = window.__ACTIVE_POLICY__ || null;
+
+function fmtMoney(paise) { return '₹' + (paise / 100).toLocaleString('en-IN', {minimumFractionDigits:0}); }
+function fmtNum(n) { return n.toLocaleString('en-IN'); }
+
+// Populate tag checkboxes from catalog union
+const allTags = [...new Set(CATALOG.flatMap(p => p.tags || []))].sort();
+const tagBox = document.getElementById('tagCheckboxes');
+allTags.forEach(t => {
+  const lbl = document.createElement('label');
+  lbl.innerHTML = `<input type="checkbox" value="${t}"> ${t}`;
+  tagBox.appendChild(lbl);
+});
+
+// Populate blocked SKUs
+const skuBox = document.getElementById('blockedSkus');
+CATALOG.forEach(p => {
+  const lbl = document.createElement('label');
+  lbl.innerHTML = `<input type="checkbox" value="${p.sku}"> ${p.sku} — ${fmtMoney(p.price_minor)}`;
+  skuBox.appendChild(lbl);
+});
+
+// Default expiry: 7 days from now
+const d = new Date(); d.setDate(d.getDate() + 7);
+document.getElementById('expiryDate').valueAsDate = d;
+
+function getPolicy() {
+  return {
+    policy_version: 2,
+    merchant_id: window.__MERCHANT_ID__ || 'gelateria-roma',
+    currency: 'INR',
+    max_spend_per_tx_minor: parseInt(document.getElementById('perTx').value) * 100,
+    max_spend_total_minor: parseInt(document.getElementById('totalCap').value) * 100,
+    max_transactions: parseInt(document.getElementById('maxTx').value),
+    allowed_tags: [...tagBox.querySelectorAll('input:checked')].map(i => i.value),
+    tag_mode: document.querySelector('input[name=tagMode]:checked').value,
+    blocked_skus: [...skuBox.querySelectorAll('input:checked')].map(i => i.value),
+    not_before: 0,
+    expires_at: Math.floor(new Date(document.getElementById('expiryDate').value + 'T23:59:59Z').getTime() / 1000),
+    assertion_max_age_seconds: parseInt(document.getElementById('assertionAge').value),
+    step_up_above_minor: parseInt(document.getElementById('stepUp').value) * 100,
+  };
+}
+
+function updateLabels() {
+  document.getElementById('perTxVal').textContent = fmtMoney(parseInt(document.getElementById('perTx').value) * 100);
+  document.getElementById('totalCapVal').textContent = fmtMoney(parseInt(document.getElementById('totalCap').value) * 100);
+  document.getElementById('maxTxVal').textContent = document.getElementById('maxTx').value;
+  document.getElementById('assertionAgeVal').textContent = document.getElementById('assertionAge').value;
+  const su = parseInt(document.getElementById('stepUp').value);
+  document.getElementById('stepUpVal').textContent = su === 0 ? 'disabled' : fmtMoney(su * 100);
+}
+
+let debounceTimer = null;
+async function refresh() {
+  updateLabels();
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(doRefresh, 250);
+}
+
+async function doRefresh() {
+  const policy = getPolicy();
+  const resEl = document.getElementById('blastResult');
+  const basketEl = document.getElementById('basketResult');
+  const diffEl = document.getElementById('diffResult');
+  resEl.innerHTML = '<p class="loading">Computing…</p>';
+
+  try {
+    const resp = await fetch('/internal/policy/blast-radius', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({policy}),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // Summary
+    const reachable = data.allowed_skus || [];
+    const blocked = (data.blocked_skus || []).map(sku => {
+      const prod = CATALOG.find(p => p.sku === sku);
+      return prod ? `${sku} (blocked)` : sku;
+    });
+    const reachCount = reachable.length;
+    const totalCount = CATALOG.length;
+    const pct = totalCount > 0 ? Math.round(reachCount / totalCount * 100) : 0;
+
+    resEl.innerHTML = `
+      <div class="summary-grid">
+        <div class="summary-item"><div class="val">${reachCount} / ${totalCount}</div><div class="lbl">Reachable products (${pct}%)</div></div>
+        <div class="summary-item"><div class="val">${fmtMoney(data.per_tx_limit_minor)}</div><div class="lbl">Per-tx limit</div></div>
+        <div class="summary-item"><div class="val">${fmtMoney(data.worst_case_total_exposure_minor || data.cumulative_limit_minor)}</div><div class="lbl">Total exposure</div></div>
+        <div class="summary-item"><div class="val">${data.max_transactions}</div><div class="lbl">Max transactions</div></div>
+      </div>
+      <div style="margin-top:0.75rem;font-size:0.85rem">
+        <b>Reachable:</b> ${reachable.join(', ') || 'none'}<br>
+        ${blocked.length ? '<b>Blocked:</b> ' + blocked.join(', ') : ''}
+      </div>
+    `;
+
+    // Basket (greedy, from worst_case_example_basket if present, else compute)
+    const basket = data.worst_case_example_basket || [];
+    if (basket.length) {
+      basketEl.innerHTML = basket.map(item => `
+        <div class="basket-item"><span>${item.sku} × ${item.qty || 1}</span><span>${fmtMoney((item.unit_minor || item.price_minor || 0) * (item.qty || 1))}</span></div>
+      `).join('') + `<div class="basket-item" style="font-weight:600"><span>Total</span><span>${fmtMoney(basket.reduce((s,i) => s + (i.unit_minor || i.price_minor || 0) * (i.qty || 1), 0))}</span></div>`;
+    } else {
+      basketEl.innerHTML = '<p style="font-size:0.85rem;color:var(--muted)">No reachable products under this policy.</p>';
+    }
+
+    // Diff vs active policy
+    if (ACTIVE_POLICY) {
+      const diffs = [];
+      const cmp = (key, label) => {
+        const a = ACTIVE_POLICY[key], b = policy[key];
+        if (JSON.stringify(a) !== JSON.stringify(b)) diffs.push({label, old: a, new: b});
+      };
+      cmp('max_spend_per_tx_minor', 'Per-tx cap');
+      cmp('max_spend_total_minor', 'Total cap');
+      cmp('max_transactions', 'Max transactions');
+      cmp('allowed_tags', 'Allowed tags');
+      cmp('tag_mode', 'Tag mode');
+      cmp('blocked_skus', 'Blocked SKUs');
+      cmp('expires_at', 'Expiry');
+
+      if (diffs.length) {
+        diffEl.innerHTML = diffs.map(d => {
+          const oldStr = typeof d.old === 'object' ? JSON.stringify(d.old) : String(d.old);
+          const newStr = typeof d.new === 'object' ? JSON.stringify(d.new) : String(d.new);
+          return `<div class="diff-item"><b>${d.label}:</b> <span class="diff-remove">${oldStr}</span> → <span class="diff-add">${newStr}</span></div>`;
+        }).join('');
+      } else {
+        diffEl.innerHTML = '<p style="font-size:0.85rem;color:var(--muted)">No changes from active policy.</p>';
+      }
+    }
+
+    document.getElementById('digestDisplay').textContent = `Compiler digest: ${data.policy_digest || '—'}`;
+  } catch (e) {
+    resEl.innerHTML = `<p class="error">Error: ${e.message}</p>`;
+  }
+}
+
+// Bind events
+document.querySelectorAll('input[type=range], input[type=date]').forEach(el => el.addEventListener('input', refresh));
+document.querySelectorAll('input[type=checkbox], input[type=radio]').forEach(el => el.addEventListener('change', refresh));
+
+refresh();
+</script>
+</body>
+</html>

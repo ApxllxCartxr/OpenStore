@@ -93,3 +93,11 @@ docs/Day *.md
 
 # Merchant signing key
 merchant_signing_key.pem
+
+# PoAI ES256 merchant key (gitignored per IMPLEMENTATION_SPEC §0.2)
+reference/merchant/keys/
+
+# Generated eval / redteam reports (baselines are committed manually per R3.5a)
+evals/reports/
+redteam/reports/*.json
+redteam/attacks/*_v*.yaml

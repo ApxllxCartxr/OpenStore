@@ -1,0 +1,86 @@
+# Sample 12-SKU gelato catalog for the Synthetic Buyer Swarm (GROWTH_AGENTS.md §2).
+# Prices are INR in paise (minor units): 50000 = ₹500.00.
+- sku: GEL-VEG-500
+  title: Vegan Vanilla Bean
+  description: Vegan vanilla bean gelato, coconut-milk, no dairy, no gluten, no nuts.
+  price_minor: 50000
+  tags: [dairy-free, gluten-free]
+  related_skus: [GEL-VEG-CHOC, GEL-BERRY, GEL-MANGO]
+  occasion_tags: [dessert, gifting]
+- sku: GEL-VEG-CHOC
+  title: Vegan Dark Chocolate
+  description: Rich oat-milk chocolate gelato, fully vegan.
+  price_minor: 52000
+  tags: [vegan, gluten-free]
+  related_skus: [GEL-VEG-500, GEL-COF-450]
+  occasion_tags: [dessert]
+- sku: GEL-DF-STR
+  title: Dairy-Free Strawberry
+  description: Strawberry sorbet, dairy-free and gluten-free.
+  price_minor: 48000
+  tags: [dairy-free, gluten-free]
+  related_skus: [GEL-BERRY, GEL-MANGO]
+  occasion_tags: [dessert, summer]
+- sku: GEL-GF-PIST
+  title: Pistachio
+  description: Sicilian pistachio gelato, contains nuts.
+  price_minor: 60000
+  tags: [gluten-free, nut]
+  related_skus: [GEL-HAZEL, GEL-CLA-500]
+  occasion_tags: [dessert, gifting]
+- sku: GEL-RUM-500
+  title: Rum Raisin
+  description: Vanilla gelato with rum-soaked raisins. Contains alcohol.
+  price_minor: 55000
+  tags: [alcohol, gluten-free]
+  related_skus: [GEL-CLA-500, GEL-CARAMEL]
+  occasion_tags: [adult, dessert]
+- sku: GEL-CLA-500
+  title: Classic Vanilla
+  description: Traditional custard vanilla gelato.
+  price_minor: 45000
+  tags: [gluten-free]
+  related_skus: [GEL-CARAMEL, GEL-MIN-300]
+  occasion_tags: [dessert]
+- sku: GEL-MIN-300
+  title: Mint Chocolate Chip
+  description: Mint gelato with chocolate flakes.
+  price_minor: 47000
+  tags: [gluten-free, nut-free]
+  related_skus: [GEL-CLA-500, GEL-COF-450]
+  occasion_tags: [dessert]
+- sku: GEL-CARAMEL
+  title: Salted Caramel
+  description: Caramel gelato with a hint of sea salt.
+  price_minor: 53000
+  tags: [gluten-free, nut-free]
+  related_skus: [GEL-CLA-500, GEL-RUM-500]
+  occasion_tags: [dessert, gifting]
+- sku: GEL-BERRY
+  title: Mixed Berry Sorbet
+  description: Vegan berry sorbet, no dairy, no gluten, no nuts.
+  price_minor: 51000
+  tags: [vegan, dairy-free, gluten-free]
+  related_skus: [GEL-VEG-500, GEL-DF-STR]
+  occasion_tags: [dessert, summer]
+- sku: GEL-COF-450
+  title: Espresso Crunch
+  description: Coffee gelato with chocolate crunch.
+  price_minor: 46000
+  tags: [gluten-free, nut-free]
+  related_skus: [GEL-VEG-CHOC, GEL-MIN-300]
+  occasion_tags: [dessert, after-meal]
+- sku: GEL-HAZEL
+  title: Hazelnut
+  description: Roasted hazelnut gelato, contains nuts.
+  price_minor: 58000
+  tags: [gluten-free, nut]
+  related_skus: [GEL-GF-PIST, GEL-CLA-500]
+  occasion_tags: [dessert, gifting]
+- sku: GEL-MANGO
+  title: Mango Sorbet
+  description: Vegan mango sorbet, no dairy, no gluten, no nuts.
+  price_minor: 49000
+  tags: [dairy-free, gluten-free]
+  related_skus: [GEL-BERRY, GEL-DF-STR]
+  occasion_tags: [dessert, summer]

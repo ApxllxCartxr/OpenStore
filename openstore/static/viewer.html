@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenStore Evidence Viewer</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 1rem; overflow: auto; border-radius: 8px; }
+  .verdict { font-size: 1.2rem; font-weight: 700; padding: 0.5rem 0.75rem; border-radius: 6px; display: inline-block; }
+  .PASS { background: #dcfce7; color: #166534; }
+  .FAIL { background: #fee2e2; color: #991b1b; }
+  .row { padding: 0.3rem 0; border-bottom: 1px solid #eee; }
+  .ok { color: #166534; } .bad { color: #991b1b; } .warn { color: #92400e; }
+  button { padding: 0.4rem 0.8rem; margin: 0.3rem 0.3rem 0.3rem 0; cursor: pointer; }
+  code { background: #f1f5f9; padding: 0 4px; border-radius: 4px; }
+  .plain { background: #fafafa; border-left: 4px solid #2563eb; padding: 0.75rem; margin: 1rem 0; }
+</style>
+</head>
+<body>
+<h1>OpenStore Evidence Viewer</h1>
+<p>Paste a PoAI <code>poai-0.1</code> bundle below. Verification runs entirely in your browser
+via <code>crypto.subtle</code> — no data leaves this page.</p>
+
+<textarea id="bundle" rows="10" style="width:100%" placeholder='{"poai_version":"0.1", ...}'></textarea>
+<br/>
+<label><input type="checkbox" id="tamper" /> Simulate tamper (flip one goods price)</label>
+<button id="verify">Verify</button>
+<button id="load">Load from ?bundle=</button>
+
+<div id="out"></div>
+
+<script>
+// Prefill when the server inlines a bundle (Evidence Viewer route).
+if (window.__BUNDLE__) {
+  document.getElementById("bundle").value = JSON.stringify(window.__BUNDLE__, null, 2);
+}
+
+// Minimal ES256 (P-256 + SHA-256) verification using WebCrypto.
+async function importEs256(jwk) {
+  return crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" },
+    true, ["verify"]);
+}
+function b64urlToBytes(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 ? "=".repeat(4 - (s.length % 4)) : "";
+  const bin = atob(s + pad); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function verifyJws(jws, jwk) {
+  const [h, p, sig] = jws.split(".");
+  const key = await importEs256(jwk);
+  const sigBytes = b64urlToBytes(sig);
+  const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key,
+    sigBytes, new TextEncoder().encode(`${h}.${p}`));
+  return { ok, payload: JSON.parse(new TextDecoder().decode(b64urlToBytes(p))) };
+}
+function sha256Hex(bytes) {
+  return crypto.subtle.digest("SHA-256", bytes).then(b => {
+    const a = new Uint8Array(b); let s = "";
+    for (let i = 0; i < a.length; i++) s += a[i].toString(16).padStart(2, "0");
+    return "sha256:" + s;
+  });
+}
+function canonical(o) {
+  if (o === null || typeof o !== "object") return JSON.stringify(o);
+  if (Array.isArray(o)) return "[" + o.map(canonical).join(",") + "]";
+  const ks = Object.keys(o).sort();
+  return "{" + ks.map(k => JSON.stringify(k) + ":" + canonical(o[k])).join(",") + "}";
+}
+async function sha256Bytes(bytes) {
+  const h = await crypto.subtle.digest("SHA-256", bytes);
+  const a = new Uint8Array(h); let s = "";
+  for (let i = 0; i < a.length; i++) s += a[i].toString(16).padStart(2, "0");
+  return "sha256:" + s;
+}
+function concatBytes(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0); out.set(b, a.length); return out;
+}
+async function recomputeChain(sections) {
+  let prev = null;
+  for (const name of ["transaction","human_intent","authority","goods","agent","adjudication","notification","aal"]) {
+    const cBytes = new TextEncoder().encode(canonical(sections[name] ?? null));
+    const data = prev ? concatBytes(prev, cBytes) : cBytes;
+    prev = await crypto.subtle.digest("SHA-256", data);
+  }
+  const a = new Uint8Array(prev); let s = "";
+  for (let i = 0; i < a.length; i++) s += a[i].toString(16).padStart(2, "0");
+  return "sha256:" + s;
+}
+
+async function run() {
+  const out = document.getElementById("out");
+  let bundle;
+  try { bundle = JSON.parse(document.getElementById("bundle").value); }
+  catch (e) { out.innerHTML = `<div class="verdict FAIL">Malformed JSON</div>`; return; }
+
+  if (document.getElementById("tamper").checked && bundle.goods?.items?.[0]) {
+    bundle.goods.items[0].unit_minor = (bundle.goods.items[0].unit_minor || 0) + 1;
+  }
+
+  let html = "";
+  const checks = [];
+
+  // 1. schema
+  const okSchema = bundle.poai_version === "0.1" && bundle.chain?.links?.length === 8;
+  checks.push(["schema", okSchema]);
+
+  // PoAI merchant JWK is embedded in the bundle's authority.enrolment for the
+  // human-asserted (catalog) leg; the merchant_signature root-of-trust JWK must
+  // be supplied by the merchant's /.well-known/poai-jwks.json. For this viewer we
+  // accept an optional ?jwk= param; otherwise merchant_signature is unverified.
+  let merchantOk = null;
+  const params = new URLSearchParams(location.search);
+  const jwkRaw = params.get("jwk");
+  if (jwkRaw) {
+    try {
+      const jwk = JSON.parse(jwkRaw);
+      const r = await verifyJws(bundle.chain.merchant_signature, jwk);
+      merchantOk = r.ok && r.payload.root === bundle.chain.root;
+    } catch { merchantOk = false; }
+  }
+  checks.push(["merchant_signature", merchantOk === null ? "unverified" : merchantOk]);
+
+  // 2. chain integrity (browser-side)
+  const root = await recomputeChain(bundle);
+  const chainOk = root === bundle.chain.root;
+  checks.push(["chain_integrity", chainOk]);
+
+  // 3. amount consistency
+  const amt = bundle.goods.items.reduce((a, i) => a + (i.unit_minor * i.qty), 0);
+  checks.push(["amount_consistency", amt === bundle.transaction.amount_minor]);
+
+  // 4. aal level present
+  checks.push(["aal", typeof bundle.aal?.level === "number"]);
+
+  const pass = checks.every(([, v]) => v === true || v === "unverified");
+  html += `<div class="verdict ${pass ? "PASS" : "FAIL"}">${pass ? "VERDICT: TRUSTWORTHY" : "VERDICT: DO NOT TRUST"}</div>`;
+  html += `<div class="plain"><strong>Plain-language:</strong> ${plain(bundle, checks)}</div>`;
+  html += `<pre>${checks.map(([n, v]) =>
+    `${v === true ? "✓" : v === "unverified" ? "○" : "✗"} ${n}`).join("\n")}</pre>`;
+  html += `<details><summary>Raw bundle</summary><pre>${JSON.stringify(bundle, null, 2)}</pre></details>`;
+  out.innerHTML = html;
+}
+function plain(bundle, checks) {
+  const aal = bundle.aal?.level;
+  const bad = checks.filter(([, v]) => v === false).map(([n]) => n);
+  if (bad.length) return "This receipt failed: " + bad.join(", ") + ". Do not rely on it.";
+  return `A human authorised this ${bundle.transaction?.currency} payment of ` +
+    `${bundle.transaction?.amount_minor} (AAL tier ${aal}). ` +
+    (checks.find(([n]) => n === "merchant_signature")?.[1] === "unverified"
+      ? "The merchant's signature was not checked here — supply the merchant JWK to confirm."
+      : "The merchant's signature checks out.");
+}
+document.getElementById("verify").onclick = run;
+document.getElementById("load").onclick = async () => {
+  const p = new URLSearchParams(location.search).get("bundle");
+  if (p) document.getElementById("bundle").value = await (await fetch(p)).text();
+};
+</script>
+</body>
+</html>

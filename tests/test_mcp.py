@@ -5,8 +5,8 @@ import time
 from fastapi.testclient import TestClient
 import jwt as pyjwt
 
-from merchant.app import create_app
-from merchant.oauth.routes import JWT_SECRET
+from reference.merchant.app import create_app
+from reference.merchant.oauth.routes import JWT_SECRET
 
 
 def _get_token(scopes: list[str], client_id: str = "test-mcp-client") -> str:

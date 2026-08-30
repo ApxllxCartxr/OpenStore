@@ -1,0 +1,9 @@
+{
+  "kty": "EC",
+  "crv": "P-256",
+  "x": "XsSgDujc4yO_2pUyEyvIs_seu1NuQoSS0XUr9jRl0FU",
+  "y": "AHWt8LPnraU8QXP5BBArgsACCfKsGFBrHP98wONjzDs",
+  "kid": "poai-es256-golden",
+  "alg": "ES256",
+  "use": "sig"
+}

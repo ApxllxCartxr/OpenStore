@@ -9,7 +9,10 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "a2a-sdk>=1.1.2",
+    "alembic>=1.15.0",
     "argon2-cffi>=25.1.0",
+    "base58>=2.1.1",
+    "cbor2>=6.1.4",
     "cryptography>=50.0.1",
     "discord-py>=2.7.1",
     "fastapi>=0.141.1",
@@ -32,6 +35,9 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[project.scripts]
+openstore-verify = "openstore.verify.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
