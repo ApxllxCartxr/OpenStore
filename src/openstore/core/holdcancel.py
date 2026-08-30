@@ -119,7 +119,6 @@ def initiate_hold(
     INV-5: Ledger RESERVE entry created.
     INV-8: checkout.expires_at enforced.
     """
-    from openstore.core.idempotency import generate_idempotency_key
     from openstore.models import Checkout
 
     checkout = session.exec(
@@ -151,7 +150,6 @@ def initiate_hold(
                 raise ValueError(f"Spend cap check failed: {reason}")
 
     # Create RESERVE ledger entry (INV-5)
-    generate_idempotency_key("reserve", trace_id, client_id, checkout_id)
     create_reserve_entry(
         session=session,
         trace_id=trace_id,
@@ -187,7 +185,6 @@ def release_hold(
 
     INV-5: Ledger CAPTURE entry created.
     """
-    from openstore.core.idempotency import generate_idempotency_key
     from openstore.models import Checkout
 
     checkout = session.exec(
@@ -201,7 +198,6 @@ def release_hold(
         raise ValueError(f"Checkout not in HELD state: {checkout.state}")
 
     # Create CAPTURE ledger entry (INV-5)
-    generate_idempotency_key("capture", trace_id, client_id, checkout_id)
     create_capture_entry(
         session=session,
         trace_id=trace_id,
@@ -234,7 +230,6 @@ def cancel_hold(
     INV-5: Ledger RELEASE entry created (reverses RESERVE).
     Returns budget to ledger.
     """
-    from openstore.core.idempotency import generate_idempotency_key
     from openstore.models import Checkout
 
     checkout = session.exec(
@@ -248,7 +243,6 @@ def cancel_hold(
         raise ValueError(f"Checkout not in HELD state (cannot cancel): {checkout.state}")
 
     # Create RELEASE ledger entry (INV-5)
-    generate_idempotency_key("release", trace_id, client_id, checkout_id)
     create_release_entry(
         session=session,
         trace_id=trace_id,
@@ -280,7 +274,6 @@ def refund_checkout(
 
     INV-5: Ledger REFUND entry created (reverses CAPTURE).
     """
-    from openstore.core.idempotency import generate_idempotency_key
     from openstore.models import Checkout
 
     checkout = session.exec(
@@ -294,7 +287,6 @@ def refund_checkout(
         raise ValueError(f"Checkout not refundable: {checkout.state}")
 
     # Create REFUND ledger entry (INV-5)
-    generate_idempotency_key("refund", trace_id, client_id, checkout_id)
     create_refund_entry(
         session=session,
         trace_id=trace_id,

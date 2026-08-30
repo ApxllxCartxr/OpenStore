@@ -77,7 +77,7 @@ def create_checkout(
         select(IntentPolicy).where(
             IntentPolicy.id == policy_id,
             IntentPolicy.merchant_id == merchant_id,
-            IntentPolicy.is_active is True,
+            IntentPolicy.is_active.is_(True),  # type: ignore[attr-defined]
         )
     ).first()
 
@@ -203,20 +203,23 @@ def create_checkout(
         agent_plan=agent_plan,
     )
 
-    # Initiate hold (creates RESERVE ledger entry)
-    initiate_hold(
-        session=session,
-        config=config,
-        checkout_id=checkout.id,
-        trace_id=trace_id,
-        client_id=client_id,
-        merchant_id=merchant_id,
-        amount_minor=result.effective_amount_minor,
-        currency=policy.currency,
-        aal_level=AALLevel(result.aal_level),
-        policy_id=policy_id,
-        policy_hash=policy.policy_hash,
-    )
+    # Initiate hold (creates RESERVE ledger entry) only on first creation.
+    # On an idempotent re-invocation the checkout already exists in a lifecycle
+    # state (e.g. HELD), so re-running initiate_hold would wrongly raise.
+    if created:
+        initiate_hold(
+            session=session,
+            config=config,
+            checkout_id=checkout.id,
+            trace_id=trace_id,
+            client_id=client_id,
+            merchant_id=merchant_id,
+            amount_minor=result.effective_amount_minor,
+            currency=policy.currency,
+            aal_level=AALLevel(result.aal_level),
+            policy_id=policy_id,
+            policy_hash=policy.policy_hash,
+        )
 
     # Audit success
     audit_log(session, trace_id, client_id, "checkout_created", "checkout",
@@ -276,9 +279,11 @@ def confirm_checkout(
         psp_payment_link_id=psp_payment_link_id,
     )
 
-    # Generate cancel token for hold/cancel link
-    from openstore.core.idempotency import generate_idempotency_key
-    cancel_token = generate_idempotency_key("cancel", trace_id, client_id, checkout_id)
+    # Generate cancel token for hold/cancel link.
+    # Must be a high-entropy unguessable bearer secret (not derived from
+    # caller-known IDs) so only the holder can cancel the hold.
+    import secrets
+    cancel_token = secrets.token_urlsafe(32)
     checkout.cancel_token = cancel_token
     session.add(checkout)
     session.flush()

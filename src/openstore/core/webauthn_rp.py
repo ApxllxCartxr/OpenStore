@@ -232,7 +232,7 @@ def complete_assertion(
         select(WebAuthnCredential).where(
             WebAuthnCredential.credential_id == credential_id,
             WebAuthnCredential.user_handle == user_handle,
-            WebAuthnCredential.is_active is True,
+            WebAuthnCredential.is_active.is_(True),  # type: ignore[attr-defined]
         )
     ).first()
 
@@ -275,7 +275,7 @@ def get_user_credentials(session: Session, user_handle: str) -> list[WebAuthnCre
     return list(session.exec(
         select(WebAuthnCredential).where(
             WebAuthnCredential.user_handle == user_handle,
-            WebAuthnCredential.is_active is True,
+            WebAuthnCredential.is_active.is_(True),  # type: ignore[attr-defined]
         )
     ).all())
 
