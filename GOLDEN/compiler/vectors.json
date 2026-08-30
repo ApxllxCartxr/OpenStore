@@ -1989,7 +1989,7 @@
       "reason_code": "policy.aggregate_cap_exceeded",
       "transcript": []
     },
-    "name": "aggregate_cap_exceeded",
+    "name": "policy.aggregate_cap_exceeded",
     "note": "Aggregate cap is enforced at policy signing time (PRD \u00a73.2a, S3.5), not inside the compiler check ladder. Behavioral gate lives in policy_signing.py.",
     "policy": {
       "allowed_tags": [],

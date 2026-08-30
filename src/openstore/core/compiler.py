@@ -188,17 +188,22 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
     # 9. spend_per_tx
     cart_total = sum(item.get("qty", 0) * item.get("unit_minor", 0) for item in ctx.cart_items)
 
-    # Apply campaign discounts if present
-    effective_total = cart_total
+    # Apply campaign discounts if present. Discount is computed on the per-cart subtotal
+    # of items sharing a campaign (not per-item), so the cumulative floor of integer
+    # division cannot leak 1 paise per line into a multi-item cart.
+    discount_total = 0
+    campaign_subtotals: dict[str, int] = {}
     for item in ctx.cart_items:
         campaign_id = item.get("campaign_id")
         if campaign_id and campaign_id in ctx.campaign_lookup:
-            campaign = ctx.campaign_lookup[campaign_id]
-            discount_bps = campaign.get("offer_terms", {}).get("discount_bps", 0)
-            if discount_bps > 0:
-                item_total = item.get("qty", 0) * item.get("unit_minor", 0)
-                discount = (item_total * discount_bps) // 10000
-                effective_total -= discount
+            item_total = item.get("qty", 0) * item.get("unit_minor", 0)
+            campaign_subtotals[campaign_id] = campaign_subtotals.get(campaign_id, 0) + item_total
+    for campaign_id, subtotal in campaign_subtotals.items():
+        campaign = ctx.campaign_lookup[campaign_id]
+        discount_bps = campaign.get("offer_terms", {}).get("discount_bps", 0)
+        if discount_bps > 0:
+            discount_total += (subtotal * discount_bps) // 10000
+    effective_total = cart_total - discount_total
 
     if effective_total > ctx.policy.max_spend_per_tx_minor:
         add_check("spend_per_tx", False, "policy.spend_per_tx_exceeded")

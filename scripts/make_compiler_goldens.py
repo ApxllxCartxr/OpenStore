@@ -268,7 +268,7 @@ def main() -> None:
     # policy.aggregate_cap_exceeded (signing-time, authored expected)
     p = _make_policy()
     vectors.append(_vector(
-        "aggregate_cap_exceeded", p, [chai], {},
+        "policy.aggregate_cap_exceeded", p, [chai], {},
         expected={"allowed": False, "reason_code": "policy.aggregate_cap_exceeded", "transcript": []},
         note="Aggregate cap is enforced at policy signing time (PRD §3.2a, S3.5), not "
              "inside the compiler check ladder. Behavioral gate lives in policy_signing.py.",
@@ -342,7 +342,7 @@ def main() -> None:
         "policy.spend_per_tx_exceeded", "policy.spend_envelope_exceeded",
         "policy.spend_cumulative_exceeded", "policy.campaign_inactive",
         "policy.campaign_outside_window", "two_policy_cumulative_isolation",
-        "aggregate_cap_exceeded",
+        "policy.aggregate_cap_exceeded",
     ]
     names = {v["name"] for v in vectors}
     missing = [r for r in required if r not in names]

@@ -21,11 +21,7 @@ GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "compiler" / "vecto
 
 # Reason codes the root-path compiler cannot produce this stage; their vectors are
 # authored (expected pinned in the fixture) and dispatched to a signing-layer gate.
-AUTHORED_ONLY = {"policy.spend_envelope_exceeded", "aggregate_cap_exceeded"}
-
-AUTHORED_CODES = {
-    "policy.aggregate_cap_exceeded",
-}
+AUTHORED_ONLY = {"policy.spend_envelope_exceeded", "policy.aggregate_cap_exceeded"}
 
 
 def _load() -> list[dict]:
@@ -86,7 +82,7 @@ def test_vectors_present_and_sufficient():
         "policy.spend_per_tx_exceeded", "policy.spend_envelope_exceeded",
         "policy.spend_cumulative_exceeded", "policy.campaign_inactive",
         "policy.campaign_outside_window", "two_policy_cumulative_isolation",
-        "aggregate_cap_exceeded",
+        "policy.aggregate_cap_exceeded",
     ]
     names = {v["name"] for v in vectors}
     for r in required:
@@ -174,8 +170,7 @@ def test_two_policy_cumulative_isolation_spent_zero():
 
 
 def _aggregate_entry_policy():
-    entry = next(v for v in _load() if v["name"] == "aggregate_cap_exceeded")
-    return entry
+    return next(v for v in _load() if v["name"] == "policy.aggregate_cap_exceeded")
 
 
 def test_aggregate_cap_vector_shape_and_gate():

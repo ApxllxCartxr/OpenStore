@@ -148,10 +148,7 @@ def _assert_for(challenge_b64: str, sign_count: int = 4):
 
 
 def _begin_assertion(client: TestClient) -> str:
-    res = client.post("/internal/webauthn/assertion/begin", json={"mode": "policy"}, headers=HEADERS)
-    assert res.status_code == 200
-    return res.json()["challenge"]
-    res = client.post("/internal/webauthn/assertion/begin", json={"mode": "policy"}, headers=HEADERS)
+    res = client.post("/internal/webauthn/assertion/begin", json={}, headers=HEADERS)
     assert res.status_code == 200
     return res.json()["challenge"]
 
@@ -242,7 +239,7 @@ def test_signing_rejects_legacy_policy_version(client: TestClient, session_facto
         headers=HEADERS,
     )
     assert res.status_code == 422
-    assert res.json()["detail"]["reason_code"] == "policy_version_unsupported"
+    assert res.json()["detail"]["reason_code"] == "policy.aggregate_cap_exceeded"
 
 
 def test_assertion_without_policy_returns_sign_count(client: TestClient, session_factory):

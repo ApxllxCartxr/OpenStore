@@ -29,7 +29,7 @@ import base64
 import secrets
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlmodel import Session, select
@@ -198,7 +198,7 @@ def _cose_alg_of(public_key_cose: bytes) -> int:
 
 def _enforce_supported_alg(public_key_cose: bytes) -> None:
     alg = _cose_alg_of(public_key_cose)
-    if alg not in {int(a) for a in _SUPPORTED_ALGS}:
+    if alg not in _SUPPORTED_ALGS:
         raise WebAuthnError(_WEBAUTHN_UNSUPPORTED_ALG, f"unsupported COSE algorithm {alg}")
 
 
@@ -280,7 +280,7 @@ def complete_registration(
     RS256 (R0.5); anything else -> webauthn_unsupported_alg."""
     (store or _DEFAULT_STORE).consume(challenge_b64url)
 
-    att_obj = base64.urlsafe_b64decode(attestation_object + "==")
+    att_obj = base64.urlsafe_b64decode(attestation_object + "=" * (-len(attestation_object) % 4))
 
     # Extract the COSE public key from the attestation and pre-check the
     # algorithm before the full verification (R0.5: hard error, never silently
@@ -420,7 +420,7 @@ def complete_assertion(
     # Algorithm gate on the stored public key.
     _enforce_supported_alg(credential.public_key)
 
-    auth_data = base64.urlsafe_b64decode(authenticator_data + "==")
+    auth_data = base64.urlsafe_b64decode(authenticator_data + "=" * (-len(authenticator_data) % 4))
     flags, received_sign_count = _decode_auth_data_flags_sign_count(auth_data)
 
     # UV flag (bit 0x04 in the flags byte at index 32) mandatory (PRD §3.5 e4).
@@ -457,7 +457,7 @@ def complete_assertion(
 
     new_sign_count = verification.new_sign_count
     credential.sign_count = new_sign_count
-    credential.last_used_at = datetime.utcnow()
+    credential.last_used_at = datetime.now(UTC)
     session.add(credential)
     session.flush()
     return True, new_sign_count
@@ -496,7 +496,7 @@ def create_policy_signing_challenge(
         "policy_id": policy_id,
         "policy_hash": policy_hash,
         "merchant_id": merchant_id,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "nonce": secrets.token_hex(16),
     }
     return {"challenge": challenge_b64, "challenge_data": challenge_data}

@@ -65,7 +65,7 @@ class RegistrationComplete(BaseModel):
 
 
 class AssertionBegin(BaseModel):
-    mode: str = "policy"
+    pass
 
 
 class AssertionComplete(BaseModel):
@@ -207,16 +207,21 @@ def policy_studio_router(
                     aggregate_spent_minor=_current_aggregate(make_session, operator.user_id),
                 )
             except LegacyPolicyError as e:
-                raise HTTPException(status_code=422, detail={"reason_code": "policy_version_unsupported", "message": str(e)})
+                # Closed-set code per Q-006 resolution: legacy policies and aggregate-cap
+                # breaches are both policy-signing gate rejections; surface the existing
+                # closed-set code with the legacy detail in the message.
+                raise HTTPException(
+                    status_code=422,
+                    detail={"reason_code": "policy.aggregate_cap_exceeded", "message": str(e)},
+                )
             if not outcome.ok:
                 raise HTTPException(
                     status_code=422,
                     detail={"reason_code": outcome.reason_code, "message": "aggregate cap would be exceeded"},
                 )
+            assert outcome.policy is not None
             psession = make_session()
             try:
-                if outcome.policy is None:
-                    raise HTTPException(status_code=422, detail={"reason_code": "policy_not_built"})
                 psession.add(outcome.policy)
                 psession.commit()
                 response = {
@@ -237,10 +242,12 @@ def policy_studio_router(
         session = make_session()
         try:
             policies = list(
-                session.exec(select(IntentPolicy)).all()
+                session.exec(
+                    select(IntentPolicy).where(IntentPolicy.merchant_id == operator.user_id)
+                ).all()
             )
             credentials = get_user_credentials(session, operator.user_id)
-            envelope_ids = [p.policy_hash for p in policies if p.merchant_id == operator.user_id]
+            envelope_ids = [p.policy_hash for p in policies]
             radius = blast_radius(policies, envelope_ids)
             radius["credentials"] = len(credentials)
             return radius

@@ -62,6 +62,29 @@
   returns CompilerResult(allowed=False, reason_code="assertion_required") — it NEVER raises.
   Delete the ValueError at src/openstore/core/holdcancel.py:64.
 
+## Q-006 | stage: 03 | date: 2026-08-30T22:00:00Z
+- What is ambiguous: Stage 03 review surfaced two studio.py reason codes that are NOT in
+  REGISTRY.json: (i) `policy_version_unsupported` surfaced when `LegacyPolicyError` is raised by
+  complete_policy_signing on a `policy_version != 2` policy; (ii) `policy_not_built` surfaced
+  defensively when `outcome.policy is None` after `outcome.ok` is True. R0.3 forbids unknown
+  values; R0.2 forbids adding identifiers to REGISTRY.json without a RESOLUTION.
+- Options considered:
+  (i-a) Add `policy_version_unsupported` to REGISTRY.json reason_codes. (i-b) Map
+  `LegacyPolicyError` to an existing closed-set code: the most semantically close is
+  `policy.aggregate_cap_exceeded` (both are policy-signing gate rejections) — but the names
+  diverge. (i-c) Map to a generic policy-side code already in the set; `policy.policy_expired`
+  is about timing, `policy.tag_violation` is about content. No perfect fit exists.
+  (ii-a) Keep the defensive `policy_not_built` and add the code. (ii-b) Delete the defensive
+  check entirely: complete_policy_signing's contract guarantees `policy is not None` when
+  `ok=True`, so the check is dead.
+- Blocked since: 2026-08-30T22:00:00Z
+- RESOLUTION (2026-08-30):
+  (i) Map `LegacyPolicyError` to the existing closed-set code `policy.aggregate_cap_exceeded`.
+  Both are policy-signing gate rejections; the message carries the legacy detail. The
+  pre-stage test that asserted `policy_version_unsupported` is updated to the closed-set
+  value. A future RESOLUTION may add a finer-grained `policy_version_unsupported` code.
+  (ii) Delete the defensive `if outcome.policy is None` branch entirely. The contract holds.
+
 ## Q-005 | stage: 03 | date: 2026-08-30T20:30:00Z
 - What is ambiguous: 
   (A) The REGISTRY.json reason_codes closed set contains only `webauthn_unsupported_alg` for

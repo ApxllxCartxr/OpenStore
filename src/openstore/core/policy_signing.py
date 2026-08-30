@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from openstore.models import IntentPolicy
@@ -196,7 +196,7 @@ def complete_policy_signing(
         required_skus=list(fields.get("required_skus", [])),
         webauthn_credential_id=credential_id,
         webauthn_sign_count=webauthn_sign_count,
-        signed_at=datetime.fromisoformat(signed_at.replace("Z", "+00:00")) if signed_at else datetime.utcnow(),
+        signed_at=datetime.fromisoformat(signed_at.replace("Z", "+00:00")) if signed_at else datetime.now(UTC),
         is_active=True,
     )
 
