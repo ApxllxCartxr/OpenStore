@@ -41,6 +41,5 @@ Thumbs.db
 *.log
 
 # Generated configs (examples only)
-gelateria.yaml
 catalog.yaml
 .env.example

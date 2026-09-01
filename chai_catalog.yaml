@@ -1,0 +1,39 @@
+# OpenStore catalog — Chai House SKUs in integer paise (minor units)
+# Tags are free-form strings used by IntentPolicy allowed_tags
+
+items:
+  - sku: "chai_masala"
+    name: "Masala Chai"
+    unit_minor: 8000
+    tags: ["chai", "spiced"]
+    stock: 200
+
+  - sku: "chai_adrak"
+    name: "Adrak (Ginger) Chai"
+    unit_minor: 9000
+    tags: ["chai", "spiced"]
+    stock: 150
+
+  - sku: "chai_green"
+    name: "Green Cardamom Chai"
+    unit_minor: 10000
+    tags: ["chai", "premium"]
+    stock: 100
+
+  - sku: "chai_kulhad"
+    name: "Kulhad Chai (clay cup)"
+    unit_minor: 12000
+    tags: ["chai", "traditional"]
+    stock: 80
+
+  - sku: "biscuit_parle"
+    name: "Parle-G Biscuits"
+    unit_minor: 2000
+    tags: ["snack", "biscuit"]
+    stock: 300
+
+  - sku: "samosa_aloo"
+    name: "Aloo Samosa"
+    unit_minor: 15000
+    tags: ["snack", "fried"]
+    stock: 100
