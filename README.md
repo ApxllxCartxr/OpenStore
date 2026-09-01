@@ -8,7 +8,7 @@ pip install openstore[razorpay]
 
 The idea: a merchant drops OpenStore into their stack, points it at a product catalog YAML, and their store becomes something an AI agent can browse, negotiate with, and buy from — with real money, real authorization, and a cryptographic receipt at the end.
 
-This is a solo project by Joseph Fernando, built almost entirely by Claude (Anthropic's AI) across 10 development stages over about 9 days. I'll be honest about what exists and what doesn't below.
+This is a solo project by Joseph Fernando, built with the help of [OpenCode](https://github.com/anthropics/claude-code) across 10 development stages over about 9 days. This README was written by Claude. I'll be honest about what exists and what doesn't below.
 
 ## What's actually here
 
@@ -179,9 +179,9 @@ Being straight about it:
 
 ## The approach
 
-This was built by Claude in 10 stages over ~9 days, following a very prescriptive PRD (Part 0 of the PRD is literally "rules for the implementer"). Each stage had a spec, got built, got tested, got reviewed, got fixed, and moved on. The PRD enforced some strong constraints — closed-set enums, no invented identifiers, fail-loud everywhere, every money value in integer paise, every timestamp in UTC.
+Joseph wrote the PRD and the stage specs, then built it with OpenCode (Claude Code) over 10 stages in ~9 days. Each stage had a spec, got built, got tested, got reviewed, got fixed, and moved on. The PRD enforced some strong constraints — closed-set enums, no invented identifiers, fail-loud everywhere, every money value in integer paise, every timestamp in UTC.
 
-The result is a codebase where the money path is careful and the verification is real, but the "agent" part — the thing that makes this interesting to a user — is more promise than delivery. The infrastructure is overbuilt relative to the agent layer, which is about right for a system where getting the money wrong is worse than getting the UX wrong.
+The result is a codebase where the money path is careful and the verification is real, but the "agent" part — the thing that makes this interesting to a user — is more promise than delivery. The infrastructure is probably overbuilt relative to the agent layer, which is about right for a system where getting the money wrong is worse than getting the UX wrong.
 
 ## License
 
