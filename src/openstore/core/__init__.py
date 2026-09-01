@@ -72,10 +72,15 @@ from .oauth import (
 )
 from .poai import (
     SECTION_ORDER,
+    build_aal_section,
     build_hash_chain,
-    canonical_json,
+    build_time_anchor,
+    canonical_json_bytes,
+    compute_aal_level_from_bundle,
     create_poai_bundle,
+    evaluate_aal_predicates,
     hash_section,
+    sign_merchant_jws_compact,
     verify_poai_bundle,
 )
 from .webauthn_rp import (
@@ -162,12 +167,17 @@ __all__ = [
     "revoke_token",
     "get_jwks",
     # poai
-    "canonical_json",
+    "canonical_json_bytes",
     "hash_section",
     "build_hash_chain",
     "create_poai_bundle",
     "verify_poai_bundle",
     "SECTION_ORDER",
+    "build_aal_section",
+    "build_time_anchor",
+    "compute_aal_level_from_bundle",
+    "evaluate_aal_predicates",
+    "sign_merchant_jws_compact",
     # webauthn_rp
     "WebAuthnError",
     "begin_registration",
