@@ -15,18 +15,20 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from openstore.config import Settings
 from openstore.core.holdcancel import AAL_HOLD_SECONDS
 
-POAI_KEYS: dict[str, Any] = {}
+# DECISIONS §11.1.10: per-merchant keypairs, kid = "{merchant_id}-key-{n}".
+# Keys are cached keyed by merchant_id so each install serves only its own keys.
+POAI_KEYS: dict[str, dict[str, Any]] = {}
 
 
-def get_catalog_signing_key() -> bytes | None:
-    """Return the POAI private key for signing catalog attestations."""
-    return _load_or_generate_poai_keys().get("private_key")
+def get_catalog_signing_key(merchant_id: str) -> bytes | None:
+    """Return the merchant's POAI private key for signing catalog attestations."""
+    return _load_or_generate_poai_keys(merchant_id).get("private_key")
 
 
-def _load_or_generate_poai_keys() -> dict[str, Any]:
+def _load_or_generate_poai_keys(merchant_id: str) -> dict[str, Any]:
     global POAI_KEYS
-    if POAI_KEYS:
-        return POAI_KEYS
+    if merchant_id in POAI_KEYS:
+        return POAI_KEYS[merchant_id]
     from cryptography.hazmat.primitives.asymmetric import ec
     key = ec.generate_private_key(ec.SECP256R1())
     priv_bytes = key.private_bytes(
@@ -37,8 +39,7 @@ def _load_or_generate_poai_keys() -> dict[str, Any]:
     pub_numbers = key.public_key().public_numbers()
     x_b64 = base64.urlsafe_b64encode(pub_numbers.x.to_bytes(32, "big")).decode().rstrip("=")
     y_b64 = base64.urlsafe_b64encode(pub_numbers.y.to_bytes(32, "big")).decode().rstrip("=")
-    kid = pub_numbers.x.to_bytes(32, "big").hex()[:16]
-    POAI_KEYS = {
+    POAI_KEYS[merchant_id] = {
         "private_key": priv_bytes,
         "public_key": key.public_key(),
         "jwk": {
@@ -46,11 +47,11 @@ def _load_or_generate_poai_keys() -> dict[str, Any]:
             "crv": "P-256",
             "x": x_b64,
             "y": y_b64,
-            "kid": f"openstore-key-{kid}",
+            "kid": f"{merchant_id}-key-1",
             "alg": "ES256",
         },
     }
-    return POAI_KEYS
+    return POAI_KEYS[merchant_id]
 
 
 def build_agent_commerce_manifest(config: Settings, origin: str) -> dict[str, Any]:
@@ -126,7 +127,7 @@ def _merchant_id(config: Settings) -> str:
 
 
 def get_poai_jwks(config: Settings) -> dict[str, Any]:
-    keys_data = _load_or_generate_poai_keys()
+    keys_data = _load_or_generate_poai_keys(_merchant_id(config))
     return {"keys": [keys_data["jwk"]]}
 
 
@@ -175,7 +176,7 @@ def get_signed_campaign_feed(config: Settings, origin: str) -> dict[str, Any]:
     payload_bytes = json.dumps({"campaigns": campaigns_data}, sort_keys=True, separators=(",", ":")).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode().rstrip("=")
 
-    keys_data = _load_or_generate_poai_keys()
+    keys_data = _load_or_generate_poai_keys(_merchant_id(config))
     priv_bytes = keys_data["private_key"]
     key = serialization.load_der_private_key(priv_bytes, password=None)
     if isinstance(key, ec.EllipticCurvePrivateKey):
