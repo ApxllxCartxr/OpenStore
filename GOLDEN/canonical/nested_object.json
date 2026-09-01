@@ -1,0 +1,8 @@
+{
+  "as_text": "{\"outer\":{\"a\":2,\"z\":1},\"x\":0}",
+  "canonical_b64u": "eyJvdXRlciI6eyJhIjoyLCJ6IjoxfSwieCI6MH0",
+  "canonical_hex": "7b226f75746572223a7b2261223a322c227a223a317d2c2278223a307d",
+  "input_repr": "{'outer': {'z': 1, 'a': 2}, 'x': 0}",
+  "name": "nested_object",
+  "note": "nested keys also sorted"
+}

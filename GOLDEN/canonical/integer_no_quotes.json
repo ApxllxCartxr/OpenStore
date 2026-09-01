@@ -1,0 +1,8 @@
+{
+  "as_text": "{\"amount\":21000,\"qty\":1}",
+  "canonical_b64u": "eyJhbW91bnQiOjIxMDAwLCJxdHkiOjF9",
+  "canonical_hex": "7b22616d6f756e74223a32313030302c22717479223a317d",
+  "input_repr": "{'amount': 21000, 'qty': 1}",
+  "name": "integer_no_quotes",
+  "note": "integers are unquoted (not string '21000')"
+}

@@ -1,0 +1,8 @@
+{
+  "as_text": "{\"items\":[]}",
+  "canonical_b64u": "eyJpdGVtcyI6W119",
+  "canonical_hex": "7b226974656d73223a5b5d7d",
+  "input_repr": "{'items': []}",
+  "name": "empty_list",
+  "note": "empty containers preserved as []"
+}

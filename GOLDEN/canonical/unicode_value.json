@@ -1,0 +1,8 @@
+{
+  "as_text": "{\"name\":\"\\u0930\\u093e\\u091c\",\"qty\":5}",
+  "canonical_b64u": "eyJuYW1lIjoiXHUwOTMwXHUwOTNlXHUwOTFjIiwicXR5Ijo1fQ",
+  "canonical_hex": "7b226e616d65223a225c75303933305c75303933655c7530393163222c22717479223a357d",
+  "input_repr": "{'name': '\u0930\u093e\u091c', 'qty': 5}",
+  "name": "unicode_value",
+  "note": "hindi characters, integers unquoted"
+}

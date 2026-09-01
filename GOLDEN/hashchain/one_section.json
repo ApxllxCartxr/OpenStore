@@ -1,0 +1,32 @@
+{
+  "description": "only transaction section populated",
+  "links": [
+    "sha256:d3f34db14e7d18dda37f6a98fb3332836bbb070965e4101d67081c2f9b8ca099",
+    "sha256:993896157edc4474d7823e35d99c7981689462bebd0a960b3816e6e1c804cc8c",
+    "sha256:95d43f6bdcb88f0371e2cfc0cec1ca6b1d7c7432e9e7f384a284ae198e6ecb43",
+    "sha256:302567c6ede4c086d1c8630566dacbca04f07d2101aaed5779b69016666e2251",
+    "sha256:74cec211b008882cec303b25c3851c1cefb3d5a9d2d29eab273c1056e2e4c190",
+    "sha256:5cdf451a9289f9ed5ea43ba040470d2d36e98c52f45a5f9b4d2c97dc4b4b0611",
+    "sha256:a57717f7586307883fe5e6c983266d794df4d05fa1ae2b160db86306b31094f3",
+    "sha256:cda1c95530ca11afaa5e52d5616850be7de9bcb17e07cf9cb8cc31d36667a2ca",
+    "sha256:1b63b1d782149b82dfbd75b545a3938299395b5b4cc639cf49d6dbc925288658"
+  ],
+  "root": "1b63b1d782149b82dfbd75b545a3938299395b5b4cc639cf49d6dbc925288658",
+  "sections": {
+    "aal": null,
+    "adjudication": null,
+    "agent": null,
+    "authority": null,
+    "campaign": null,
+    "goods": null,
+    "human_intent": null,
+    "notification": null,
+    "transaction": null
+  },
+  "sections_override": {
+    "transaction": {
+      "amount_minor": 10000,
+      "merchant_id": "m_test"
+    }
+  }
+}

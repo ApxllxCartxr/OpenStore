@@ -1,0 +1,8 @@
+{
+  "as_text": "null",
+  "canonical_b64u": "bnVsbA",
+  "canonical_hex": "6e756c6c",
+  "input_repr": "None",
+  "name": "null_section",
+  "note": "Python None \u2192 b'null'"
+}

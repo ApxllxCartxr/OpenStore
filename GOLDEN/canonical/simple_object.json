@@ -1,0 +1,8 @@
+{
+  "as_text": "{\"a\":1,\"b\":2}",
+  "canonical_b64u": "eyJhIjoxLCJiIjoyfQ",
+  "canonical_hex": "7b2261223a312c2262223a327d",
+  "input_repr": "{'b': 2, 'a': 1}",
+  "name": "simple_object",
+  "note": "sorted keys regardless of input order"
+}

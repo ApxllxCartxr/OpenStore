@@ -1,0 +1,8 @@
+{
+  "as_text": "{\"metadata\":{}}",
+  "canonical_b64u": "eyJtZXRhZGF0YSI6e319",
+  "canonical_hex": "7b226d65746164617461223a7b7d7d",
+  "input_repr": "{'metadata': {}}",
+  "name": "empty_object",
+  "note": "empty objects preserved as {}"
+}

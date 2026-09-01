@@ -1,0 +1,26 @@
+{
+  "description": "all 9 sections are JSON null",
+  "links": [
+    "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+    "sha256:b7312c187f752c0a034723485a75cee444d5466002a2030a6223fbfd716f481d",
+    "sha256:a8c4443501eade475f6de3214a1fdb52cc2041d17887dce67d77bfd4b4b235e4",
+    "sha256:0d55f1d3e12728ee9f5d058b944d9681bc2a7ba2ca973cffce3bc691893b117d",
+    "sha256:2e24921883272ef9933d84e2ae342e938083c165eeaa6974466b85ccd8b4aae1",
+    "sha256:47da8a4393b6dce94b4f41ca141d92cd1e7f1e7e08fd935fa043eaaea62c432b",
+    "sha256:b0cb679159aacc44e7829ba6ad9eeef2b478b8fd3ae149a47f94e3a4cdf1d98e",
+    "sha256:bf3660a7e0d2a68f991831118ac56358c683452ba56de8e8a0454bcb75c8c4c9",
+    "sha256:1caea1c2bd4fc70fdef598b2a970d8fcb6f822264313bc096924fb02a199868d"
+  ],
+  "root": "1caea1c2bd4fc70fdef598b2a970d8fcb6f822264313bc096924fb02a199868d",
+  "sections": {
+    "aal": null,
+    "adjudication": null,
+    "agent": null,
+    "authority": null,
+    "campaign": null,
+    "goods": null,
+    "human_intent": null,
+    "notification": null,
+    "transaction": null
+  }
+}

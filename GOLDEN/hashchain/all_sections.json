@@ -1,0 +1,47 @@
+{
+  "description": "all 9 sections populated (campaign null)",
+  "links": [
+    "sha256:d3f34db14e7d18dda37f6a98fb3332836bbb070965e4101d67081c2f9b8ca099",
+    "sha256:02119401cb47ab0d819e3342e9c9c9d48eb57189d9c903cb14a5f88cbf219e60",
+    "sha256:69af0d5356d8df91678ce643f80b692775496c4c8001d049924fc4e8bd4a7108",
+    "sha256:bb27e8cd16d6c0fd2b46d80374299cd20c3ea04e1d7af5036ccc9fa11feed1be",
+    "sha256:252bb28492b99a7f61c27da6a6b82e370a7a67349c63285f5d4c246acc00e447",
+    "sha256:5c68d47fa115a08dba733fa8af574bcb303f986c1d2964ab9287a65d8e436e21",
+    "sha256:3a735fe43c64215a052f24f156d7ce7aefc4cb58c5be537d1a0d1ee7d2fb7dfb",
+    "sha256:1aee5f9f4e16648565c5f7537caa023fbce70c85fa02df2a048f295fd969e7ec",
+    "sha256:e340bf895e36b0a19e975dabbaa3504b72bef566c0aea368bda62017668c2e3d"
+  ],
+  "root": "e340bf895e36b0a19e975dabbaa3504b72bef566c0aea368bda62017668c2e3d",
+  "sections": {
+    "aal": {
+      "level": 2
+    },
+    "adjudication": {
+      "compiler_digest": "sha256:compiler"
+    },
+    "agent": {
+      "client_id": "agent-1",
+      "scopes": [
+        "checkout:confirm"
+      ],
+      "token_jti": "jti-1"
+    },
+    "authority": {
+      "scheme": "webauthn"
+    },
+    "campaign": null,
+    "goods": {
+      "cart_hash": "sha256:cart"
+    },
+    "human_intent": {
+      "request_digest": "sha256:test"
+    },
+    "notification": {
+      "receipt_digest": "sha256:receipt"
+    },
+    "transaction": {
+      "amount_minor": 10000,
+      "merchant_id": "m_test"
+    }
+  }
+}

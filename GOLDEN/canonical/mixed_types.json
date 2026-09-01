@@ -1,0 +1,8 @@
+{
+  "as_text": "{\"catalog_digest\":\"sha256:abc123\",\"iat\":1787000000,\"merchant_id\":\"gelateria-roma\",\"price_minor\":21000,\"sku\":\"GEL-VAN-500\",\"tags\":[\"vegan\",\"dairy-free\"]}",
+  "canonical_b64u": "eyJjYXRhbG9nX2RpZ2VzdCI6InNoYTI1NjphYmMxMjMiLCJpYXQiOjE3ODcwMDAwMDAsIm1lcmNoYW50X2lkIjoiZ2VsYXRlcmlhLXJvbWEiLCJwcmljZV9taW5vciI6MjEwMDAsInNrdSI6IkdFTC1WQU4tNTAwIiwidGFncyI6WyJ2ZWdhbiIsImRhaXJ5LWZyZWUiXX0",
+  "canonical_hex": "7b22636174616c6f675f646967657374223a227368613235363a616263313233222c22696174223a313738373030303030302c226d65726368616e745f6964223a2267656c6174657269612d726f6d61222c2270726963655f6d696e6f72223a32313030302c22736b75223a2247454c2d56414e2d353030222c2274616773223a5b22766567616e222c2264616972792d66726565225d7d",
+  "input_repr": "{'sku': 'GEL-VAN-500', 'price_minor': 21000, 'tags': ['vegan', 'dairy-free'], 'catalog_digest': 'sha256:abc123', 'merchant_id': 'gelateria-roma', 'iat': 1787000000}",
+  "name": "mixed_types",
+  "note": "real catalog attestation payload"
+}

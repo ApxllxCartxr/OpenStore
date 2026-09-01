@@ -1,0 +1,230 @@
+{
+  "aal": {
+    "level": 2,
+    "predicates": {
+      "e1": true,
+      "e2": true,
+      "e3": true,
+      "e4": true,
+      "e5": false,
+      "e6": false,
+      "e7": true,
+      "e8": true,
+      "e9": true
+    },
+    "reasons": [
+      "Proposed liability position (not a network rule): ...the human authorized a standing policy with a fresh, user-verified signature, and this cart compiled clean against it; this is evidence of authorized intent, with final allocation resting with the network and issuer."
+    ]
+  },
+  "adjudication": {
+    "compiler_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "compiler_version": "1.0.0",
+    "context": {
+      "cart_items": [
+        {
+          "catalog_attestation": null,
+          "qty": 1,
+          "sku": "GEL-VAN-500",
+          "tags": [
+            "dairy-free",
+            "vegan"
+          ],
+          "unit_minor": 21000
+        }
+      ],
+      "currency": "INR",
+      "merchant_id": "gelateria-roma"
+    },
+    "evaluated_at": "2030-01-01T00:00:01Z",
+    "policy_schema_version": 2,
+    "reason_code": null,
+    "transcript": [
+      {
+        "check": "human_authority_present",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "currency_match",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "merchant_lock",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "policy_not_before",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "policy_expiry",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "transaction_count",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "item_qty",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "item_blocked_sku",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "item_tag_allowlist",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "spend_per_tx",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "spend_envelope",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "spend_cumulative",
+        "reason_code": null,
+        "result": "pass"
+      },
+      {
+        "check": "campaign_validity",
+        "reason_code": null,
+        "result": "pass"
+      }
+    ],
+    "verdict": "ALLOW"
+  },
+  "agent": {
+    "client_id": "buyer-agent-001",
+    "consent_granted_at": "2030-01-01T00:00:00Z",
+    "display_name": "OpenStore Buyer Agent",
+    "edge_identity": null,
+    "scopes": [
+      "catalog:read",
+      "cart:write",
+      "checkout:initiate",
+      "checkout:confirm"
+    ],
+    "token_jti": "jti-agent-001"
+  },
+  "authority": {
+    "delegation": null,
+    "enrolment": {
+      "aaguid": "00000000-0000-0000-0000-000000000000",
+      "attestation_format": "none",
+      "enrolled_at": "2030-01-01T00:00:00Z",
+      "public_key": {
+        "crv": "P-256",
+        "kty": "EC",
+        "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    "policy": "pol_test_001",
+    "policy_hash": "dc539f99833554b3851ae3614591dbdea3fab3fdecd0b0a618b2d03bdf889f35",
+    "presentation": null,
+    "scheme": "webauthn",
+    "webauthn": {
+      "assertion_max_age_seconds": 86400,
+      "authenticator_data": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAAAABA",
+      "challenge_binding": {
+        "mode": "policy"
+      },
+      "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsIm9yaWdpbiI6Imh0dHBzOi8vb3BlbnN0b3JlLnRlc3QiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+      "credential_id": "cred_es256_test",
+      "sign_count": 4,
+      "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "signed_at": "2030-01-01T00:00:00Z",
+      "uv": true
+    }
+  },
+  "bundle_id": "poai_test_bundle_aal2",
+  "campaign": null,
+  "chain": {
+    "links": [
+      "sha256:5cd1c09d4b3fbc50e3e162ed9beabf9636c82ab483627058c75d738282a511db",
+      "sha256:1263479ec41789aa9cf44e1fffc1a304f74b005db2689d75dedb7476d2945769",
+      "sha256:18d09a967825dbf0c8258cdb1ecb4e23dd650a8432b4788f7af7722201e7c679",
+      "sha256:c75a79b83d7349f8918f2a61138ba24a7a26d17ad0518b99467c53435f12937d",
+      "sha256:7370f173b74bb8941cf0a315fe41a54ebdd46083ea8144912757b44302f8c025",
+      "sha256:7278334ef57b162fc4e2764320ab8a37a5e9baa500ee2c78ab9b12ed6977cc71",
+      "sha256:ba19877ddc2a74a2eb43b0f805ec686f5bbd3f7c98f0009407e0af00b22cb602",
+      "sha256:31f769dac2072c64511431b32aaa9f90ff60ea61888874fbcda18bcbcde821f8",
+      "sha256:35cf062cf0fe3558a887cd1ac00167da4614b5d89095a1427d8c186d1d066929"
+    ],
+    "merchant_signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImdlbGF0ZXJpYS1yb21hLWtleS0xIiwidHlwIjoiSldUIn0.eyJidW5kbGVfaWQiOiJwb2FpX3Rlc3RfYnVuZGxlX2FhbDIiLCJpc3N1ZWRfYXQiOiIyMDMwLTAxLTAxVDAwOjAwOjAwWiIsInJvb3QiOiIzNWNmMDYyY2YwZmUzNTU4YTg4N2NkMWFjMDAxNjdkYTQ2MTRiNWQ4OTA5NWExNDI3ZDhjMTg2ZDFkMDY2OTI5In0.RbQBKfWaTLaAlpFY-9pfIFigkjMX7MhTBQ7b8N3lKBiNjZtp2ZpSmm8AW1Oapta0LnVngIGVy7DzM-ZvFy1qFg",
+    "root": "35cf062cf0fe3558a887cd1ac00167da4614b5d89095a1427d8c186d1d066929",
+    "time_anchor": {
+      "digest": "sha256:cbe0aabae5a2f6f9ed4809ab180eb252eda779f2a83e5eebfcc4d5d7e3958939",
+      "root": "35cf062cf0fe3558a887cd1ac00167da4614b5d89095a1427d8c186d1d066929",
+      "salt": "GpgANpMIZn_16rJSflffsw",
+      "type": "merkle_daily"
+    }
+  },
+  "goods": {
+    "cart_hash": "71043698e95fbb7ff2b1ea9a19dcddc9e3fe112a86b82378c6d898e093ef29e8",
+    "cart_version": 1,
+    "catalog_attestations_valid": true,
+    "items": [
+      {
+        "catalog_attestation": null,
+        "qty": 1,
+        "sku": "GEL-VAN-500",
+        "tags": [
+          "dairy-free",
+          "vegan"
+        ],
+        "unit_minor": 21000
+      }
+    ]
+  },
+  "human_intent": {
+    "agent_plan": {
+      "candidates_considered": 3,
+      "constraints_extracted": [
+        "vegan",
+        "\u2264\u20b9500"
+      ],
+      "interpretation": "user wants to order gelato",
+      "model": "gpt-4o",
+      "plan_digest": "fc2b464d905ceb43ab2c9d3e908268395ac846781ef00504bb258ab8a261201b"
+    },
+    "captured_at": "2030-01-01T00:00:00Z",
+    "channel": "mcp",
+    "channel_message_id": "msg_test",
+    "request_digest": "ced2755fd9a34f150ea084b209efcb2c272900db65eeffc69013a237fcb717b2",
+    "request_text": "Buy gelato"
+  },
+  "issued_at": "2030-01-01T00:00:00Z",
+  "notification": {
+    "channel": "discord",
+    "receipt_digest": "e29c808c81c593614acc9df4a0c4720a87ecfcfd7c9ea35fd604a87ccc1ded8e",
+    "sent_at": "2030-01-01T00:00:02Z"
+  },
+  "poai_version": "0.1",
+  "transaction": {
+    "amount_minor": 21000,
+    "cart_created_at": "2030-01-01T00:00:00Z",
+    "checkout_id": "chk_test_001",
+    "currency": "INR",
+    "merchant_id": "gelateria-roma",
+    "psp": {
+      "order_id": "order_test",
+      "payment_link_id": "link_test",
+      "provider": "razorpay"
+    }
+  }
+}
