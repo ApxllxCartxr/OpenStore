@@ -20,23 +20,48 @@ class CampaignValidationError(Exception):
         super().__init__(f"[{reason_code}] {message}")
 
 
+# Symbol/token patterns matched on the raw (lowercased) text — punctuation matters.
 _PROMPT_INJECTION_PATTERNS = [
     "system:", "system ",   # classic system-prompt override
     "<|", "|>",            # LLM special tokens (ChatML, Llama, etc.)
     "[INST", "[/INST",     # Llama instruction tags
     "[SYS", "[/SYS]",      # Mistral system tags
     "{{", "}}",            # Template injection (Handlebars, Jinja2)
-    "ignore previous instructions",
-    "ignore all previous",
-    "disregard your instructions",
     "you are now a",
     "roleplay as",
 ]
 
+# Q-009 RESOLUTION: full synonym phrase family, matched on normalized text
+# (lowercase, whitespace collapsed to single space, non-alphanumerics stripped).
+_PROMPT_INJECTION_PHRASES = [
+    "ignore previous instructions",
+    "ignore all previous",
+    "ignore all previous instructions",
+    "ignore all prior instructions",
+    "ignore all instructions",
+    "disregard your instructions",
+    "disregard all previous instructions",
+    "disregard all prior instructions",
+    "disregard all instructions",
+    "forget all previous instructions",
+    "forget all prior instructions",
+    "override your instructions",
+    "override your previous instructions",
+]
+
+
+def _normalize_plaintext(text: str) -> str:
+    import re
+    collapsed = re.sub(r"\s+", " ", text.lower())
+    return re.sub(r"[^a-z0-9 ]", "", collapsed)
+
 
 def _has_prompt_injection(text: str) -> bool:
-    t = text.lower()
-    return any(pat.lower() in t for pat in _PROMPT_INJECTION_PATTERNS)
+    lowered = text.lower()
+    if any(pat.lower() in lowered for pat in _PROMPT_INJECTION_PATTERNS):
+        return True
+    normalized = _normalize_plaintext(text)
+    return any(phrase in normalized for phrase in _PROMPT_INJECTION_PHRASES)
 
 
 def validate_campaign(
