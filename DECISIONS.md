@@ -47,3 +47,14 @@
 
 ## DECISION-015 | date: 2026-08-30T11:10:00Z | stage: 00
 - Currency: "INR" only. Single-tenant per sidecar process.
+## DECISION-016 | date: 2026-09-02T00:00:00Z | stage: 10
+- Feature freeze record (Q-008/009/010 resolved): sidecar integration contract SID-1..7
+  implemented and green (PRD §1.4; SPECS stage-10 S10.5). Gates at freeze:
+  `ruff check src tests` clean; `mypy src` clean; `python scripts/registry_diff.py`
+  prints nothing; `pytest -q` → 323 passed, 1 skipped. SID commits: 66e8878 (Q-008/Q-009
+  resolution + Q-010 contract), 270cc3e (Q-009 prompt-injection), 44f9276 (OAuth kid
+  mypy), acbda3c (SID-1..7 implementation), this freeze.
+- Q-011/012/013 provisional (unattended-agent, operator-ratify pending): hand-rolled
+  Prometheus (B1), __version__ via importlib.metadata.version (B4), headless §11 steps
+  3-5 (B6). Recorded in OPEN_QUESTIONS.md; not operator-ratified. PENDING-HUMAN
+  verification items listed in SPECS/stage-10-freeze.md S10.6. Never self-certified.
