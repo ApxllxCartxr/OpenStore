@@ -15,6 +15,11 @@ from sqlmodel import Session, select
 from openstore.config import Settings
 from openstore.models import OAuthAuthorizationCode, OAuthClient, OAuthToken
 
+# INV-9 (Q-008 RESOLUTION): access tokens are asymmetric ES256 JWTs. The validator
+# pins the header alg and verifies the JWS signature against the merchant's public
+# key (resolved by kid) BEFORE trusting any claim.
+_JWS_ALG_ALLOWLIST = {"ES256"}
+
 
 class OAuthError(Exception):
     def __init__(self, error: str, description: str, status_code: int = 400):
@@ -254,8 +259,14 @@ def _create_jwt_token(
     token_type: str,
     merchant_jwks: dict[str, Any] | None = None,
 ) -> str:
-    """Create JWT token signed with ES256."""
-    header = {"alg": "ES256", "typ": "JWT", "kid": "merchant-key-1"}
+    """Create JWT token signed with ES256.
+
+    INV-9 / Q-008: issuance signs a real ES256 JWS Compact using the merchant's
+    per-merchant key (DECISIONS §11.1.10), header {alg, kid, typ}. The kid is
+    namespaced "{merchant_id}-key-{n}"; the default merchant key is used when no
+    explicit jwks/key material is supplied (single-tenant sidecar default).
+    """
+    header = {"alg": "ES256", "typ": "JWT", "kid": _resolve_token_kid(merchant_jwks)}
     claims = {
         "jti": jti,
         "iss": "openstore",
@@ -267,29 +278,94 @@ def _create_jwt_token(
         "token_type": token_type,
     }
 
-    # Placeholder: return a structured token that can be parsed
-    header_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
-    claims_b64 = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
-    signature_b64 = base64.urlsafe_b64encode(b"placeholder-signature").decode().rstrip("=")
+    header_bytes = json.dumps(header, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    claims_bytes = json.dumps(claims, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    header_b64 = base64.urlsafe_b64encode(header_bytes).decode().rstrip("=")
+    claims_b64 = base64.urlsafe_b64encode(claims_bytes).decode().rstrip("=")
+    signing_input = f"{header_b64}.{claims_b64}"
 
-    return f"{header_b64}.{claims_b64}.{signature_b64}"
+    private_key = _token_private_key(merchant_jwks)
+    sig_b64 = _sign_es256(signing_input, private_key)
+
+    return f"{header_b64}.{claims_b64}.{sig_b64}"
+
+
+def _token_private_key(merchant_jwks: dict[str, Any] | None) -> Any:
+    """Return the merchant's ES256 private key for token signing.
+
+    When explicit key material is absent, fall back to the sidecar's per-merchant
+    key from the well-known surface (same keypair its /.well-known/poai-jwks.json
+    serves), so a default single-merchant install signs and verifies end to end.
+    """
+    if merchant_jwks and merchant_jwks.get("private_key"):
+        from cryptography.hazmat.primitives import serialization
+        return serialization.load_der_private_key(merchant_jwks["private_key"], password=None)
+
+    from openstore.surfaces.wellknown import _load_or_generate_poai_keys
+    data = _load_or_generate_poai_keys("merchant")
+    from cryptography.hazmat.primitives import serialization
+    return serialization.load_der_private_key(data["private_key"], password=None)
+
+
+def _resolve_token_kid(merchant_jwks: dict[str, Any] | None) -> str:
+    """kid for the signing key: per-merchant default (DECISIONS §11.1.10
+    namespaced kid for merchant_id 'merchant')."""
+    from openstore.surfaces.wellknown import _load_or_generate_poai_keys
+    return _load_or_generate_poai_keys("merchant")["jwk"]["kid"]
+
+
+def _sign_es256(signing_input: str, private_key: Any) -> str:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+    if isinstance(private_key, ec.EllipticCurvePrivateKey):
+        if private_key.curve.name != "secp256r1":
+            raise ValueError("token signing requires EC P-256 (secp256r1)")
+    else:
+        raise ValueError("token signing requires an EC P-256 private key")
+    der_sig = private_key.sign(signing_input.encode("ascii"), ec.ECDSA(hashes.SHA256()))
+    r, s = decode_dss_signature(der_sig)
+    raw_sig = r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    return base64.urlsafe_b64encode(raw_sig).decode().rstrip("=")
 
 
 def validate_access_token(
     session: Session,
     token: str,
     required_scopes: list[str] | None = None,
+    jwks: dict[str, Any] | None = None,
 ) -> OAuthToken:
     """
     Validate access token.
 
-    In production, this would verify the ES256 signature against JWKS.
-    For now, we parse and check DB record.
+    INV-9 / Q-008: BEFORE trusting any claim, verify the JWS signature and pin the
+    header alg (allowlist ["ES256"]) against the merchant JWKS resolved by kid.
+    Verification comes before the jti/exp/DB/revocation checks. Every verification
+    failure carries the closed-set reason code auth.token_verification_failed.
     """
     try:
         parts = token.split(".")
         if len(parts) != 3:
             raise OAuthError("invalid_token", "Malformed token", 401)
+
+        header_json = base64.urlsafe_b64decode(parts[0] + "==").decode()
+        header = json.loads(header_json)
+
+        if header.get("alg") not in _JWS_ALG_ALLOWLIST:
+            raise OAuthError(
+                "auth.token_verification_failed", "Unsupported token algorithm", 401
+            )
+
+        kid = header.get("kid")
+        if not kid:
+            raise OAuthError("auth.token_verification_failed", "Missing token kid", 401)
+
+        public_key = _resolve_public_key(kid, jwks)
+
+        signing_input = f"{parts[0]}.{parts[1]}"
+        if not _verify_es256(signing_input, parts[2], public_key):
+            raise OAuthError("auth.token_verification_failed", "Token signature invalid", 401)
 
         claims_json = base64.urlsafe_b64decode(parts[1] + "==").decode()
         claims = json.loads(claims_json)
@@ -327,6 +403,67 @@ def validate_access_token(
         raise OAuthError("invalid_token", "Invalid token format", 401)
 
 
+def _resolve_public_key(kid: str, jwks: dict[str, Any] | None) -> Any:
+    """Resolve the ES256 public key by kid. Q-008: unknown kid is a hard error."""
+    import base64 as _b64
+
+    if jwks:
+        keys = jwks.get("keys", [])
+        jwk = next((k for k in keys if k.get("kid") == kid), None)
+        if jwk is None:
+            raise OAuthError(
+                "auth.token_verification_failed", f"Unknown token kid {kid!r}", 401
+            )
+        x = _b64.urlsafe_b64decode(jwk["x"] + "==")
+        y = _b64.urlsafe_b64decode(jwk["y"] + "==")
+        return _build_public_key(x, y)
+
+    # Default single-merchant install: use the same per-merchant keypair the
+    # sidecar serves at /.well-known/poai-jwks.json (DECISIONS §11.1.10). If the
+    # default merchant key was never created at issuance, generate it now so the
+    # lookup below can resolve kid "merchant-key-1".
+    from openstore.surfaces.wellknown import POAI_KEYS, _load_or_generate_poai_keys
+
+    _load_or_generate_poai_keys("merchant")
+    data = next(
+        (cached for cached in POAI_KEYS.values() if cached["jwk"]["kid"] == kid),
+        None,
+    )
+    if data is None:
+        raise OAuthError(
+            "auth.token_verification_failed", f"Unknown token kid {kid!r}", 401
+        )
+    return data["public_key"]
+
+
+def _build_public_key(x: bytes, y: bytes) -> Any:
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    return ec.EllipticCurvePublicNumbers(
+        int.from_bytes(x, "big"), int.from_bytes(y, "big"), ec.SECP256R1()
+    ).public_key()
+
+
+def _verify_es256(signing_input: str, sig_b64: str, public_key: Any) -> bool:
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+
+        raw_sig = base64.urlsafe_b64decode(sig_b64 + "==")
+        if len(raw_sig) != 64:
+            return False
+        r = int.from_bytes(raw_sig[:32], "big")
+        s = int.from_bytes(raw_sig[32:], "big")
+        der_sig = encode_dss_signature(r, s)
+        public_key.verify(
+            der_sig, signing_input.encode("ascii"), ec.ECDSA(hashes.SHA256())
+        )
+        return True
+    except Exception:
+        return False
+
+
 def revoke_token(session: Session, jti: str, token_type: str = "access_token") -> bool:
     """Revoke a token."""
     token_record = session.exec(
@@ -352,4 +489,5 @@ def get_jwks(config: Settings) -> dict[str, Any]:
 
     Resource servers fetch this to validate ES256 signatures.
     """
-    return {"keys": []}
+    from openstore.surfaces.wellknown import get_poai_jwks
+    return get_poai_jwks(config)

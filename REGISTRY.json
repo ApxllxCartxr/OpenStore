@@ -7,7 +7,7 @@
     "policy.aggregate_cap_exceeded","policy.campaign_inactive","policy.campaign_outside_window",
     "policy.policy_version_unsupported",
     "idempotency_key_reuse_with_different_payload","webauthn_unsupported_alg",
-    "unsupported_compiler_digest","request_in_progress"],
+    "unsupported_compiler_digest","request_in_progress","auth.token_verification_failed"],
   "error_namespaces": ["auth.*","policy.*","checkout.*","psp.*","ratelimit.*","agent.*",
     "hold.*","authority.*","orchestration.*"],
   "authority_reason_codes": ["authority.unknown_scheme","authority.scheme_capped_native_webauthn",
