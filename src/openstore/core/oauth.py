@@ -311,7 +311,10 @@ def _resolve_token_kid(merchant_jwks: dict[str, Any] | None) -> str:
     """kid for the signing key: per-merchant default (DECISIONS §11.1.10
     namespaced kid for merchant_id 'merchant')."""
     from openstore.surfaces.wellknown import _load_or_generate_poai_keys
-    return _load_or_generate_poai_keys("merchant")["jwk"]["kid"]
+    kid = _load_or_generate_poai_keys("merchant")["jwk"].get("kid")
+    if not isinstance(kid, str):
+        raise ValueError("merchant JWK kid must be a string")
+    return kid
 
 
 def _sign_es256(signing_input: str, private_key: Any) -> str:

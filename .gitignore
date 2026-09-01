@@ -43,3 +43,6 @@ Thumbs.db
 # Generated configs (examples only)
 catalog.yaml
 .env.example
+
+# Local opencode tooling
+.opencode/

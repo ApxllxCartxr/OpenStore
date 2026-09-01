@@ -79,6 +79,7 @@ def test_registry_reason_codes_complete():
         "webauthn_unsupported_alg",
         "unsupported_compiler_digest",
         "request_in_progress",
+        "auth.token_verification_failed",
     }
 
     actual = set(registry["reason_codes"])
