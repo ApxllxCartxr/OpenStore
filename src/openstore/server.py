@@ -2,20 +2,44 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, PlainTextResponse
 
+from openstore import __version__
 from openstore.config import Settings
 
 
 def console_print(msg: str) -> None:
     print(msg, flush=True)
+
+
+def resolve_public_origin(config: Settings, request: Request | None = None) -> str:
+    """SID-1: the origin used in manifests. public_base_url wins (subdomain /
+    explicit deployment); otherwise derive from the request (same-origin proxy)."""
+    if config.public_base_url:
+        return config.public_base_url.rstrip("/")
+    if request is not None:
+        return str(request.base_url).rstrip("/")
+    return (config.webauthn.origin or "http://localhost:8000").rstrip("/")
+
+
+def _gated_paths() -> set[str]:
+    from openstore.core.health import GATED_PATHS
+
+    return GATED_PATHS
+
+
+def _paths_match(route_path: str, gated_template: str) -> bool:
+    # Convert FastAPI route path {x} to exact string compare; gated templates use
+    # {campaign_id}/{cancel_token} which the app already mounts identically.
+    return route_path == gated_template
 
 
 def create_app(config: Settings) -> FastAPI:
@@ -25,7 +49,7 @@ def create_app(config: Settings) -> FastAPI:
         # Startup
         console_print(f"OpenStore server starting for {config.merchant.name}")
 
-        # Wire PSP config and start workers
+        # SID-3 boot order: config → migrations → keys → workers → serve.
         try:
             from openstore.psp.router import set_psp_config
 
@@ -38,15 +62,91 @@ def create_app(config: Settings) -> FastAPI:
         # Shutdown
         console_print("OpenStore server shutting down")
 
+    # SID-5: origin security boundary. CORS is restricted to the merchant origin
+    # (public_base_url, else the WebAuthn origin). WebAuthn RP ID must equal the
+    # public_base_url host when one is configured (fail loud, R0.5).
+    merchant_origin = (
+        (config.public_base_url or config.webauthn.origin).rstrip("/")
+        if (config.public_base_url or config.webauthn.origin)
+        else "http://localhost:8000"
+    )
+    if config.public_base_url:
+        from urllib.parse import urlparse
+
+        pub_host = urlparse(config.public_base_url).hostname
+        if pub_host and pub_host != config.webauthn.rp_id:
+            raise ValueError(
+                "SID-5 origin mismatch: public_base_url host "
+                f"({pub_host}) != webauthn.rp_id ({config.webauthn.rp_id})"
+            )
+
     app = FastAPI(
         title=f"OpenStore — {config.merchant.name}",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
-    # Health check
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[merchant_origin],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # SID-2 readiness gate: refuse agent/money traffic until the sidecar is ready.
+    @app.middleware("http")
+    async def readiness_gate(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        from openstore.core.health import compute_readiness, is_gated, is_ready
+
+        if is_gated(request.url.path) and not is_ready(config):
+            from fastapi.responses import JSONResponse
+
+            state = compute_readiness(config)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "service_unavailable",
+                    "reason_codes": state.reason_codes,
+                },
+            )
+        return await call_next(request)
+
+    # Health check (liveness, SID-2)
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok", "merchant": config.merchant.name}
+
+    # SID-2 health endpoints
+    @app.get("/health/live")
+    async def health_live() -> dict[str, str]:
+        return {"status": "alive", "merchant": config.merchant.name}
+
+    @app.get("/health/ready", response_model=None)
+    async def health_ready() -> dict[str, Any] | Response:
+        from openstore.core.health import compute_readiness
+
+        state = compute_readiness(config)
+        if state.ready:
+            return {"status": "ready", "merchant": config.merchant.name}
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "merchant": config.merchant.name,
+                "reason_codes": state.reason_codes,
+            },
+        )
+
+    # SID-7 metrics endpoint
+    @app.get("/internal/metrics")
+    async def internal_metrics() -> PlainTextResponse:
+        from openstore.core.health import metrics_text
+
+        return PlainTextResponse(metrics_text(config), media_type="text/plain")
 
     # Well-known manifests (S6.4 per §3.9)
     def _mid(cfg: Settings) -> str:
@@ -55,7 +155,7 @@ def create_app(config: Settings) -> FastAPI:
     @app.get("/.well-known/agent-commerce.json")
     async def agent_commerce(request: Request) -> dict[str, Any]:
         from openstore.surfaces.wellknown import build_agent_commerce_manifest
-        origin = str(request.base_url).rstrip("/")
+        origin = resolve_public_origin(config, request)
         return build_agent_commerce_manifest(config, origin)
 
     @app.get("/.well-known/agent-policy.json")
@@ -64,18 +164,19 @@ def create_app(config: Settings) -> FastAPI:
         return build_agent_policy_manifest(config)
 
     @app.get("/.well-known/agent-card.json")
-    async def agent_card() -> dict[str, Any]:
+    async def agent_card(request: Request) -> dict[str, Any]:
         return {
             "name": config.merchant.name,
             "description": f"OpenStore agent-capable merchant: {config.merchant.name}",
-            "url": config.webauthn.origin or "http://localhost:8000",
+            "url": resolve_public_origin(config, request),
             "capabilities": ["mcp", "catalog", "checkout"],
-            "version": "0.1.0",
+            "version": __version__,
+            "poai_version": "0.1",
         }
 
     @app.get("/.well-known/oauth-authorization-server")
     async def oauth_auth_server(request: Request) -> dict[str, Any]:
-        origin = str(request.base_url).rstrip("/")
+        origin = resolve_public_origin(config, request)
         return {
             "issuer": origin,
             "authorization_endpoint": f"{origin}/oauth/authorize",
@@ -94,7 +195,7 @@ def create_app(config: Settings) -> FastAPI:
 
     @app.get("/.well-known/agent-campaigns.json")
     async def agent_campaigns_signed(request: Request) -> dict[str, Any]:
-        origin = str(request.base_url).rstrip("/")
+        origin = resolve_public_origin(config, request)
         from openstore.surfaces.wellknown import get_signed_campaign_feed
         return get_signed_campaign_feed(config, origin)
 
@@ -103,7 +204,6 @@ def create_app(config: Settings) -> FastAPI:
     async def agent_catalog(request: Request) -> dict[str, Any]:
         from openstore.surfaces.catalog import serve_catalog_feed
         from openstore.surfaces.wellknown import get_catalog_signing_key
-        origin = str(request.base_url).rstrip("/")
         return serve_catalog_feed(
             config, merchant_id=_mid(config),
             private_key_pem=get_catalog_signing_key(_mid(config)),
@@ -112,9 +212,9 @@ def create_app(config: Settings) -> FastAPI:
     # MCP endpoint (S6.3)
     @app.post("/agent/mcp")
     async def agent_mcp(request: Request) -> dict[str, Any]:
-        from openstore.surfaces.mcp_server import handle_mcp_request
         from openstore.core.database import get_session
         from openstore.core.oauth import validate_access_token
+        from openstore.surfaces.mcp_server import handle_mcp_request
 
         body = await request.json()
         auth_header = request.headers.get("authorization", "")
@@ -160,13 +260,13 @@ def create_app(config: Settings) -> FastAPI:
     @app.get("/agent/campaigns")
     async def agent_campaigns_feed(request: Request) -> dict[str, Any]:
         from openstore.surfaces.wellknown import get_signed_campaign_feed
-        origin = str(request.base_url).rstrip("/")
+        origin = resolve_public_origin(config, request)
         return get_signed_campaign_feed(config, origin)
 
     # Campaign approve / reject (REGISTRY routes)
     @app.post("/campaign/{campaign_id}/approve")
     async def campaign_approve(campaign_id: str, request: Request) -> dict[str, Any]:
-        from openstore.core.campaigns import activate_campaign, CampaignValidationError
+        from openstore.core.campaigns import CampaignValidationError, activate_campaign
         from openstore.core.database import get_session as _get_session
 
         body = await request.json()

@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from openstore.config import Settings
-from openstore.core.holdcancel import AAL_HOLD_SECONDS
+from openstore.core.holdcancel import AAL_HOLD_SECONDS, AALLevel
 
 # DECISIONS §11.1.10: per-merchant keypairs, kid = "{merchant_id}-key-{n}".
 # Keys are cached keyed by merchant_id so each install serves only its own keys.
@@ -112,9 +112,9 @@ def build_agent_policy_manifest(config: Settings) -> dict[str, Any]:
         "requires_human_approval": True,
         "aal_hold_seconds": {
             "AAL0": None,
-            "AAL1": AAL_HOLD_SECONDS.get(1),
-            "AAL2": AAL_HOLD_SECONDS.get(2),
-            "AAL3": AAL_HOLD_SECONDS.get(3),
+            "AAL1": AAL_HOLD_SECONDS.get(AALLevel.AAL1),
+            "AAL2": AAL_HOLD_SECONDS.get(AALLevel.AAL2),
+            "AAL3": AAL_HOLD_SECONDS.get(AALLevel.AAL3),
         },
         "evidence_retention_days": getattr(config, "evidence_retention_days", 540),
         "max_per_tx_cap_minor": 50000,

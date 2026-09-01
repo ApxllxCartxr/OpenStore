@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from openstore.agents.buyer_agent import BuyerAgent, compute_cart_hash
 from openstore.agents.llm import DummyProvider, LLMProvider

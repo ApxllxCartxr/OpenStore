@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,

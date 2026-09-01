@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from openstore.config import Settings
@@ -72,14 +72,14 @@ class DiscordNotifier:
         await self._send("buyer", f"[{trace_id}] {action}", embed={
             "title": action,
             "fields": [{"name": k, "value": str(v), "inline": True} for k, v in details.items()],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     async def merchant_trace(self, trace_id: str, action: str, details: dict[str, Any]) -> None:
         await self._send("merchant", f"[{trace_id}] {action}", embed={
             "title": action,
             "fields": [{"name": k, "value": str(v), "inline": True} for k, v in details.items()],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     async def money_trace(
@@ -92,7 +92,7 @@ class DiscordNotifier:
                 {"name": "amount_minor", "value": str(amount_minor), "inline": True},
                 {"name": "currency", "value": currency, "inline": True},
             ],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     async def alert(self, alert_type: str, message: str, details: dict[str, Any]) -> None:
@@ -100,7 +100,7 @@ class DiscordNotifier:
             "title": f"Alert: {alert_type}",
             "description": message,
             "fields": [{"name": k, "value": str(v), "inline": True} for k, v in details.items()],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
 

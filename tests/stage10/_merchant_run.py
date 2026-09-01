@@ -14,8 +14,6 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime, timedelta
 
-from sqlmodel import select
-
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,
@@ -29,6 +27,7 @@ from openstore.config import (
 from openstore.core.database import compute_policy_spend, get_session, init_database
 from openstore.core.ledger import create_capture_entry, create_reserve_entry
 from openstore.models import Campaign, Checkout, IntentPolicy, OrderState
+from sqlmodel import select
 
 
 def build_settings(db_url: str, merchant_id: str) -> Settings:
@@ -96,6 +95,104 @@ def main() -> None:
     elif op == "read_campaigns":
         rows = list(session.exec(select(Campaign)).all())
         print([(c.id, c.merchant_id, c.title) for c in rows])
+    elif op == "seed_pending_link":
+        # SID-4: simulate a process that got the Razorpay payment link created
+        # (psp_payment_link_id persisted) but was killed before the buyer paid.
+        # The intent is HELD (policy passed, awaiting payment) — the crash left
+        # it mid-flight.
+        now = datetime.now(UTC)
+        pid = f"pol_{merchant_id.split('-')[0]}"
+        make_policy(session, merchant_id, pid)
+        ckid = f"chk_{merchant_id.split('-')[0]}"
+        ck = Checkout(
+            id=ckid, trace_id=f"tr_{merchant_id.split('-')[0]}",
+            client_id=f"cli_{merchant_id.split('-')[0]}", merchant_id=merchant_id,
+            cart_hash=f"h_{merchant_id.split('-')[0]}", cart_version=1,
+            amount_minor=40000, currency="INR", state=OrderState.HELD,
+            policy_id=pid, policy_hash=f"ph_{pid}", aal_level=1,
+            expires_at=now + timedelta(hours=1), idempotency_key=f"idem_{merchant_id.split('-')[0]}",
+            cart_snapshot={"items": []}, created_at=now, updated_at=now,
+            psp_provider="razorpay", psp_order_id=ckid,
+            psp_payment_link_id=f"plink_{merchant_id.split('-')[0]}",
+        )
+        session.add(ck)
+        session.commit()
+        print(ck.id)
+    elif op == "recover_no_duplicate":
+        # SID-4 restart: re-invoke create_payment_link for the same (HELD) checkout.
+        # The mock Razorpay store already holds ONE link keyed by reference_id; a
+        # second create fires the duplicate-reference_id recovery path — no
+        # duplicate Razorpay object and no orphaned non-terminal checkout.
+        from openstore.core.database import get_session as _gs
+        from openstore.psp import razorpay_driver as driver
+
+        class _MockStore:
+            def __init__(self) -> None:
+                self.links: dict[str, dict] = {}
+                self.created: list[str] = []
+
+            def create(self, req: dict) -> dict:
+                ref = req.get("reference_id", "")
+                if ref in self.links:
+                    # Razorpay's literal duplicate-reference_id error code.
+                    raise RuntimeError("REFERENCE_ID_ALREADY_EXISTS")
+                link = dict(req)
+                link["id"] = f"plink_{ref[:20]}"
+                self.links[ref] = link
+                self.created.append(ref)
+                return dict(link)
+
+            def all(self, params: dict) -> dict:
+                ref = params.get("reference_id", "")
+                items = [dict(self.links[ref])] if ref in self.links else []
+                return {"items": items}
+
+        store = _MockStore()
+        # Pre-load the store with the link created in the previous (killed) process.
+        ckid = f"chk_{merchant_id.split('-')[0]}"
+        store.create({"reference_id": ckid})
+
+        class _MockRz:
+            def __init__(self, store: _MockStore) -> None:
+                self.payment_link = store
+
+        checkout = session.exec(
+            select(Checkout).where(Checkout.id == ckid)
+        ).first()
+        assert checkout is not None, "checkout must survive the crash"
+        session.close()
+
+        s2 = _gs(cfg)
+        try:
+            driver.create_payment_link(
+                config=cfg, session=s2, trace_id=f"tr_restart_{merchant_id.split('-')[0]}",
+                client_id="restart", checkout_id=ckid, amount_minor=40000,
+                currency="INR", description="retry-after-crash",
+                mock_razorpay=_MockRz(store),
+            )
+            s2.commit()
+        finally:
+            s2.close()
+
+        s3 = _gs(cfg)
+        try:
+            refreshed = s3.exec(
+                select(Checkout).where(Checkout.id == ckid)
+            ).first()
+            # Exactly one link exists in the mock store (no duplicate Razorpay object).
+            assert len(store.links) == 1, f"duplicate Razorpay link: {list(store.links)}"
+            assert store.links[ckid]["id"] == refreshed.psp_payment_link_id
+            # No orphaned non-terminal checkout left without a payment link.
+            nonterminal = s3.exec(
+                select(Checkout).where(
+                    Checkout.merchant_id == merchant_id,
+                    Checkout.state.in_([OrderState.HELD]),
+                )
+            ).all()
+            assert all(c.psp_payment_link_id for c in nonterminal), "orphaned checkout"
+            print("recovered", refreshed.psp_payment_link_id)
+        finally:
+            s3.close()
     session.close()
 
 

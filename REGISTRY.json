@@ -54,6 +54,9 @@
     "/orders/intent/<intent_id>/evidence",
     "/internal/webauthn/*",
     "/internal/policy/blast-radius",
+    "/health/live",
+    "/health/ready",
+    "/internal/metrics",
     "/admin/*"
   ]
 }

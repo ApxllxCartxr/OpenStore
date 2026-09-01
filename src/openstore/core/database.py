@@ -16,6 +16,20 @@ from openstore.models import Checkout, LedgerEntry, LedgerEntryType, OrderState
 
 _engine: Engine | None = None
 
+# SID-2/SID-3: tracks whether the schema exists (via alembic migration on the
+# serve path, or create_all in tests/tooling). health readiness keys off this.
+_schema_ready: bool = False
+
+
+def mark_schema_ready() -> None:
+    """Set by apply_migrations (serve) or init_database (tests/tooling)."""
+    global _schema_ready
+    _schema_ready = True
+
+
+def schema_ready(config: Settings) -> bool:
+    return _schema_ready
+
 
 def get_engine(config: Settings) -> Engine:
     """Get or create database engine."""
@@ -47,6 +61,35 @@ def init_database(config: Settings) -> None:
     """Initialize database tables."""
     engine = get_engine(config)
     SQLModel.metadata.create_all(engine)
+    mark_schema_ready()
+
+
+def apply_migrations(config: Settings) -> None:
+    """SID-3: run Alembic migrations to head at boot (serve path).
+
+    Fails loud on any migration error (R0.5). After success, marks the schema
+    ready so /health/ready and the agent-traffic gate can pass (SID-2).
+    """
+    try:
+        import os
+
+        from alembic import command
+        from alembic.config import Config
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        ini_path = os.path.join(repo_root, "alembic.ini")
+
+        if not os.path.exists(ini_path):
+            raise FileNotFoundError(f"alembic.ini not found at {ini_path}")
+
+        os.environ["OPENSTORE_DB_URL"] = config.database.url
+
+        cfg = Config(ini_path)
+        cfg.set_main_option("script_location", os.path.join(repo_root, "alembic"))
+        command.upgrade(cfg, "head")
+        mark_schema_ready()
+    except Exception as exc:
+        raise RuntimeError(f"alembic migrations failed: {exc}") from exc
 
 
 def get_session(config: Settings) -> Session:

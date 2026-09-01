@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import logging
 import secrets as _secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response
-from sqlmodel import Session, select
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from sqlmodel import select
 
 from openstore.config import Settings
 from openstore.core.database import get_session
@@ -64,7 +64,7 @@ def psp_router(config: Settings) -> APIRouter:
 
         session = get_session(cfg)
         try:
-            event = driver.persist_raw_webhook_event(
+            driver.persist_raw_webhook_event(
                 session=session,
                 raw_body=raw_body,
                 signature=x_razorpay_signature,
@@ -139,8 +139,8 @@ def psp_router(config: Settings) -> APIRouter:
                         description="hold_cancel (already-paid/cancelled)",
                     )
                     checkout.state = OrderState.CANCELLED
-                    checkout.cancelled_at = datetime.now(timezone.utc)
-                    checkout.updated_at = datetime.now(timezone.utc)
+                    checkout.cancelled_at = datetime.now(UTC)
+                    checkout.updated_at = datetime.now(UTC)
                     session.add(checkout)
                     session.commit()
                     return {"status": "RELEASE", "checkout_id": checkout.id}

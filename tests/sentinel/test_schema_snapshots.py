@@ -5,9 +5,8 @@
 
 from __future__ import annotations
 
-from sqlmodel import SQLModel
-
 import openstore.models  # noqa: F401  (registers table=True models on metadata)
+from sqlmodel import SQLModel
 
 # Pinned column sets per table (name -> required). A column present in the model
 # but not listed here, or non-nullability flipping, is a schema drift.

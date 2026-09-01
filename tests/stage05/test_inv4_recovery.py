@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,

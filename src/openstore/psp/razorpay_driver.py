@@ -11,11 +11,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, cast
 
 from sqlmodel import Session, select
 
@@ -72,8 +71,8 @@ class PspIntent:
     short_url: str | None = None
     trace_id: str = ""
     client_id: str = ""
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # Webhook event types the driver handles (PRD Part 4 / S5.1).
@@ -210,8 +209,8 @@ def create_payment_link(
             request_hash=request_hash,
             response_status=0,
             response_body={},
-            created_at=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC),
         )
         session.add(idem)
         session.flush()
@@ -279,7 +278,7 @@ def _finalize_payment_link_create(
     checkout.psp_order_id = link.get("reference_id") or checkout.id
     checkout.psp_payment_link_id = link.get("id")
     checkout.psp_provider = "razorpay"
-    checkout.updated_at = datetime.now(timezone.utc)
+    checkout.updated_at = datetime.now(UTC)
     session.add(checkout)
 
     response_body = {
@@ -294,7 +293,7 @@ def _finalize_payment_link_create(
     if idem:
         idem.response_status = 200
         idem.response_body = response_body
-        idem.expires_at = datetime.now(timezone.utc)
+        idem.expires_at = datetime.now(UTC)
         session.add(idem)
 
     session.flush()
@@ -316,7 +315,7 @@ def _fetch_existing_payment_link_by_reference_id(
         resp = client.payment_link.all({"reference_id": reference_id})
         items = resp.get("items", [])
         if items:
-            return items[0]
+            return cast("dict[str, Any]", items[0])
     except Exception:
         return None
     return None
@@ -330,10 +329,10 @@ def fetch_payment_link(
     """Fetch an existing payment link by id."""
     assert_test_mode_key(config.razorpay.key_id)
     if mock_razorpay is not None:
-        return mock_razorpay.payment_link.fetch(payment_link_id)
+        return cast("dict[str, Any]", mock_razorpay.payment_link.fetch(payment_link_id))
     from razorpay import Client
     client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
-    return client.payment_link.fetch(payment_link_id)
+    return cast("dict[str, Any]", client.payment_link.fetch(payment_link_id))
 
 
 def cancel_payment_link(
@@ -460,7 +459,7 @@ def create_refund_entry_local(
     if existing:
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     revenue_reversal = LedgerEntry(
         trace_id=trace_id,
@@ -571,7 +570,7 @@ def _process_persisted_webhook(
             payload=payload,
             status=WebhookStatus.PROCESSING,
             retry_count=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         session.add(event)
         session.flush()
@@ -585,7 +584,7 @@ def _process_persisted_webhook(
     try:
         _dispatch_webhook_event(session, event_name, payload)
         event.status = WebhookStatus.COMPLETED
-        event.processed_at = datetime.now(timezone.utc)
+        event.processed_at = datetime.now(UTC)
         event.last_error = None
         session.add(event)
         session.flush()
@@ -655,9 +654,9 @@ def _apply_payment_link_paid(
     # payment_link.paid moves the checkout to RELEASED (terminal fulfilment state).
     # PAID is the in-band payment confirmation; RELEASED is the order-final state.
     checkout.state = OrderState.RELEASED
-    checkout.paid_at = datetime.now(timezone.utc)
-    checkout.released_at = datetime.now(timezone.utc)
-    checkout.updated_at = datetime.now(timezone.utc)
+    checkout.paid_at = datetime.now(UTC)
+    checkout.released_at = datetime.now(UTC)
+    checkout.updated_at = datetime.now(UTC)
     session.add(checkout)
     session.flush()
 
@@ -685,8 +684,8 @@ def _apply_payment_link_cancelled(session: Session, payload: dict[str, Any]) -> 
         )
 
     checkout.state = OrderState.CANCELLED
-    checkout.cancelled_at = datetime.now(timezone.utc)
-    checkout.updated_at = datetime.now(timezone.utc)
+    checkout.cancelled_at = datetime.now(UTC)
+    checkout.updated_at = datetime.now(UTC)
     session.add(checkout)
     session.flush()
 
@@ -725,8 +724,8 @@ def _apply_payment_failed(session: Session, payload: dict[str, Any]) -> None:
             description="payment.failed",
         )
     checkout.state = OrderState.CANCELLED
-    checkout.cancelled_at = datetime.now(timezone.utc)
-    checkout.updated_at = datetime.now(timezone.utc)
+    checkout.cancelled_at = datetime.now(UTC)
+    checkout.updated_at = datetime.now(UTC)
     session.add(checkout)
     session.flush()
 
@@ -753,14 +752,14 @@ def reconciliation_sweep(
     """
     assert_test_mode_key(config.razorpay.key_id)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff_min = now.timestamp() - SWEEPER_MAX_AGE_SECONDS
     cutoff_max = now.timestamp() - SWEEPER_MIN_AGE_SECONDS
 
     candidates = session.exec(
         select(Checkout).where(
             Checkout.state.in_([OrderState.CREATED, OrderState.HELD]),  # type: ignore[attr-defined]
-            Checkout.psp_payment_link_id.is_not(None),  # type: ignore[attr-defined]
+            Checkout.psp_payment_link_id.is_not(None),  # type: ignore[union-attr]
         )
     ).all()
 
@@ -779,7 +778,9 @@ def reconciliation_sweep(
             continue
 
         try:
-            link = fetch_payment_link(config, checkout.psp_payment_link_id, mock_razorpay=mock_razorpay)
+            link_id = checkout.psp_payment_link_id
+            assert link_id is not None, "sweep requires a persisted payment_link_id"
+            link = fetch_payment_link(config, link_id, mock_razorpay=mock_razorpay)
         except Exception:
             continue
 
@@ -883,7 +884,7 @@ def _persist_event(
         payload=payload,
         status=WebhookStatus.PROCESSING,
         retry_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(event)
     session.flush()
@@ -898,7 +899,7 @@ def process_webhook_in_worker(session: Session, event: WebhookEvent) -> None:
     try:
         _dispatch_webhook_event(session, event.event_type, event.payload)
         event.status = WebhookStatus.COMPLETED
-        event.processed_at = datetime.now(timezone.utc)
+        event.processed_at = datetime.now(UTC)
         event.last_error = None
         session.add(event)
         session.flush()

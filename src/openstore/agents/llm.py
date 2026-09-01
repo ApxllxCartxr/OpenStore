@@ -57,7 +57,10 @@ class OpenAIProvider(LLMProvider):
         if resp.status_code != 200:
             raise LLMError(f"OpenAI API error: {resp.status_code} {resp.text[:200]}")
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        if not isinstance(content, str):
+            raise LLMError(f"Unexpected LLM response shape: {type(content).__name__}")
+        return content
 
 
 class DummyProvider(LLMProvider):

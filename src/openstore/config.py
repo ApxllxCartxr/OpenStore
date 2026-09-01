@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     campaign: CampaignSettings = Field(default_factory=CampaignSettings)
     catalog_path: str | None = None
     evidence_retention_days: int = 540
+    # SID-1: public origin (scheme+host) the sidecar is reachable at, used for
+    # manifests and CORS/RP binding. None => same-origin reverse proxy (derive
+    # from request). Subdomain deployments MUST set this explicitly.
+    public_base_url: str | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> Settings:

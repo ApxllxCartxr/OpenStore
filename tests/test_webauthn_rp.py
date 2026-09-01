@@ -11,8 +11,6 @@ import json
 from pathlib import Path
 
 import pytest
-from sqlmodel import select
-
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,
@@ -31,6 +29,7 @@ from openstore.core.webauthn_rp import (
     complete_registration,
 )
 from openstore.models import WebAuthnCredential
+from sqlmodel import select
 
 GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "webauthn"
 

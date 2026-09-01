@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
 from openstore.config import Settings
 
-
-CATALOG_CACHE: dict[str, Any] | None = None
+CATALOG_CACHE: list[dict[str, Any]] | None = None
 
 
 def load_catalog(config: Settings) -> list[dict[str, Any]]:
@@ -98,10 +98,11 @@ def build_catalog_attestation(
     private_key_pem: bytes,
 ) -> str:
     """Build ES256 JWS Compact catalog attestation per §3.8."""
+    import base64
+
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
-    import base64
 
     payload = {
         "sku": sku,

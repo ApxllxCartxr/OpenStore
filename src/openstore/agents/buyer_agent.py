@@ -4,12 +4,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 from openstore.config import Settings
-from openstore.notifier import sync_buyer_trace, sync_money_trace
+from openstore.notifier import sync_buyer_trace
 
 logger = logging.getLogger("openstore.buyer_agent")
 
@@ -95,7 +94,7 @@ class BuyerAgent:
         })
 
         sync_buyer_trace(trace_id, "cart_compiled", result)
-        return result
+        return cast("dict[str, Any]", result)
 
     async def hold_monitoring(self, checkout_id: str, trace_id: str) -> dict[str, Any]:
         """S7.2: Monitor the hold window. Periodically poll the order state."""
@@ -104,7 +103,7 @@ class BuyerAgent:
             return {"status": "unknown", "checkout_id": checkout_id}
 
         result = await self.mcp.call("get_order", {"checkout_id": checkout_id})
-        return result
+        return cast("dict[str, Any]", result)
 
 
 def compute_cart_hash(cart: list[dict[str, Any]]) -> str:
@@ -134,7 +133,10 @@ class BuyerBot:
 
             @self._client.event
             async def on_message(message: Any) -> None:
-                if message.author == self._client.user:
+                client = self._client
+                if client is None:
+                    return
+                if message.author == client.user:
                     return
                 if message.content.startswith("!shop "):
                     goal = message.content[6:].strip()

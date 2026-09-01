@@ -14,8 +14,6 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlmodel import select
-
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,
@@ -29,6 +27,7 @@ from openstore.config import (
 from openstore.core.database import get_session, init_database
 from openstore.core.policy_signing import PER_USER_AGGREGATE_CAP_MINOR
 from openstore.core.webauthn_rp import ChallengeStore
+from sqlmodel import select
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # noqa: I001
 sys.path.insert(0, str(ROOT / "scripts"))

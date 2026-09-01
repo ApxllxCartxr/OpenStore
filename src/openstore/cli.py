@@ -19,9 +19,13 @@ app = typer.Typer(
 console = Console()
 
 
-def build_config_dict(merchant: str, currency: str) -> dict[str, Any]:
+def build_config_dict(
+    merchant: str,
+    currency: str,
+    public_base_url: str | None = None,
+) -> dict[str, Any]:
     """Build config dict programmatically to avoid fragile string replacement."""
-    return {
+    cfg: dict[str, Any] = {
         "merchant": {"name": merchant, "currency": currency},
         "razorpay": {
             "key_id": "${RAZORPAY_KEY_ID}",
@@ -44,6 +48,11 @@ def build_config_dict(merchant: str, currency: str) -> dict[str, Any]:
         "llm": {"model": "gpt-4o-mini", "temperature": 0.2},
         "campaign": {"min_bps": 500, "max_bps": 3000, "max_active": 5},
     }
+    # SID-1: subdomain deployment sets an explicit public_base_url; same-origin
+    # reverse proxy leaves it unset (manifests derive origin from the request).
+    if public_base_url:
+        cfg["public_base_url"] = public_base_url
+    return cfg
 
 
 ENV_TEMPLATE = """# OpenStore environment variables
@@ -96,6 +105,17 @@ def init(
     merchant: str = typer.Option(..., "--merchant", "-m", help="Merchant name"),
     currency: str = typer.Option("INR", "--currency", "-c", help="Currency (ISO 4217)"),
     output_dir: Path = typer.Option(Path("."), "--output", "-o", help="Output directory"),
+    deployment: str = typer.Option(
+        "same-origin",
+        "--deployment",
+        "-d",
+        help="SID-1 deployment mode: same-origin (reverse proxy) or subdomain",
+    ),
+    public_base_url: str | None = typer.Option(
+        None,
+        "--public-base-url",
+        help="SID-1 public origin for subdomain deployments (e.g. https://openstore.gelateria.example)",
+    ),
 ) -> None:
     """Initialize a new OpenStore sidecar project."""
     output_dir = output_dir.resolve()
@@ -105,8 +125,15 @@ def init(
     env_path = output_dir / ".env.example"
     catalog_path = output_dir / "catalog.yaml"
 
+    # SID-1: subdomain mode requires an explicit public_base_url; same-origin
+    # derives origin from the request at runtime.
+    pub = public_base_url
+    if deployment == "subdomain" and not pub:
+        console.print("[red]✗[/red] --deployment subdomain requires --public-base-url")
+        raise typer.Exit(code=2)
+
     # Write config template with merchant name
-    config_dict = build_config_dict(merchant, currency)
+    config_dict = build_config_dict(merchant, currency, public_base_url=pub)
     config_path.write_text(yaml.safe_dump(config_dict, sort_keys=False))
 
     env_path.write_text(ENV_TEMPLATE)
@@ -115,6 +142,7 @@ def init(
     console.print(f"[green]✓[/green] Created {config_path}")
     console.print(f"[green]✓[/green] Created {env_path}")
     console.print(f"[green]✓[/green] Created {catalog_path}")
+    console.print(f"[green]✓[/green] Deployment mode: {deployment}")
     console.print()
     console.print("Next steps:")
     console.print(f"  1. Copy {env_path} to .env and fill in your keys")
@@ -132,6 +160,13 @@ def serve(
     console.print(f"[blue]Loading config from {config_path}...[/blue]")
     config = load_config(config_path)
     console.print(f"[green]✓[/green] Config loaded for merchant: {config.merchant.name}")
+
+    # SID-3 boot order: config → migrations → keys → workers → serve.
+    console.print("[blue]Applying database migrations...[/blue]")
+    from openstore.core.database import apply_migrations
+
+    apply_migrations(config)
+    console.print("[green]✓[/green] Migrations at head")
 
     # Import here to avoid circular imports
     import uvicorn

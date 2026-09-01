@@ -3,11 +3,10 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,
@@ -18,10 +17,8 @@ from openstore.config import (
     Settings,
     WebAuthnConfig,
 )
-from openstore.core.database import get_session, init_database
+from openstore.core.database import init_database
 from openstore.server import create_app
-from fastapi.testclient import TestClient
-
 
 GOLDEN = Path(__file__).resolve().parents[2] / "GOLDEN"
 
@@ -134,8 +131,8 @@ class TestMCPTools:
 
 class TestCatalogFeed:
     def test_catalog_endpoint_returns_items(self, client, tmp_path):
-        from openstore.surfaces.catalog import CATALOG_CACHE
-        CATALOG_CACHE = None
+        import openstore.surfaces.catalog as catalog_mod
+        catalog_mod.CATALOG_CACHE = None
         catalog = tmp_path / "catalog.yaml"
         catalog.write_text("""
 items:
@@ -145,8 +142,7 @@ items:
     tags: [dairy-free]
     description: A test item
 """)
-        config = client.app.dependency_overrides.get(Settings, lambda: client.app) if hasattr(client.app, "dependency_overrides") else None
-        # Just verify the endpoint exists
+        # Verify the endpoint returns the catalog feed
         r = client.get("/agent/catalog")
         assert r.status_code == 200
         data = r.json()

@@ -192,6 +192,7 @@ openstore/
 │   │   ├── poai.py           # bundle assembly, 9 sections, hash chain
 │   │   ├── webauthn_rp.py    # relying party (INV-2, INV-10)
 │   │   ├── holdcancel.py     # hold/release/cancel state machine
+│   │   ├── health.py         # SID-2 readiness + gate; SID-7 metrics (hand-rolled Prometheus)
 │   │   └── api.py            # Commerce Core API — single entry for all adapters
 │   ├── psp/
 │   │   └── razorpay_driver.py# payment links, webhooks, sweeper (INV-4,6,7)
@@ -226,6 +227,58 @@ openstore/
 **Import firewall (binding):** `src/openstore/core/` and `src/openstore/verify/` MUST NOT
 import any LLM SDK, network LLM client, or `openstore.agents.*`.
 `tests/sentinel/test_import_firewall.py` asserts this statically.
+
+### 1.4 Sidecar integration contract (SID-1 … SID-7)
+
+Authorized by OPEN_QUESTIONS Q-010 (option a). Normative for deploying the sidecar
+beside a merchant's existing store in either of the two supported topologies. Each SID
+is a MUST (RFC 2119). Tests: `tests/stage10/test_sid_integration.py` and
+`tests/stage10/test_sid4_kill_restart.py`.
+
+**Topologies** (SID-1). OpenStore binds to a public origin derived as follows:
+- `same-origin` (default): sidecar sits behind the merchant's reverse proxy; its public
+  URLs (`storefront`, `url`, OAuth `issuer`) derive from the incoming request.
+- `subdomain`: merchant sets `public_base_url` (e.g. `https://agent.gelateria.example`).
+  When set, every public URL MUST use it.
+New config key: `public_base_url` (`str | None`, default `null`).
+CLI: `openstore init --deployment same-origin|subdomain`; `subdomain` REQUIRES
+`--public-base-url` else the process exits non-zero (`fail fast`, R0.5).
+
+**Health & readiness** (SID-2). `GET /health/live` → 200 always (liveness).
+`GET /health/ready` → 200 `{"status":"ready"}` only when all of: config loaded, DB
+reachable, schema present (migrations or test `create_all`), Razorpay test-mode keys
+(`key_id` MUST be prefixed `rzp_test_`), and PoAI signing keys derivable. Otherwise 503
+with `reason_codes`. While not ready, any **gated** agent/money route
+(`/agent/*`, `/campaign/{id}/approve|reject`, `/hold/{cancel_token}/cancel`,
+`/webhooks/razorpay`) MUST return 503 `service_unavailable`. Infra/discovery routes stay
+open. Reason codes: `health.<check>.<status>`.
+
+**Startup ordering** (SID-3). Boot order on `openstore serve`: load config → run
+Alembic migrations → derive signing keys → start workers → bind HTTP. Migrations run
+before the server accepts traffic; `apply_migrations()`, guarded by a schema-ready flag
+so double-migration is impossible on a single process.
+
+**Failure semantics** (SID-4). Crash/kill between PSP `create` and `create` returning
+MUST NOT double-pay or orphan a held checkout. Recovery keys off the persisted
+`psp_payment_link_id`; a dedupe by `reference_id` rejects a second PSP link for the same
+checkout and re-attaches the recovered id. See `test_sid4_kill_restart.py`.
+
+**Origin security boundary** (SID-5). When `public_base_url` is set, its host MUST equal
+`webauthn.rp_id` (RP ID); a mismatch fails at app build (500/startup), never silently.
+CORS `allow_origins` is pinned to the merchant origin only — a foreign Origin is blocked.
+
+**Versioning & rollback** (SID-6). `openstore.__version__` MUST equal
+`pyproject.toml [project] version` (PEP 621 canonical), read at runtime via
+`importlib.metadata.version("openstore")`. The agent-card manifest and the FastAPI app
+SHOULD expose `version`. A rollback to a prior pip release lines up with the prior
+manifest/DB migration set.
+
+**Observability** (SID-7). `GET /internal/metrics` MUST return Prometheus text
+exposition (verified hand-rolled form, no new dependency, Q-011): at least
+`openstore_health_ready`, `openstore_checkout_hold_state{label=...}`,
+`openstore_ledger_balance_minor{label=...}`, `openstore_reconciliation_drift_total`.
+Drift is recomputed from the latest reconciliation sweeper audit entry (server-side
+truth, R0.8) — never a fabricated constant.
 
 ---
 
@@ -657,6 +710,8 @@ per INV-9). OAuth 2.1 + PKCE; asymmetric tokens (INV-9).
 | Local tunneling (demo) | `cloudflared` | for webhook receipt during development |
 | Evidence retention | config key `evidence_retention_days` (default 540) | nightly worker deletes older `EvidenceBundle` rows, writes `RETENTION_PURGE` audit entry per deletion; retention advertised in `/agents` MUST equal the configured value (DECISIONS §11.1.9) |
 | Envelope TTL | `envelope_ttl_seconds = 14400` (4h), merchant-configurable | DECISIONS §11.1.14 |
+| Observability | hand-rolled Prometheus text exposition on `/internal/metrics` | no new dependency (Q-011); gauges: health_ready, checkout_hold_state, ledger_balance_minor, reconciliation_drift_total |
+| Readiness/migrations | `core/health.py` + Alembic `apply_migrations()` | SID-2/SID-3; schema-ready flag prevents double-migration |
 
 **Razorpay pinned constants:** `reference_id = checkout_id` (deterministic; max 40 chars,
 UUID4 is 36). Webhook events handled: `payment_link.paid`, `payment_link.cancelled`,
@@ -719,9 +774,11 @@ See Part 9 (normative).
 `/agent/mcp`, `/agent/acp`, `/agent/campaigns`, `/protocols/<name>/spec-excerpt`,
 `/intent/studio`, `/campaign/studio`, `/campaign/{campaign_id}/approve`,
 `/campaign/{campaign_id}/reject`, `/admin/agents`, `/hold/{cancel_token}/cancel`,
-`/orders/{checkout_id}/evidence`, `/orders/{id}/evidence/view`,
-`/orders/intent/{intent_id}/evidence`, `/oauth/jwks.json`, `/internal/webauthn/*`,
+`/orders/{checkout_id}/evidence`, `/orders/intent/{intent_id}/evidence`, `/oauth/jwks.json`, `/internal/webauthn/*`,
 `/internal/policy/blast-radius`, `/admin/*`.
+**SID routes (Q-010):** `/health/live`, `/health/ready`, `/internal/metrics` —
+liveness, readiness (SID-2), and Prometheus text metrics (SID-7). Registered in
+REGISTRY.json; `/health/live` is also served as `/healthz` for legacy probes.
 
 ---
 

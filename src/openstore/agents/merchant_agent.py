@@ -8,7 +8,6 @@ import json
 import logging
 from typing import Any
 
-from openstore.agents.llm import llm_chat
 from openstore.config import Settings
 from openstore.notifier import sync_merchant_trace
 

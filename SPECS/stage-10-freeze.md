@@ -42,6 +42,43 @@ pins, import firewall. Fails the build on any drift.
 OPEN_QUESTIONS without RESOLUTION; cuts in Part 10 remain cut (no delegation chains, no
 buyer swarm feature, no AXO loop, no UAP adapter). Tag the freeze.
 
+### S10.5 Sidecar integration contract (SID-1 … SID-7)
+Authorized by Q-010 (PRD §1.4). Implement and test all seven SIDs:
+- SID-1 deployment topology: `public_base_url` config key; `init --deployment
+  same-origin|subdomain` (subdomain REQUIRES --public-base-url, fail fast);
+  public URL derivation (same-origin from request, subdomain from public_base_url).
+- SID-2 health/readiness: `/health/live` 200 always; `/health/ready` 200 only when
+  config+DB+schema+test-mode-Razorpay+signing keys all present, else 503 with
+  `health.<check>.<status>` reason codes; gated agent/money routes 503 while not ready.
+- SID-3 startup ordering: serve = config → `apply_migrations()` → keys → workers →
+  HTTP; schema-ready flag prevents double-migration.
+- SID-4 crash/restart: two-process kill/restart op proves no double-pay and no orphaned
+  HELD checkout (`tests/stage10/test_sid4_kill_restart.py`).
+- SID-5 origin security: `public_base_url` host MUST equal `webauthn.rp_id` (app-build
+  failure on mismatch); CORS pinned to merchant origin.
+- SID-6 versioning: `__version__` = pyproject version via `importlib.metadata.version`;
+  exposed on agent-card manifest and FastAPI app.
+- SID-7 metrics: `/internal/metrics` hand-rolled Prometheus (no new dep, Q-011) with
+  health_ready, checkout_hold_state, ledger_balance_minor, reconciliation_drift_total.
+Tests: `tests/stage10/test_sid_integration.py`, `tests/stage10/test_sid4_kill_restart.py`.
+
+### S10.6 Headless execution of PRD Part 12 steps 3–5 (B6 / Q-013)
+The unattended run supersedes PRD Part 12 steps 3–5 as follows (Q-013, option b):
+step 3 (bounded money) and step 4 (agentic failure) are exercised **headlessly** by
+direct MCP tool calls (`checkout_initiate`/`checkout_confirm`, policy deny/recover)
+using GOLDEN WebAuthn fixtures — no live Discord, no live Razorpay. Step 5 (campaign
+beat) is exercised via `list_campaigns` on a seeded feed. The live-Discord-bot and
+live-Razorpay-payment variants of these steps move to the operator-verified list below.
+
+## PENDING-HUMAN-VERIFICATION (report to operator; never self-certified)
+- Live Discord bot completes a full policy-aware purchase (Part 12 step 2 live).
+- Live Razorpay payment-link click + webhook round-trip (step 3 live payment).
+- Live Passkey/WebAuthn ceremony on a real authenticator (incl. the three `webauthn_*`
+  MCP wrappers whose wiring predates the INV-10 signature change — see `type: ignore[call-arg]`
+  in `surfaces/mcp_server.py`).
+- Two-merchant concurrent demo (gelateria + chai) with live browsers.
+- Full PRD Part 12 track-bar compliance run on a real store.
+
 ## MUST NOT
 - No new features, no new identifiers, no new config keys. Freeze means freeze.
 - Do not weaken a red-team test to make it pass — a failing red-team test is a bug in the
