@@ -9,12 +9,12 @@
 #   POST /internal/webauthn/assertion/complete  (assertion + optional policy sign)
 #   GET  /internal/policy/blast-radius          (per signed-in operator)
 #
-# Signing-time validation (PRD §3.2a): a policy whose max_spend_total_minor would
-# push the enrolled user's aggregate above the per-user cap is rejected with
-# policy.aggregate_cap_exceeded; a policy_version != 2 raises LegacyPolicyError
-# and is never mapped to a reason code. All totals are recomputed server-side
-# (R0.8); the user_id / credential selection comes from the session, never the
-# request body (INV-10).
+# Signing-time validation (PRD §3.2a + Q-006 resolution): a policy whose
+# max_spend_total_minor would push the enrolled user's aggregate above the
+# per-user cap is rejected with policy.aggregate_cap_exceeded; a policy_version
+# != 2 is rejected with policy.policy_version_unsupported (closed set). All
+# totals are recomputed server-side (R0.8); the user_id / credential selection
+# comes from the session, never the request body (INV-10).
 from __future__ import annotations
 
 import json
@@ -32,7 +32,6 @@ from openstore.core.database import get_session
 from openstore.core.holdcancel import AAL_HOLD_SECONDS
 from openstore.core.policy_signing import (
     PER_USER_AGGREGATE_CAP_MINOR,
-    LegacyPolicyError,
     blast_radius,
     complete_policy_signing,
 )
@@ -195,29 +194,22 @@ def policy_studio_router(
             session.close()
 
         # If a policy payload accompanies the verified assertion, complete the
-        # signing ceremony (S3.5 / PRD §3.2a).
+        # signing ceremony (S3.5 / PRD §3.2a). Gate rejections (legacy policy
+        # version, aggregate cap) come back as non-ok SigningOutcome with the
+        # exact closed-set reason_code (Q-006 resolution).
         if body.policy is not None:
-            try:
-                outcome = complete_policy_signing(
-                    fields=body.policy,
-                    merchant_id=operator.user_id,
-                    user_id=operator.user_id,
-                    credential_id=body.credential_id,
-                    webauthn_sign_count=new_sign_count,
-                    aggregate_spent_minor=_current_aggregate(make_session, operator.user_id),
-                )
-            except LegacyPolicyError as e:
-                # Closed-set code per Q-006 resolution: legacy policies and aggregate-cap
-                # breaches are both policy-signing gate rejections; surface the existing
-                # closed-set code with the legacy detail in the message.
-                raise HTTPException(
-                    status_code=422,
-                    detail={"reason_code": "policy.aggregate_cap_exceeded", "message": str(e)},
-                )
+            outcome = complete_policy_signing(
+                fields=body.policy,
+                merchant_id=operator.user_id,
+                user_id=operator.user_id,
+                credential_id=body.credential_id,
+                webauthn_sign_count=new_sign_count,
+                aggregate_spent_minor=_current_aggregate(make_session, operator.user_id),
+            )
             if not outcome.ok:
                 raise HTTPException(
                     status_code=422,
-                    detail={"reason_code": outcome.reason_code, "message": "aggregate cap would be exceeded"},
+                    detail={"reason_code": outcome.reason_code, "message": f"policy-signing gate rejected: {outcome.reason_code}"},
                 )
             assert outcome.policy is not None
             psession = make_session()

@@ -74,6 +74,7 @@ def test_registry_reason_codes_complete():
         "policy.aggregate_cap_exceeded",
         "policy.campaign_inactive",
         "policy.campaign_outside_window",
+        "policy.policy_version_unsupported",
         "idempotency_key_reuse_with_different_payload",
         "webauthn_unsupported_alg",
         "unsupported_compiler_digest",

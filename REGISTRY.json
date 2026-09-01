@@ -5,6 +5,7 @@
     "policy.spend_per_tx_exceeded","policy.spend_envelope_exceeded",
     "policy.spend_cumulative_exceeded","policy.no_human_authority",
     "policy.aggregate_cap_exceeded","policy.campaign_inactive","policy.campaign_outside_window",
+    "policy.policy_version_unsupported",
     "idempotency_key_reuse_with_different_payload","webauthn_unsupported_alg",
     "unsupported_compiler_digest","request_in_progress"],
   "error_namespaces": ["auth.*","policy.*","checkout.*","psp.*","ratelimit.*","agent.*",

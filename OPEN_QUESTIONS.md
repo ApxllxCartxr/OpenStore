@@ -79,11 +79,15 @@
   `ok=True`, so the check is dead.
 - Blocked since: 2026-08-30T22:00:00Z
 - RESOLUTION (2026-08-30):
-  (i) Map `LegacyPolicyError` to the existing closed-set code `policy.aggregate_cap_exceeded`.
-  Both are policy-signing gate rejections; the message carries the legacy detail. The
-  pre-stage test that asserted `policy_version_unsupported` is updated to the closed-set
-  value. A future RESOLUTION may add a finer-grained `policy_version_unsupported` code.
-  (ii) Delete the defensive `if outcome.policy is None` branch entirely. The contract holds.
+  (i) SUPERSEDED 2026-09-01. Add reason code `policy.policy_version_unsupported` to
+  REGISTRY.json reason_codes (R0.2 clearance granted by this RESOLUTION). Map
+  `LegacyPolicyError` -> `policy.policy_version_unsupported` in complete_policy_signing on
+  `policy_version != 2`, update the Studio surface, and update the Stage-3 test that
+  previously asserted the old value. The earlier mapping to `policy.aggregate_cap_exceeded`
+  is void; `policy.aggregate_cap_exceeded` remains reserved for actual aggregate-cap
+  breaches only (PRD v3.0 §3.2a).
+  (ii) Keep: delete the defensive `if outcome.policy is None` branch entirely. The
+  contract holds.
 
 ## Q-005 | stage: 03 | date: 2026-08-30T20:30:00Z
 - What is ambiguous: 
@@ -123,4 +127,117 @@
       `PER_USER_AGGREGATE_CAP_MINOR = 500_000` lives in policy_signing.py. Both are imported
       by the studio surface and the templates.
   (D) Option (d2). `import pytest` added to tests/sentinel/test_import_firewall.py:12
-      (single-line correction; no semantic change). Documented here per SCOPE-closed policy.
+       (single-line correction; no semantic change). Documented here per SCOPE-closed policy.
+
+- AMENDMENT (2026-09-01): Keep the closed reason code `assertion_required` on the compiler
+  path exactly as resolved above. Additionally, the WebAuthn RP MUST record the precise
+  failure type — one of assertion_signature_invalid | challenge_mismatch | challenge_expired
+  | challenge_reused | sign_count_regression | credential_not_found | uv_flag_missing — on
+  the AuditLogEntry detail field and in the `#alerts` Discord trace, so security-relevant
+  failures (especially sign_count_regression, the cloned-authenticator signal) are never
+  flattened out of the evidence trail. These failure-type strings are local to the audit
+  detail and are NOT added to REGISTRY.json reason_codes. New fine-grained reason codes
+  remain future RESOLUTION material.
+
+## Q-007 | stage: 05 | date: 2026-08-31T00:00:00Z
+- What is ambiguous: The [verify-at-build] constants (R0.7) — duplicate-reference_id
+  error code string, cancel-already-paid HTTP 400 body, and webhook body shapes for
+  payment_link.paid / payment_link.cancelled / payment_link.partially_paid / payment.failed
+  — must be captured live from Razorpay test-mode. scripts/capture_constants.py
+  implements the capture flow. However, the sandbox has no outbound access to
+  api.razorpay.com, so live capture cannot be performed during this build session.
+  The golden fixtures in GOLDEN/razorpay/ are documented as "captured live by
+  scripts/capture_constants.py" with source comments. PRD §4 states the constants
+  are [verify-at-build]; R0.7 requires live confirmation or an OPEN_QUESTION.
+- Options considered:
+  (a) Stop the stage entirely (R0.7) until live test-mode is reachable. This would
+      block Stages 5–10 since Stage 5 is on the critical path.
+  (b) Use representative canonical fixtures with full source comments, implement
+      scripts/capture_constants.py correctly so a developer can re-run it against
+      live test-mode, and document the gap. Tests use the fixtures with mocked SDK
+      calls. This is the chosen path.
+  (c) Invent the constants from memory. FORBIDDEN — the unforgivable act (R0.7).
+- Blocked since: 2026-08-31T00:00:00Z
+- RESOLUTION (2026-09-01): Option (b) approved — proceed with representative canonical
+  fixtures carrying full source comments; scripts/capture_constants.py stays implemented
+  and re-runnable; tests use the fixtures with mocked SDK calls; the gap is recorded
+  here. Production release remains BLOCKED by R0.7 on a live capture — option (c)
+  (inventing constants from memory) remains FORBIDDEN.
+  Recovery protocol (human-executed, before any production release):
+  1) On a machine with outbound access to api.razorpay.com, run
+     `uv run python scripts/capture_constants.py` with the real test-mode keys from .env;
+  2) Confirm it writes the 4 webhook bodies (payment_link.paid / payment_link.cancelled /
+     payment_link.partially_paid / payment.failed) and the 2 error shapes (
+     duplicate-reference_id create error; cancel-already-paid HTTP 400) into
+     GOLDEN/razorpay/ with source comments (URL + capture date);
+  3) Re-run tests/stage05/ against the captured bodies — 0 failures;
+  4) Commit as `chore(razorpay): pin verify-at-build constants <ISO-date>`;
+  5) Update this RESOLUTION block with the capture date.
+  Until then Stage 5 remains "provisional": no production code path may depend on
+  unverified constants.
+
+## Q-008 | stage: 10 | date: 2026-09-01T14:42:34Z
+- What is ambiguous: INV-9 — validate_access_token() (src/openstore/core/oauth.py) parses
+  the JWT, checks `jti`, `exp`, DB record, and revocation, but NEVER verifies the JWS
+  signature nor pins the header `alg`. A forged token that re-uses a live token's `jti`
+  claim with header `alg: none` or `alg: RS256` (no signature) is ACCEPTED. The stage-10
+  red-team proofs tests/redteam/test_inv9_oauth_alg.py::test_alg_none_token_rejected and
+  ::test_rs256_alg_confusion_rejected assert rejection and FAIL. Per stage-10 MUST-NOT the
+  tests must not be weakened; a failing red-team test is a product bug. PRD §3.13/§5.1
+  mandates ES256 asymmetric tokens with `kid` (INV-9) — the issuer path conforms, but the
+  validator has no key/signature verification step.
+- Options considered: (a) verify signature + pin `alg` in validate_access_token against
+  the merchant JWKS before trusting the DB record (schema-from-PRD compliant, closes the
+  gap); (b) declare the validator "internal-only" and defer signature verification to the
+  resource-server boundary; (c) weaken/delete the failing red-team tests — FORBIDDEN.
+- Blocked since: 2026-09-01T14:42:34Z
+- RESOLUTION (2026-09-01): Option (a). validate_access_token must, BEFORE trusting any
+  claim, verify the JWS signature AND pin the header alg, using the same JWS library as
+  issuance (python-jose), explicit allowlist algorithms=["ES256"]:
+  1) decode with verify_signature=True + allowlist — alg:none and RS256 are rejected by
+     the library's algorithm check before signature verification (mechanism verified
+     on 2026-09-01);
+  2) resolve the public key by `kid` from the merchant JWKS
+     (/.well-known/poai-jwks.json, DECISIONS §11.1.10); missing/unknown kid -> hard
+     error;
+  3) only then continue the existing jti/exp/DB/revocation checks.
+  Any verification failure carries the new closed-set reason code
+  `auth.token_verification_failed`, authorized by this RESOLUTION to be added to
+  REGISTRY.json reason_codes — add it TOGETHER WITH the Stage-10 implementation (never
+  before, so registry_diff never sees an unimplemented identifier). Tests to add:
+  alg:none / RS256 impersonation / unsigned / wrong-kid unit tests;
+  tests/redteam/test_inv9_oauth_alg.py::test_alg_none_token_rejected and
+  ::test_rs256_alg_confusion_rejected must pass unweakened.
+
+## Q-009 | stage: 10 | date: 2026-09-01T14:42:34Z
+- What is ambiguous: Prompt-injection pattern family — the closed pattern list
+  _PROMPT_INJECTION_PATTERNS (src/openstore/core/campaigns.py) rejects
+  "ignore previous instructions" and "ignore all previous" but NOT
+  "DISREGARD ALL PREVIOUS INSTRUCTIONS" (same family, synonym verb, undetected). Red-team
+  tests tests/redteam/test_prompt_injection.py parametrize this payload; the two
+  variations FAIL as DID-NOT-RAISE. stage-10 MUST-NOT forbids weakening the test; the gap
+  is a product bug in the deterministic validator (R0.3: unknown value must hard-error,
+  never silently pass).
+- Options considered: (a) extend the pattern set with "disregard all previous" and
+  "ignore all instructions" variants (validator becomes a closed-set superset that still
+  matches only authored patterns); (b) move the pattern list to REGISTRY.json as an
+  exhaustive closed set (design change, requires a new identifier — R0.2 blocks without
+  approval); (c) remove the payload from the parametrize list — FORBIDDEN (weakens the
+  test).
+- Blocked since: 2026-09-01T14:42:34Z
+- RESOLUTION (2026-09-01): Option (a) + normalization hardening. Extend
+  _PROMPT_INJECTION_PATTERNS (src/openstore/core/campaigns.py) to the full synonym
+  family: ignore all previous instructions, ignore all prior instructions, ignore all
+  instructions, disregard all previous instructions, disregard all prior instructions,
+  disregard all instructions, forget all previous instructions, forget all prior
+  instructions, override your instructions, override your previous instructions.
+  Deterministic matching (no LLM): normalize input first — lowercase; collapse every
+  whitespace run (including newlines and tabs) to a single space; strip all
+  non-alphanumeric characters — then substring-match against the normalized family.
+  Verified on 2026-09-01: lowercase + punctuation variants are caught, but
+  whitespace-collapse is mandatory because multi-space and newline-separated variants
+  slip through before collapsing. Both red-team payloads in
+  tests/redteam/test_prompt_injection.py must pass unweakened. The wordlist stays
+  maintainer-owned; migration to REGISTRY.json remains a future design change requiring
+  its own RESOLUTION.
+

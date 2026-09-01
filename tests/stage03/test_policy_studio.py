@@ -239,7 +239,7 @@ def test_signing_rejects_legacy_policy_version(client: TestClient, session_facto
         headers=HEADERS,
     )
     assert res.status_code == 422
-    assert res.json()["detail"]["reason_code"] == "policy.aggregate_cap_exceeded"
+    assert res.json()["detail"]["reason_code"] == "policy.policy_version_unsupported"
 
 
 def test_assertion_without_policy_returns_sign_count(client: TestClient, session_factory):

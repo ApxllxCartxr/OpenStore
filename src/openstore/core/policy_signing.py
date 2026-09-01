@@ -137,10 +137,10 @@ def compute_policy_hash(fields: dict[str, Any]) -> str:
     """Deterministic sha256 (hex) over the canonical JSON of the authorizeable
     §3.1 fields. A field missing from the supplied form is treated as absent,
     but a whitelist guarantees the hash never includes client-invented keys."""
-    from openstore.core.poai import canonical_json
+    from openstore.core.poai import canonical_json_bytes
 
     payload = {k: fields[k] for k in POLICY_HASH_FIELDS if k in fields}
-    return hashlib.sha256(canonical_json(payload)).hexdigest()
+    return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -164,15 +164,21 @@ def complete_policy_signing(
     """Construct and validate the signed IntentPolicy after a verified
     `{"mode": "policy"}` assertion.
 
-    Raises LegacyPolicyError if policy_version != 2 (R0.5: never mapped).
-    Returns SigningOutcome(ok=False, reason_code="policy.aggregate_cap_exceeded")
-    if committing this policy's max spend breaches the per-user aggregate cap
+    A `policy_version != 2` maps to SigningOutcome(ok=False,
+    reason_code="policy.policy_version_unsupported") (Q-006 resolution; the code
+    is closed-set in REGISTRY.json). Returns
+    SigningOutcome(ok=False, reason_code="policy.aggregate_cap_exceeded") if
+    committing this policy's max spend breaches the per-user aggregate cap
     (§3.2a). Otherwise returns SigningOutcome(ok=True, policy=...) with the
     server-derived id, policy_hash, and signing anchor filled in. No LLM, no
     client-trusted totals (R0.8/R0.9).
     """
     version = fields.get("policy_version", 2)
-    validate_policy_version(version)
+    try:
+        validate_policy_version(version)
+    except LegacyPolicyError:
+        # Q-006 resolution: the legacy-version gate maps to the closed-set code.
+        return SigningOutcome(ok=False, reason_code="policy.policy_version_unsupported")
 
     policy_hash = compute_policy_hash(fields)
     policy_id = "pol_" + hashlib.sha256((merchant_id + ":" + policy_hash).encode()).hexdigest()[:24]
