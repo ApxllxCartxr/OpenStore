@@ -1,0 +1,22 @@
+{
+  "description": "payment.failed webhook body",
+  "source": "Razorpay webhook (test-mode simulation, captured by scripts/capture_constants.py)",
+  "capture_date": "2026-08-30T00:00:00Z",
+  "event": "payment.failed",
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_TEST_FAILED_001",
+        "order_id": "chk_TEST_CHECKOUT_004",
+        "amount": 10000,
+        "currency": "INR",
+        "status": "failed",
+        "error_code": "BAD_REQUEST_ERROR",
+        "error_description": "Payment failed",
+        "notes": {"checkout_id": "chk_TEST_CHECKOUT_004", "trace_id": "trace_TEST_004"},
+        "created_at": 1234567890
+      }
+    }
+  },
+  "created_at": 1234567890
+}

@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "BAD_REQUEST_ERROR",
+    "description": "reference_id provided is already used. Please provide another value",
+    "source": "business",
+    "step": "request",
+    "reason": "duplicate_reference_id"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "description": "Cancel-already-paid HTTP 400 body shape (DECISIONS §11.1.2)",
+  "source": "Razorpay /v1/payment_links/{id}/cancel (POST) against a paid link",
+  "capture_date": "2026-08-30T00:00:00Z",
+  "http_status": 400,
+  "body_shape": {
+    "error": {
+      "code": "BAD_REQUEST_ERROR",
+      "description": "Payment link is already paid. Cannot cancel.",
+      "source": "business",
+      "step": "payment_cancellation",
+      "reason": "already_paid"
+    }
+  },
+  "note": "Driver MUST detect this exact response and issue refund instead of cancel."
+}

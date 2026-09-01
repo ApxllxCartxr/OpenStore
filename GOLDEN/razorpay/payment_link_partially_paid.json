@@ -1,0 +1,22 @@
+{
+  "description": "payment_link.partially_paid webhook body",
+  "source": "Razorpay webhook (test-mode simulation, captured by scripts/capture_constants.py)",
+  "capture_date": "2026-08-30T00:00:00Z",
+  "event": "payment_link.partially_paid",
+  "payload": {
+    "payment_link": {
+      "entity": {
+        "id": "plink_TEST_PARTIAL_001",
+        "reference_id": "chk_TEST_CHECKOUT_003",
+        "amount": 10000,
+        "amount_paid": 5000,
+        "currency": "INR",
+        "status": "partially_paid",
+        "description": "Test partial payment",
+        "notes": {"checkout_id": "chk_TEST_CHECKOUT_003", "trace_id": "trace_TEST_003"},
+        "created_at": 1234567890
+      }
+    }
+  },
+  "created_at": 1234567890
+}

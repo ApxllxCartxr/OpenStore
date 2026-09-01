@@ -1,0 +1,23 @@
+{
+  "description": "payment_link.paid webhook body",
+  "source": "Razorpay webhook (test-mode simulation, captured by scripts/capture_constants.py)",
+  "capture_date": "2026-08-30T00:00:00Z",
+  "event": "payment_link.paid",
+  "payload": {
+    "payment_link": {
+      "entity": {
+        "id": "plink_TEST123456789",
+        "reference_id": "chk_TEST_CHECKOUT_001",
+        "amount": 21000,
+        "amount_paid": 21000,
+        "currency": "INR",
+        "status": "paid",
+        "description": "Gelato order",
+        "short_url": "https://rzp.io/i/TEST",
+        "notes": {"checkout_id": "chk_TEST_CHECKOUT_001", "trace_id": "trace_TEST_001", "client_id": "client_test_001"},
+        "created_at": 1234567890
+      }
+    }
+  },
+  "created_at": 1234567890
+}

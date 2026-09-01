@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "BAD_REQUEST_ERROR",
+    "description": "Payment Link has expired or completed. It cannot be cancelled",
+    "source": "business",
+    "step": "payment_link",
+    "reason": "payment_link_inactive"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "description": "Duplicate reference_id create error response",
+  "source": "Razorpay /v1/payment_links (POST) with duplicate reference_id",
+  "capture_date": "2026-08-30T00:00:00Z",
+  "error_code": "REFERENCE_ID_ALREADY_EXISTS",
+  "error_description": "A payment link with this reference_id already exists.",
+  "http_status": 400,
+  "body_shape": {
+    "error": {
+      "code": "REFERENCE_ID_ALREADY_EXISTS",
+      "description": "A payment link with this reference_id already exists.",
+      "source": "business",
+      "step": "payment_initiation",
+      "reason": "duplicate_reference_id"
+    }
+  },
+  "note": "Driver must catch ONLY this pinned error code; never bare Exception."
+}
