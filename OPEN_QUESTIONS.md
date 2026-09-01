@@ -241,3 +241,59 @@
   maintainer-owned; migration to REGISTRY.json remains a future design change requiring
   its own RESOLUTION.
 
+## Q-010 | stage: 10 | date: 2026-09-01T14:42:34Z
+- What is ambiguous: Sidecar integration contract — no spec exists for deploying
+  OpenStore beside an existing merchant site. The PRD assumes a standalone process
+  but does not define health/readiness, startup ordering, versioning, metrics, or
+  origin-security binding for the two deployment topologies (same-origin reverse proxy
+  vs subdomain). Without these, a merchant cannot integrate OpenStore without deep
+  PRD knowledge.
+- Options considered: (a) define a sidecar integration contract as §1.4 in the PRD
+  with 7 SID requirements (deployment topology, health/readiness, startup ordering,
+  failure semantics, origin security, versioning, observability) and implement in
+  Stage 10; (b) defer to a future version; (c) implement ad-hoc without spec.
+- Blocked since: 2026-09-01T14:42:34Z
+- RESOLUTION (2026-09-01): Option (a). Operator-authorized addition to PRD §1.4.
+  Full specification provided in the implementation prompt §3.3. Identifiers:
+  SID-1 (public_base_url, deployment modes), SID-2 (health/live, health/ready),
+  SID-3 (startup/shutdown ordering), SID-4 (crash/restart semantics), SID-5
+  (origin security boundary), SID-6 (versioning & rollback), SID-7 (metrics).
+  New routes: /health/live, /health/ready, /internal/metrics. New config key:
+  public_base_url. New file: src/openstore/core/health.py.
+  Tests: kill+restart recovery, WebAuthn RP ID match, CORS origin binding.
+  The 3 routes authorized for REGISTRY.json addition: /health/live, /health/ready,
+  /internal/metrics.
+
+## Q-011 | stage: 10 | date: 2026-09-01T14:42:34Z
+- What is ambiguous: SID-7 mandates Prometheus text exposition format for metrics
+  endpoint. The PRD's closed dependency list (Part 4) does not include prometheus-client.
+  Hand-rolling the format vs adding the library is a dependency decision.
+- Options considered: (a) add prometheus-client to dependencies; (b) hand-roll the
+  minimal text exposition (# HELP/# TYPE + gauge lines) with no new dependency.
+- PROVISIONAL (unattended-agent): Option (b). Use hand-rolled Prometheus text
+  exposition format with # HELP/# TYPE lines and gauge values. No new dependency.
+  Operator to ratify.
+
+## Q-012 | stage: 10 | date: 2026-09-01T14:42:34Z
+- What is ambiguous: __version__ single source of truth. PEP 621 (pyproject.toml)
+  convention is version in pyproject.toml, exposed at runtime via
+  importlib.metadata.version("openstore"). The unattended-agent addendum B4
+  initially specified src/openstore/__init__.py as source, which conflicts.
+- Options considered: (a) src/openstore/__init__.py hard-coded; (b) pyproject.toml
+  as canonical, __init__.py reads via importlib.metadata.version.
+- PROVISIONAL (unattended-agent): Option (b). Canonical version in pyproject.toml
+  (PEP 621), __init__.py exposes it via importlib.metadata.version("openstore").
+  Operator to ratify.
+
+## Q-013 | stage: 10 | date: 2026-09-01T14:42:34Z
+- What is ambiguous: Main-prompt §11 step 3 says "Discord bot → search_products → …"
+  but the unattended-agent addendum B6 says exercise buyer flow headlessly via direct
+  MCP tool calls (no live Discord token available overnight). The addendum claims
+  override authority for R0.4 only, not for §11.
+- Options considered: (a) follow §11 literally and require live Discord (blocks
+  unattended run); (b) supersede §11 steps 3-5 for the unattended run.
+- PROVISIONAL (unattended-agent): Option (b). B6 supersedes main-prompt §11 steps
+  3-5 for the unattended run: those steps are executed headlessly with GOLDEN WebAuthn
+  fixtures and direct MCP calls; the Discord-bot and live-payment variants move to
+  the PENDING-HUMAN list. Operator to ratify.
+
