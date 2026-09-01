@@ -238,8 +238,10 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
             starts_at = campaign.get("offer_terms", {}).get("starts_at")
             ends_at = campaign.get("offer_terms", {}).get("ends_at")
             if starts_at and ends_at:
-                start_ts = int(datetime.fromisoformat(starts_at.replace("Z", "+00:00")).timestamp())
-                end_ts = int(datetime.fromisoformat(ends_at.replace("Z", "+00:00")).timestamp())
+                start_str = starts_at.replace("Z", "+00:00").replace("+00:00+00:00", "+00:00")
+                end_str = ends_at.replace("Z", "+00:00").replace("+00:00+00:00", "+00:00")
+                start_ts = int(datetime.fromisoformat(start_str).timestamp())
+                end_ts = int(datetime.fromisoformat(end_str).timestamp())
 
                 if ctx.now_unix < start_ts or ctx.now_unix >= end_ts:
                     add_check("campaign_validity", False, "policy.campaign_outside_window")
