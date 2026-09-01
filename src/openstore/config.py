@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     campaign: CampaignSettings = Field(default_factory=CampaignSettings)
+    catalog_path: str | None = None
+    evidence_retention_days: int = 540
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> Settings:
@@ -80,4 +82,7 @@ def load_config(config_path: str | Path) -> Settings:
     Raises:
         ValidationError: If unknown keys are present (R0.3) or required fields missing.
     """
-    return Settings.from_yaml(config_path)
+    settings = Settings.from_yaml(config_path)
+    # Set catalog_path from the config file's directory
+    settings.catalog_path = str(Path(config_path).parent / "catalog.yaml")
+    return settings
