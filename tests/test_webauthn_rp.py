@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 
 import pytest
+from sqlmodel import select
+
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,
@@ -29,7 +31,6 @@ from openstore.core.webauthn_rp import (
     complete_registration,
 )
 from openstore.models import WebAuthnCredential
-from sqlmodel import select
 
 GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "webauthn"
 
@@ -133,6 +134,7 @@ def test_registration_challenge_single_use(rp_session, rp_settings):
     with pytest.raises(WebAuthnError) as ei:
         store.consume(chal)
     assert ei.value.reason_code == "assertion_required"
+    assert ei.value.failure_type == "challenge_reused"
 
 
 def test_challenge_ttl_expiry(rp_settings):
@@ -145,6 +147,7 @@ def test_challenge_ttl_expiry(rp_settings):
     with pytest.raises(WebAuthnError) as ei:
         store.consume(challenge)
     assert ei.value.reason_code == "assertion_required"
+    assert ei.value.failure_type == "challenge_expired"
 
 
 # --- assertion -------------------------------------------------------------
@@ -193,7 +196,7 @@ def test_assertion_wrong_challenge(rp_session, rp_settings):
             binding={"mode": "policy"}, store=store,
         )
     assert ei.value.reason_code == "assertion_required"
-
+    assert ei.value.failure_type == "assertion_signature_invalid"
 
 def test_assertion_sign_count_regression(rp_session, rp_settings):
     _enroll(rp_session, rp_settings, "registration_es256")
@@ -219,6 +222,7 @@ def test_assertion_sign_count_regression(rp_session, rp_settings):
             binding={"mode": "policy"}, store=store,
         )
     assert ei.value.reason_code == "assertion_required"
+    assert ei.value.failure_type == "sign_count_regression"
 
 
 def test_assertion_uv_flag_missing(rp_session, rp_settings):
@@ -239,6 +243,7 @@ def test_assertion_uv_flag_missing(rp_session, rp_settings):
             binding={"mode": "policy"}, store=store,
         )
     assert ei.value.reason_code == "assertion_required"
+    assert ei.value.failure_type == "uv_flag_missing"
 
 
 def test_assertion_binding_mismatch(rp_session, rp_settings):
@@ -256,6 +261,7 @@ def test_assertion_binding_mismatch(rp_session, rp_settings):
             binding={"mode": "cart", "cart_hash": "hash-b"}, store=store,
         )
     assert ei.value.reason_code == "assertion_required"
+    assert ei.value.failure_type == "challenge_mismatch"
 
 
 def test_assertion_binding_cart_match(rp_session, rp_settings):

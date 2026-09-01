@@ -15,9 +15,14 @@
 # != 2 is rejected with policy.policy_version_unsupported (closed set). All
 # totals are recomputed server-side (R0.8); the user_id / credential selection
 # comes from the session, never the request body (INV-10).
+#
+# Q-005 AMENDMENT: every WebAuthn rejection is mirrored into the evidence trail
+# (AuditLogEntry detail + #alerts) with its precise failure_type, so security-
+# relevant failures (e.g. sign_count_regression) are never flattened.
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -44,7 +49,8 @@ from openstore.core.webauthn_rp import (
     complete_registration,
     get_user_credentials,
 )
-from openstore.models import IntentPolicy
+from openstore.models import AuditLog, IntentPolicy
+from openstore.notifier import sync_alert
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
@@ -156,6 +162,8 @@ def policy_studio_router(
             }
         except WebAuthnError as e:
             session.rollback()
+            _record_webauthn_failure(session, operator.user_id, body.credential_id, e, "register")
+            session.commit()
             raise HTTPException(status_code=422, detail={"reason_code": e.reason_code, "message": e.message})
         finally:
             session.close()
@@ -189,6 +197,8 @@ def policy_studio_router(
             session.commit()
         except WebAuthnError as e:
             session.rollback()
+            _record_webauthn_failure(session, operator.user_id, body.credential_id, e, "assertion")
+            session.commit()
             raise HTTPException(status_code=401, detail={"reason_code": e.reason_code, "message": e.message})
         finally:
             session.close()
@@ -251,6 +261,37 @@ def policy_studio_router(
 
 def _safe_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True)
+
+
+def _record_webauthn_failure(
+    session: Session,
+    operator_user_id: str,
+    credential_id: str | None,
+    err: WebAuthnError,
+    ceremony: str,
+) -> None:
+    """Q-005 AMENDMENT: surface a WebAuthn failure in the evidence trail instead
+    of flattening it. Writes an AuditLogEntry whose detail carries the precise
+    failure_type (cloned-authenticator signals like sign_count_regression must
+    never vanish), and emits a #alerts trace. failure_type stays local to the
+    audit detail — it is NOT a REGISTRY reason_code.
+
+    The audit row is written directly (not via core.audit.audit_log): that
+    helper's `metadata` kwarg maps to no model field (`audit_metadata` is the
+    real column), so every entry it writes today carries None detail. audit.py
+    is outside this stage's SCOPE, so the detail-bearing entry is built here.
+    """
+    entry = AuditLog(
+        trace_id=f"studio_{secrets.token_hex(8)}",
+        client_id=operator_user_id,
+        action=f"webauthn_{ceremony}_rejected",
+        resource_type="webauthn",
+        resource_id=credential_id,
+        audit_metadata={"reason_code": err.reason_code, "failure_type": err.failure_type, "message": err.message},
+    )
+    session.add(entry)
+    session.flush()
+    sync_alert("webauthn_failure", err.message, {"failure_type": err.failure_type, "reason_code": err.reason_code})
 
 
 def _current_aggregate(session_factory: Callable[[], Session], user_id: str) -> int:

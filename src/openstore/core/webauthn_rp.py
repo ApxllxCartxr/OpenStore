@@ -20,6 +20,14 @@
 #     regression) maps to the compiler's `assertion_required` (author decision,
 #     OPEN_QUESTIONS; REGISTRY has no finer WebAuthn codes and adding them is
 #     forbidden by AGENTS.md R0.2).
+#   * Q-005 AMENDMENT (2026-09-01): each assertion rejection additionally
+#     carries a precise `failure_type` — one of assertion_signature_invalid |
+#     challenge_mismatch | challenge_expired | challenge_reused |
+#     sign_count_regression | credential_not_found | uv_flag_missing — so the
+#     evidence trail (AuditLogEntry detail + #alerts) never flattens security-
+#     relevant failures (especially sign_count_regression). These strings are
+#     local to the audit detail and are NOT REGISTRY reason_codes (R0.2 still
+#     binds; new reason codes remain RESOLUTION material).
 #   * No LLM imports. user_id comes from the session, never the request body
 #     (INV-10).
 
@@ -60,6 +68,29 @@ from openstore.models import WebAuthnCredential
 _WEBAUTHN_UNSUPPORTED_ALG = "webauthn_unsupported_alg"
 _ASSERTION_REQUIRED = "assertion_required"
 
+# Q-005 AMENDMENT: precise failure types for the audit trail / #alerts. Local to
+# the audit detail and the alerts trace — NOT REGISTRY reason_codes (R0.2 binds;
+# AGENTS.md forbids adding identifiers without a RESOLUTION).
+assertion_signature_invalid = "assertion_signature_invalid"
+challenge_mismatch = "challenge_mismatch"
+challenge_expired = "challenge_expired"
+challenge_reused = "challenge_reused"
+sign_count_regression = "sign_count_regression"
+credential_not_found = "credential_not_found"
+uv_flag_missing = "uv_flag_missing"
+
+_FAILURE_TYPES = frozenset(
+    {
+        assertion_signature_invalid,
+        challenge_mismatch,
+        challenge_expired,
+        challenge_reused,
+        sign_count_regression,
+        credential_not_found,
+        uv_flag_missing,
+    }
+)
+
 # Supported COSE algorithms (DECISIONS §11.1.4).
 _SUPPORTED_ALGS = frozenset({COSEAlgorithmIdentifier.ECDSA_SHA_256, COSEAlgorithmIdentifier.RSASSA_PKCS1_v1_5_SHA_256})
 
@@ -73,11 +104,16 @@ _AUTH_DATA_FLAGS_BYTE = 32  # rpIdHash(32) + flags(1) + signCount(4) -> flags at
 
 
 class WebAuthnError(Exception):
-    """RP rejection. reason_code is always a closed-set REGISTRY value."""
+    """RP rejection. reason_code is always a closed-set REGISTRY value;
+    failure_type, when set, is one of the Q-005 AMENDMENT audit types (local to
+    the audit detail / #alerts, never a REGISTRY reason code)."""
 
-    def __init__(self, reason_code: str, message: str):
+    def __init__(self, reason_code: str, message: str, failure_type: str | None = None):
         self.reason_code = reason_code
         self.message = message
+        if failure_type is not None and failure_type not in _FAILURE_TYPES:
+            raise ValueError(f"unknown failure_type: {failure_type}")
+        self.failure_type = failure_type
         super().__init__(f"[{reason_code}] {message}")
 
 
@@ -100,6 +136,7 @@ class ChallengeStore:
 
     def issue(self, challenge_b64url: str, binding: dict[str, Any]) -> None:
         with self._lock:
+            self._prune_expired()
             self._entries[challenge_b64url] = {
                 "binding": binding,
                 "issued_at": time.time(),
@@ -111,20 +148,37 @@ class ChallengeStore:
 
         Raises WebAuthnError(assertion_required) on unknown, reused, or expired
         challenge (R0.5: no silent default; single use is enforced).
+
+        A consumed challenge stays in the map flagged `used` so that a later
+        presentation is distinguishable as a reuse rather than an unknown
+        challenge (Q-005 AMENDMENT: the audit trail must record the precise
+        failure type — challenge_reused — for the replay signal). Stale entries
+        are pruned on the next issue.
         """
         now = time.time()
         with self._lock:
             entry = self._entries.get(challenge_b64url)
             if entry is None:
-                raise WebAuthnError(_ASSERTION_REQUIRED, "unknown challenge")
+                raise WebAuthnError(
+                    _ASSERTION_REQUIRED, "unknown challenge", failure_type=challenge_mismatch
+                )
             if entry["used"]:
-                raise WebAuthnError(_ASSERTION_REQUIRED, "challenge already used")
+                raise WebAuthnError(
+                    _ASSERTION_REQUIRED, "challenge already used", failure_type=challenge_reused
+                )
             if now - entry["issued_at"] > self._ttl_seconds:
                 del self._entries[challenge_b64url]
-                raise WebAuthnError(_ASSERTION_REQUIRED, "challenge expired")
+                raise WebAuthnError(
+                    _ASSERTION_REQUIRED, "challenge expired", failure_type=challenge_expired
+                )
             entry["used"] = True
-            del self._entries[challenge_b64url]
             return entry
+
+    def _prune_expired(self) -> None:
+        now = time.time()
+        stale = [k for k, e in self._entries.items() if now - e["issued_at"] > self._ttl_seconds]
+        for k in stale:
+            del self._entries[k]
 
 
 # Process-wide store. Prefer passing an explicit store for tests; default to the
@@ -153,7 +207,9 @@ def _decode_auth_data_flags_sign_count(authenticator_data: bytes) -> tuple[int, 
     """Return (flags_byte, sign_count) from authenticator_data (prd §3.5 e4/e7,
     §3.6 check 7). Layout: rpIdHash(32) + flags(1) + signCount(4)."""
     if len(authenticator_data) < 37:
-        raise WebAuthnError(_ASSERTION_REQUIRED, "authenticator_data too short")
+        raise WebAuthnError(
+            _ASSERTION_REQUIRED, "authenticator_data too short", failure_type=assertion_signature_invalid
+        )
     flags = authenticator_data[_AUTH_DATA_FLAGS_BYTE]
     sign_count = int.from_bytes(authenticator_data[_AUTH_DATA_FLAGS_BYTE + 1 : _AUTH_DATA_FLAGS_BYTE + 5], "big")
     return flags, sign_count
@@ -405,7 +461,9 @@ def complete_assertion(
     # missing supplied binding never self-bypasses the check (R0.5).
     stored_binding = entry.get("binding") or {}
     if not _binding_matches(stored_binding, binding if binding is not None else {}):
-        raise WebAuthnError(_ASSERTION_REQUIRED, "challenge_binding mismatch")
+        raise WebAuthnError(
+            _ASSERTION_REQUIRED, "challenge_binding mismatch", failure_type=challenge_mismatch
+        )
 
     credential = session.exec(
         select(WebAuthnCredential).where(
@@ -415,7 +473,9 @@ def complete_assertion(
         )
     ).first()
     if not credential:
-        raise WebAuthnError(_ASSERTION_REQUIRED, "credential not found")
+        raise WebAuthnError(
+            _ASSERTION_REQUIRED, "credential not found", failure_type=credential_not_found
+        )
 
     # Algorithm gate on the stored public key.
     _enforce_supported_alg(credential.public_key)
@@ -425,13 +485,17 @@ def complete_assertion(
 
     # UV flag (bit 0x04 in the flags byte at index 32) mandatory (PRD §3.5 e4).
     if not (flags & _UV_FLAG):
-        raise WebAuthnError(_ASSERTION_REQUIRED, "user_verification flag not set")
+        raise WebAuthnError(
+            _ASSERTION_REQUIRED, "user_verification flag not set", failure_type=uv_flag_missing
+        )
 
     # Sign-count monotonicity (S3.3): both 0 -> accept (counter-less); otherwise
     # received must strictly exceed stored.
     stored_sign_count = credential.sign_count
     if received_sign_count != 0 and received_sign_count <= stored_sign_count:
-        raise WebAuthnError(_ASSERTION_REQUIRED, "sign_count regression")
+        raise WebAuthnError(
+            _ASSERTION_REQUIRED, "sign_count regression", failure_type=sign_count_regression
+        )
 
     try:
         verification = verify_authentication_response(
@@ -453,7 +517,11 @@ def complete_assertion(
             require_user_verification=True,
         )
     except InvalidAuthenticationResponse as e:
-        raise WebAuthnError(_ASSERTION_REQUIRED, f"assertion verification failed: {e}")
+        raise WebAuthnError(
+            _ASSERTION_REQUIRED,
+            f"assertion verification failed: {e}",
+            failure_type=assertion_signature_invalid,
+        )
 
     new_sign_count = verification.new_sign_count
     credential.sign_count = new_sign_count

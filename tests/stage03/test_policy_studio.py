@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlmodel import select
+
 from openstore.config import (
     CampaignSettings,
     DatabaseConfig,
@@ -269,3 +271,99 @@ def test_reuse_of_challenge_rejected(client: TestClient, session_factory):
     res2 = client.post("/internal/webauthn/assertion/complete", json=payload, headers=HEADERS)
     assert res2.status_code == 401
     assert res2.json()["detail"]["reason_code"] == "assertion_required"
+
+
+def test_rejected_assertion_writes_failure_type_audit(client: TestClient, session_factory):
+    """Q-005 AMENDMENT: a rejected assertion must surface its precise failure_type
+    in the AuditLogEntry detail (never flattened into a generic message) and
+    reach the #alerts trace. The closed set lives in webauthn_rp.py and is NOT a
+    REGISTRY reason code."""
+    from openstore.core.webauthn_rp import (
+        assertion_signature_invalid,
+        challenge_reused,
+        sign_count_regression,
+    )
+    from openstore.models import AuditLog
+
+    _enrol(client)
+
+    def _audit_failure_types() -> set[str]:
+        s = session_factory()
+        try:
+            rows = s.exec(select(AuditLog).where(AuditLog.action == "webauthn_assertion_rejected")).all()
+            return {r.audit_metadata["failure_type"] for r in rows if r.audit_metadata}
+        finally:
+            s.close()
+
+    # 1) Signature rejection: begin a real assertion (challenge X issued), then
+    #    present an assertion whose client_data_json was signed against a
+    #    *different* challenge Y -> py_webauthn signature verification fails
+    #    -> assertion_signature_invalid.
+    chal_sig = _begin_assertion(client)
+    ec, _, _ = wf.keys()
+    cd_wrong, auth_wrong, sig_wrong = wf.build_assertion(
+        _ENROLLED_CRED_ID, b"Y" * 32, 4, ec, wf.sign_es256
+    )
+    res_sig = client.post(
+        "/internal/webauthn/assertion/complete",
+        json={
+            "credential_id": _b64u(_ENROLLED_CRED_ID),
+            "client_data_json": _b64u(cd_wrong),
+            "authenticator_data": _b64u(auth_wrong),
+            "signature": _b64u(sig_wrong),
+            "challenge": chal_sig,
+            "policy": None,
+        },
+        headers=HEADERS,
+    )
+    assert res_sig.status_code == 401
+    assert assertion_signature_invalid in _audit_failure_types()
+
+    # 2) Reused challenge -> challenge_reused.
+    chal2 = _begin_assertion(client)
+    a2 = _assert_for(chal2)
+    res_ok = client.post(
+        "/internal/webauthn/assertion/complete",
+        json={**a2, "challenge": chal2, "policy": None},
+        headers=HEADERS,
+    )
+    assert res_ok.status_code == 200, res_ok.text
+    res_reuse = client.post(
+        "/internal/webauthn/assertion/complete",
+        json={**a2, "challenge": chal2, "policy": None},
+        headers=HEADERS,
+    )
+    assert res_reuse.status_code == 401
+    assert challenge_reused in _audit_failure_types()
+
+    # 3) Sign-count regression -> sign_count_regression (cloned-authenticator).
+    chal3 = _begin_assertion(client)
+    cd3, auth3, sig3 = wf.build_assertion(_ENROLLED_CRED_ID, _b64d(chal3), 1, ec, wf.sign_es256)
+    s = session_factory()
+    try:
+        from openstore.models import WebAuthnCredential
+
+        cred = s.exec(
+            select(WebAuthnCredential).where(
+                WebAuthnCredential.credential_id == _b64u(_ENROLLED_CRED_ID)
+            )
+        ).first()
+        cred.sign_count = 4
+        s.add(cred)
+        s.commit()
+    finally:
+        s.close()
+    res_reg = client.post(
+        "/internal/webauthn/assertion/complete",
+        json={
+            "credential_id": _b64u(_ENROLLED_CRED_ID),
+            "client_data_json": _b64u(cd3),
+            "authenticator_data": _b64u(auth3),
+            "signature": _b64u(sig3),
+            "challenge": chal3,
+            "policy": None,
+        },
+        headers=HEADERS,
+    )
+    assert res_reg.status_code == 401
+    assert sign_count_regression in _audit_failure_types()
