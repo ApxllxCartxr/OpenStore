@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session, select
@@ -129,7 +129,7 @@ def create_authorization_code(
         scopes=scopes,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
-        expires_at=datetime.utcnow() + timedelta(seconds=AUTH_CODE_TTL_SECONDS),
+        expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=AUTH_CODE_TTL_SECONDS),
         metadata=metadata,
     )
 
@@ -163,7 +163,7 @@ def validate_authorization_code(
     if auth_code.redirect_uri != redirect_uri:
         raise OAuthError("invalid_grant", "Redirect URI mismatch", 400)
 
-    if datetime.utcnow() > auth_code.expires_at:
+    if datetime.now(UTC).replace(tzinfo=None) > auth_code.expires_at:
         raise OAuthError("invalid_grant", "Authorization code expired", 400)
 
     # PKCE verification
@@ -179,7 +179,7 @@ def validate_authorization_code(
         raise OAuthError("invalid_grant", "PKCE code_verifier required", 400)
 
     # Mark as used
-    auth_code.used_at = datetime.utcnow()
+    auth_code.used_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(auth_code)
     session.flush()
 
@@ -199,7 +199,7 @@ def create_token_pair(
     Access token is signed with merchant's private key.
     Resource server only holds JWKS (public keys).
     """
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Generate JTI for access token
     access_jti = secrets.token_urlsafe(32)
@@ -272,7 +272,7 @@ def _create_jwt_token(
         "iss": "openstore",
         "sub": subject or client_id,
         "aud": client_id,
-        "iat": int(datetime.utcnow().timestamp()),
+        "iat": int(datetime.now(UTC).replace(tzinfo=None).timestamp()),
         "exp": int(expires_at.timestamp()),
         "scope": " ".join(scopes),
         "token_type": token_type,
@@ -378,7 +378,7 @@ def validate_access_token(
             raise OAuthError("invalid_token", "Missing jti claim", 401)
 
         exp = claims.get("exp")
-        if exp and datetime.utcnow().timestamp() > exp:
+        if exp and datetime.now(UTC).replace(tzinfo=None).timestamp() > exp:
             raise OAuthError("invalid_token", "Token expired", 401)
 
         token_record = session.exec(
@@ -479,7 +479,7 @@ def revoke_token(session: Session, jti: str, token_type: str = "access_token") -
     if not token_record:
         return False
 
-    token_record.revoked_at = datetime.utcnow()
+    token_record.revoked_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(token_record)
     session.flush()
 

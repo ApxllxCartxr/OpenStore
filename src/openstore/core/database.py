@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.engine import Engine
@@ -162,8 +162,10 @@ def check_spend_cap(
     # Check cumulative spend (only CAPTURE legs, minus REFUND, for this policy).
     # §3.2c (Q-003): scope via LedgerEntry.reference_id -> Checkout.policy_id join,
     # restricted to Checkout rows whose policy_id equals the policy under evaluation.
-    # No new LedgerEntry columns.
-    spent_minor = compute_policy_spend(session, policy_id)
+    # No new LedgerEntry columns. Exposure (not settled spend) is authoritative:
+    # in-flight RESERVE legs for open checkouts under this policy also consume the
+    # signed budget, so concurrent checkouts cannot exceed the cap (R0.8, TOCTOU).
+    spent_minor = compute_policy_exposure(session, policy_id)
     if spent_minor + amount_minor > max_spend_total_minor:
         return False, "policy.spend_cumulative_exceeded"
 
@@ -202,6 +204,39 @@ def compute_policy_spend(session: Session, policy_id: str) -> int:
     ).one()
 
     return int(captured) - int(refunded)
+
+
+def compute_policy_exposure(session: Session, policy_id: str) -> int:
+    """
+    Settled spend PLUS outstanding in-flight RESERVE legs for a policy.
+
+    Counts the economic exposure of a signed policy: value already captured into
+    merchant_revenue (minus REFUND), plus the merchant_pending side of every
+    outstanding RESERVE whose checkout is still open (CREATED or HELD) under this
+    policy. A RESERVE is dual-entry (customer_hold + merchant_pending rows);
+    summing only the merchant_pending side counts each reserve exactly once.
+    Recomputes server-side (R0.8); never trusts client-supplied totals.
+    """
+    settled = compute_policy_spend(session, policy_id)
+
+    open_checkout_ids = select(Checkout.id).where(
+        and_(
+            Checkout.policy_id == policy_id,
+            Checkout.state.in_([OrderState.CREATED, OrderState.HELD]),  # type: ignore[attr-defined]
+        )
+    )
+    outstanding = session.exec(
+        select(func.coalesce(func.sum(LedgerEntry.amount_minor), 0)).where(
+            and_(
+                LedgerEntry.account == "merchant_pending",
+                LedgerEntry.currency == "INR",
+                LedgerEntry.entry_type == LedgerEntryType.RESERVE,
+                LedgerEntry.reference_id.in_(open_checkout_ids),  # type: ignore[attr-defined]
+            )
+        )
+    ).one()
+
+    return int(settled) + int(outstanding)
 
 
 def get_or_create_checkout(
@@ -250,8 +285,8 @@ def get_or_create_checkout(
         idempotency_key=idempotency_key,
         cart_snapshot=cart_snapshot,
         agent_plan=agent_plan,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+        updated_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
     session.add(checkout)
@@ -277,7 +312,7 @@ def update_checkout_state(
         raise ValueError(f"Checkout not found: {checkout_id}")
 
     checkout.state = new_state
-    checkout.updated_at = datetime.utcnow()
+    checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     if psp_order_id:
         checkout.psp_order_id = psp_order_id
@@ -287,13 +322,18 @@ def update_checkout_state(
         checkout.cancel_token = cancel_token
 
     if new_state == OrderState.HELD:
-        checkout.paid_at = datetime.utcnow()
+        # Moving into HELD does not stamp paid_at: no payment has been captured
+        # yet at hold time (the payment link is merely awaiting settlement).
+        # paid_at is set only when the webhook observes an actual CAPTURE into
+        # RELEASED. Stamping it here would fabricate a settlement that has not
+        # occurred (R0.8 — never trust/assume settlement).
+        pass
     elif new_state == OrderState.RELEASED:
-        checkout.released_at = datetime.utcnow()
+        checkout.released_at = datetime.now(UTC).replace(tzinfo=None)
     elif new_state == OrderState.CANCELLED:
-        checkout.cancelled_at = datetime.utcnow()
+        checkout.cancelled_at = datetime.now(UTC).replace(tzinfo=None)
     elif new_state == OrderState.REFUNDED:
-        checkout.cancelled_at = datetime.utcnow()
+        checkout.cancelled_at = datetime.now(UTC).replace(tzinfo=None)
 
     session.add(checkout)
     session.flush()

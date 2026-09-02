@@ -278,13 +278,21 @@ def _finalize_payment_link_create(
     checkout.psp_order_id = link.get("reference_id") or checkout.id
     checkout.psp_payment_link_id = link.get("id")
     checkout.psp_provider = "razorpay"
+    checkout.short_url = link.get("short_url")
+    # Mint the cancel token here: the payment link now exists, so the holder of
+    # the link must be able to cancel the underlying hold. One high-entropy,
+    # unguessable bearer token per payment link (R0.10: the token is not derived
+    # from caller-known ids).
+    if not checkout.cancel_token:
+        checkout.cancel_token = generate_cancel_token()
     checkout.updated_at = datetime.now(UTC)
     session.add(checkout)
 
     response_body = {
         "psp_order_id": checkout.psp_order_id,
         "psp_payment_link_id": checkout.psp_payment_link_id,
-        "short_url": link.get("short_url"),
+        "short_url": checkout.short_url,
+        "cancel_token": checkout.cancel_token,
     }
 
     idem = session.exec(
@@ -713,7 +721,10 @@ def _apply_payment_failed(session: Session, payload: dict[str, Any]) -> None:
     if not checkout or checkout.state in (OrderState.CANCELLED, OrderState.PAID, OrderState.RELEASED, OrderState.REFUNDED, OrderState.FAILED):
         return
 
-    if checkout.state in (OrderState.CREATED, OrderState.HELD):
+    # Only a HELD checkout has an outstanding RESERVE to release. A CREATED
+    # checkout has not reserved funds, so releasing it would mint an unbalanced
+    # ledger entry (INV-5). Payment failed on CREATED just supersedes to CANCELLED.
+    if checkout.state == OrderState.HELD:
         create_release_entry(
             session=session,
             trace_id=checkout.trace_id,

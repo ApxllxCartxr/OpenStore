@@ -1259,21 +1259,6 @@
           "result": "pass"
         },
         {
-          "check": "spend_per_tx",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
-          "check": "spend_envelope",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
-          "check": "spend_cumulative",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
           "check": "campaign_validity",
           "reason_code": "policy.campaign_inactive",
           "result": "fail"
@@ -1386,21 +1371,6 @@
           "result": "pass"
         },
         {
-          "check": "spend_per_tx",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
-          "check": "spend_envelope",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
-          "check": "spend_cumulative",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
           "check": "campaign_validity",
           "reason_code": "policy.campaign_inactive",
           "result": "fail"
@@ -1509,21 +1479,6 @@
         },
         {
           "check": "item_tag_allowlist",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
-          "check": "spend_per_tx",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
-          "check": "spend_envelope",
-          "reason_code": null,
-          "result": "pass"
-        },
-        {
-          "check": "spend_cumulative",
           "reason_code": null,
           "result": "pass"
         },

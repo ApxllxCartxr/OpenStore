@@ -15,7 +15,7 @@ EXPECTED_COLUMNS = {
         "id", "trace_id", "client_id", "merchant_id", "cart_hash", "cart_version",
         "amount_minor", "currency", "state", "policy_id", "policy_hash", "aal_level",
         "expires_at", "idempotency_key", "psp_provider", "psp_order_id",
-        "psp_payment_link_id", "cancel_token", "created_at", "updated_at", "paid_at",
+        "psp_payment_link_id", "short_url", "cancel_token", "created_at", "updated_at", "paid_at",
         "released_at", "cancelled_at", "cart_snapshot", "agent_plan",
     },
     "intent_policies": {
@@ -24,6 +24,7 @@ EXPECTED_COLUMNS = {
         "allowed_tags", "tag_mode", "blocked_skus", "not_before", "expires_at",
         "assertion_max_age_seconds", "fulfilment_mode", "required_skus",
         "webauthn_credential_id", "webauthn_sign_count", "signed_at", "is_active", "created_at",
+        "no_human_authority",
     },
     "ledger_entries": {
         "id", "trace_id", "client_id", "entry_type", "amount_minor", "currency",

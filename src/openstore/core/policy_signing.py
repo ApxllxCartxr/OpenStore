@@ -130,6 +130,7 @@ POLICY_HASH_FIELDS = (
     "assertion_max_age_seconds",
     "fulfilment_mode",
     "required_skus",
+    "no_human_authority",
 )
 
 
@@ -200,6 +201,7 @@ def complete_policy_signing(
         assertion_max_age_seconds=int(fields.get("assertion_max_age_seconds", 86400)),
         fulfilment_mode=fields.get("fulfilment_mode", "all_or_nothing"),
         required_skus=list(fields.get("required_skus", [])),
+        no_human_authority=bool(fields.get("no_human_authority", False)),
         webauthn_credential_id=credential_id,
         webauthn_sign_count=webauthn_sign_count,
         signed_at=datetime.fromisoformat(signed_at.replace("Z", "+00:00")) if signed_at else datetime.now(UTC),

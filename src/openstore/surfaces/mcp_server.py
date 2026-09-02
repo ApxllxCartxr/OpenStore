@@ -72,6 +72,7 @@ def create_cart(
     cart_hash: str,
     cart_version: int,
     token_scopes: list[str],
+    webauthn_assertion: dict[str, Any] | None = None,
 ) -> MCPToolResult:
     """MCP tool: create_cart. Initiates checkout, returns CompilerResult."""
     _require_scope(token_scopes, "cart:write")
@@ -87,6 +88,7 @@ def create_cart(
             cart_hash=cart_hash,
             cart_version=cart_version,
             policy_id=policy_id,
+            webauthn_assertion=webauthn_assertion,
         )
         return MCPToolResult(success=True, data={
             "allowed": result.allowed,
@@ -113,14 +115,37 @@ def update_cart(
     cart_version: int,
     policy_id: str,
     token_scopes: list[str],
+    webauthn_assertion: dict[str, Any] | None = None,
 ) -> MCPToolResult:
-    """MCP tool: update_cart. Updates an existing checkout (cancels old, creates new)."""
+    """MCP tool: update_cart. Replaces an existing checkout (cancel old hold, create new)."""
     _require_scope(token_scopes, "cart:write")
-    return create_cart(
-        config=config, session=session, client_id=client_id, trace_id=trace_id,
-        merchant_id=merchant_id, items=items, policy_id=policy_id,
-        cart_hash=cart_hash, cart_version=cart_version, token_scopes=token_scopes,
-    )
+    try:
+        from sqlmodel import select
+
+        from openstore.core.holdcancel import cancel_hold
+        from openstore.models import Checkout, OrderState
+
+        old = session.exec(
+            select(Checkout).where(Checkout.id == checkout_id)
+        ).first()
+        if old and old.state == OrderState.HELD:
+            cancel_hold(
+                session=session,
+                checkout_id=old.id,
+                trace_id=trace_id,
+                client_id=client_id,
+                reason="Replaced by agent update_cart",
+            )
+        return create_cart(
+            config=config, session=session, client_id=client_id, trace_id=trace_id,
+            merchant_id=merchant_id, items=items, policy_id=policy_id,
+            cart_hash=cart_hash, cart_version=cart_version, token_scopes=token_scopes,
+            webauthn_assertion=webauthn_assertion,
+        )
+    except CommerceError as e:
+        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+    except Exception as e:
+        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
 
 
 def checkout_initiate(
@@ -134,15 +159,28 @@ def checkout_initiate(
     """MCP tool: checkout_initiate. Creates a Razorpay payment link for the checkout."""
     _require_scope(token_scopes, "checkout:initiate")
     try:
+        from sqlmodel import select
+
+        from openstore.models import Checkout
         from openstore.psp.razorpay_driver import create_payment_link
+
+        checkout = session.exec(
+            select(Checkout).where(Checkout.id == checkout_id)
+        ).first()
+        if checkout is None:
+            return MCPToolResult(success=False, error={"reason_code": "checkout.not_found", "message": f"Checkout {checkout_id} not found"})
+
         checkout = create_payment_link(
             config=config, session=session, trace_id=trace_id, client_id=client_id,
-            checkout_id=checkout_id, amount_minor=0,
+            checkout_id=checkout_id, amount_minor=checkout.amount_minor, currency=checkout.currency,
         )
         return MCPToolResult(success=True, data={
             "checkout_id": checkout.id,
             "payment_link_id": checkout.psp_payment_link_id,
-            "short_url": getattr(checkout, "short_url", None),
+            "short_url": checkout.short_url,
+            "cancel_token": checkout.cancel_token,
+            "amount_minor": checkout.amount_minor,
+            "currency": checkout.currency,
         })
     except CommerceError as e:
         return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
@@ -157,14 +195,31 @@ def checkout_confirm(
     trace_id: str,
     checkout_id: str,
     token_scopes: list[str],
+    webauthn_assertion: dict[str, Any] | None = None,
 ) -> MCPToolResult:
-    """MCP tool: checkout_confirm. Confirms the checkout after payment link is paid."""
+    """MCP tool: checkout_confirm. Confirms the checkout after payment link is paid.
+
+    Real authorization re-check: for AAL1+ flows it re-verifies the caller's
+    WebAuthn assertion via confirm_checkout; AAL0 (no_human_authority) skips the
+    per-cart human assertion. The spend cap is always re-checked server-side.
+    """
     _require_scope(token_scopes, "checkout:confirm")
     try:
+        from sqlmodel import select
+
         from openstore.core.api import confirm_checkout
+        from openstore.models import Checkout
+
+        stored = session.exec(
+            select(Checkout).where(Checkout.id == checkout_id)
+        ).first()
+        psp_order_id = stored.psp_order_id if stored else checkout_id
+        psp_payment_link_id = stored.psp_payment_link_id if stored else ""
+
         checkout = confirm_checkout(
             config=config, session=session, trace_id=trace_id, client_id=client_id,
-            checkout_id=checkout_id, psp_order_id=checkout_id, psp_payment_link_id="",
+            checkout_id=checkout_id, psp_order_id=psp_order_id,
+            psp_payment_link_id=psp_payment_link_id, webauthn_assertion=webauthn_assertion,
         )
         return MCPToolResult(success=True, data={
             "checkout_id": checkout.id,
@@ -254,19 +309,17 @@ def webauthn_register_begin(
     """MCP tool: webauthn_register_begin. Starts WebAuthn registration ceremony."""
     try:
         from openstore.core.webauthn_rp import begin_registration
-        # PENDING-HUMAN-VERIFICATION (WebAuthn): this MCP wrapper predates the
-        # INV-10 signature change; begin_registration takes (config, user_handle,
-        # user_name, display_name, store). The wiring is not exercised by the
-        # headless gate and is queued for rework — the ignore documents the gap.
-        result = begin_registration(session=session, config=config, user_handle=user_id)  # type: ignore[call-arg]
+        result = begin_registration(
+            config=config, user_handle=user_id, user_name=user_id, display_name=user_id,
+        )
         return MCPToolResult(success=True, data={
             "challenge": result.get("challenge"),
             "rp": result.get("rp"),
             "user": result.get("user"),
-            "pub_key_cred_params": result.get("pub_key_cred_params"),
+            "pub_key_cred_params": result.get("pubKeyCredParams"),
             "timeout": result.get("timeout"),
-            "exclude_credentials": result.get("exclude_credentials", []),
-            "authenticator_selection": result.get("authenticator_selection"),
+            "exclude_credentials": result.get("excludeCredentials", []),
+            "authenticator_selection": result.get("authenticatorSelection"),
         })
     except CommerceError as e:
         return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
@@ -284,14 +337,14 @@ def webauthn_register_complete(
     """MCP tool: webauthn_register_complete. Completes WebAuthn registration."""
     try:
         from openstore.core.webauthn_rp import complete_registration
-        # PENDING-HUMAN-VERIFICATION (WebAuthn): wrapper passes a `credential` dict;
-        # complete_registration expects (session, config, user_handle, credential_id,
-        # client_data_json, attestation_object, challenge_b64url, store). Not exercised
-        # by the headless gate; queued for rework alongside webauthn_register_begin.
-        credential_id = complete_registration(
-            session=session, config=config, user_handle=user_id, credential=credential  # type: ignore[call-arg]
+        cred = complete_registration(
+            session=session, config=config, user_handle=user_id,
+            credential_id=credential.get("id", ""),
+            client_data_json=credential.get("response", {}).get("clientDataJSON", ""),
+            attestation_object=credential.get("response", {}).get("attestationObject", ""),
+            challenge_b64url=credential.get("challenge", ""),
         )
-        return MCPToolResult(success=True, data={"credential_id": credential_id})
+        return MCPToolResult(success=True, data={"credential_id": cred.credential_id})
     except CommerceError as e:
         return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
     except Exception as e:
@@ -308,14 +361,12 @@ def webauthn_begin_assertion(
     """MCP tool: webauthn_begin_assertion. Starts assertion ceremony."""
     try:
         from openstore.core.webauthn_rp import begin_assertion
-        # PENDING-HUMAN-VERIFICATION (WebAuthn): wrapper signature differs from
-        # begin_assertion; not exercised by the headless gate; queued for rework.
-        result = begin_assertion(session=session, config=config, user_handle=user_id, challenge_binding=challenge_binding)  # type: ignore[call-arg]
+        result = begin_assertion(config=config, user_handle=user_id, binding=challenge_binding)
         return MCPToolResult(success=True, data={
             "challenge": result.get("challenge"),
-            "rp_id": result.get("rp_id"),
+            "rp_id": result.get("rpId"),
             "timeout": result.get("timeout"),
-            "allow_credentials": result.get("allow_credentials", []),
+            "allow_credentials": result.get("allowCredentials", []),
         })
     except CommerceError as e:
         return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
@@ -327,6 +378,7 @@ def webauthn_complete_assertion(
     config: Settings,
     session: Any,
     trace_id: str,
+    user_id: str,
     credential_id: str,
     assertion: dict[str, Any],
 ) -> MCPToolResult:
@@ -334,12 +386,13 @@ def webauthn_complete_assertion(
     try:
         from openstore.core.webauthn_rp import complete_assertion
         verified, sign_count = complete_assertion(
-            session=session, config=config, user_handle="",
+            session=session, config=config, user_handle=user_id,
             credential_id=credential_id,
             client_data_json=assertion.get("clientDataJSON", ""),
             authenticator_data=assertion.get("authenticatorData", ""),
             signature=assertion.get("signature", ""),
             challenge_b64url=assertion.get("challenge", ""),
+            binding=assertion.get("binding"),
         )
         return MCPToolResult(success=True, data={"verified": verified, "sign_count": sign_count})
     except CommerceError as e:
@@ -465,6 +518,7 @@ def handle_mcp_request(
             cart_hash=arguments.get("cart_hash", ""),
             cart_version=arguments.get("cart_version", 1),
             token_scopes=token_scopes,
+            webauthn_assertion=arguments.get("webauthn_assertion"),
         )
     elif tool_name == "update_cart":
         result = update_cart(
@@ -476,6 +530,7 @@ def handle_mcp_request(
             cart_hash=arguments.get("cart_hash", ""),
             cart_version=arguments.get("cart_version", 1),
             token_scopes=token_scopes,
+            webauthn_assertion=arguments.get("webauthn_assertion"),
         )
     elif tool_name == "checkout_initiate":
         result = checkout_initiate(
@@ -488,6 +543,7 @@ def handle_mcp_request(
             config=config, session=session, client_id=cid, trace_id=tid,
             checkout_id=arguments.get("checkout_id", ""),
             token_scopes=token_scopes,
+            webauthn_assertion=arguments.get("webauthn_assertion"),
         )
     elif tool_name == "get_order":
         result = get_order(
@@ -520,6 +576,7 @@ def handle_mcp_request(
     elif tool_name == "webauthn_complete_assertion":
         result = webauthn_complete_assertion(
             config=config, session=session, trace_id=tid,
+            user_id=arguments.get("user_id", ""),
             credential_id=arguments.get("credential_id", ""),
             assertion=arguments.get("assertion", {}),
         )

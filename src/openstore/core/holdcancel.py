@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import IntEnum
 
 from sqlmodel import Session, select
@@ -83,7 +83,7 @@ def get_aal_liability_sentence(aal_level: AALLevel) -> str:
 def calculate_expires_at(aal_level: AALLevel, created_at: datetime | None = None) -> datetime:
     """Calculate checkout expiry based on AAL level."""
     if created_at is None:
-        created_at = datetime.utcnow()
+        created_at = datetime.now(UTC).replace(tzinfo=None)
 
     hold_seconds = get_hold_duration(aal_level)
 
@@ -166,7 +166,7 @@ def initiate_hold(
     checkout.state = OrderState.HELD
     checkout.aal_level = int(aal_level)
     checkout.expires_at = expires_at
-    checkout.updated_at = datetime.utcnow()
+    checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(checkout)
     session.flush()
 
@@ -208,8 +208,8 @@ def release_hold(
     )
 
     checkout.state = OrderState.RELEASED
-    checkout.released_at = datetime.utcnow()
-    checkout.updated_at = datetime.utcnow()
+    checkout.released_at = datetime.now(UTC).replace(tzinfo=None)
+    checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(checkout)
     session.flush()
 
@@ -253,8 +253,8 @@ def cancel_hold(
     )
 
     checkout.state = OrderState.CANCELLED
-    checkout.cancelled_at = datetime.utcnow()
-    checkout.updated_at = datetime.utcnow()
+    checkout.cancelled_at = datetime.now(UTC).replace(tzinfo=None)
+    checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(checkout)
     session.flush()
 
@@ -282,8 +282,13 @@ def refund_checkout(
     if not checkout:
         raise ValueError(f"Checkout not found: {checkout_id}")
 
-    if checkout.state not in (OrderState.RELEASED, OrderState.CANCELLED):
-        raise ValueError(f"Checkout not refundable: {checkout.state}")
+    # A REFUND is only valid for a checkout whose funds were actually captured
+    # and released to the merchant. Calling refund on a still-HELD or CREATED
+    # checkout would produce a REFUND ledger entry with no matching CAPTURE,
+    # breaking the ledger balance (INV-5). Correction path: only RELEASED may be
+    # refunded; HELD should be release_hold/cancel_hold instead.
+    if checkout.state != OrderState.RELEASED:
+        raise ValueError(f"Checkout not refundable (must be RELEASED): {checkout.state}")
 
     # Create REFUND ledger entry (INV-5)
     create_refund_entry(
@@ -297,8 +302,8 @@ def refund_checkout(
     )
 
     checkout.state = OrderState.REFUNDED
-    checkout.cancelled_at = datetime.utcnow()
-    checkout.updated_at = datetime.utcnow()
+    checkout.cancelled_at = datetime.now(UTC).replace(tzinfo=None)
+    checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(checkout)
     session.flush()
 
@@ -317,7 +322,7 @@ def check_and_expire_checkouts(session: Session) -> int:
     """
     from openstore.models import Checkout
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Find expired checkouts
     expired = session.exec(

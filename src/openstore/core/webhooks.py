@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlmodel import Session, select
@@ -94,7 +94,7 @@ def process_webhook_event(
         processor(session, payload)
 
         event.status = WebhookStatus.COMPLETED
-        event.processed_at = datetime.utcnow()
+        event.processed_at = datetime.now(UTC).replace(tzinfo=None)
         event.last_error = None
         session.add(event)
         session.flush()
@@ -172,10 +172,10 @@ def handle_razorpay_payment_captured(session: Session, payload: dict[str, Any]) 
 
     # Update checkout state
     checkout.state = OrderState.RELEASED
-    checkout.paid_at = datetime.utcnow()
-    checkout.released_at = datetime.utcnow()
+    checkout.paid_at = datetime.now(UTC).replace(tzinfo=None)
+    checkout.released_at = datetime.now(UTC).replace(tzinfo=None)
     checkout.psp_payment_link_id = payment_id
-    checkout.updated_at = datetime.utcnow()
+    checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(checkout)
     session.flush()
 
@@ -219,8 +219,8 @@ def handle_razorpay_payment_failed(session: Session, payload: dict[str, Any]) ->
     )
 
     checkout.state = OrderState.CANCELLED
-    checkout.cancelled_at = datetime.utcnow()
-    checkout.updated_at = datetime.utcnow()
+    checkout.cancelled_at = datetime.now(UTC).replace(tzinfo=None)
+    checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
     session.add(checkout)
     session.flush()
 
@@ -233,7 +233,7 @@ def process_webhook_retry_queue(session: Session) -> int:
     """
     from sqlmodel import and_
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     failed_events = session.exec(
         select(WebhookEvent).where(
             and_(
@@ -272,7 +272,7 @@ def process_webhook_retry_queue(session: Session) -> int:
                     handle_razorpay_payment_failed(session, event.payload)
 
             event.status = WebhookStatus.COMPLETED
-            event.processed_at = datetime.utcnow()
+            event.processed_at = datetime.now(UTC).replace(tzinfo=None)
             event.last_error = None
             processed += 1
         except Exception as e:

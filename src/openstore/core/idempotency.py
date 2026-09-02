@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session, select
@@ -69,7 +69,7 @@ def check_idempotency(
         )
 
     # Check expiry
-    if datetime.utcnow() > existing.expires_at:
+    if datetime.now(UTC).replace(tzinfo=None) > existing.expires_at:
         raise IdempotencyError(
             "idempotency_expired",
             f"Idempotency key {idempotency_key} has expired"
@@ -98,7 +98,7 @@ def store_idempotency_result(
         raise IdempotencyError("idempotency_key_required", "Idempotency key is required")
 
     request_hash = compute_request_hash(request_body)
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Check if already exists (should have been caught by check_idempotency)
     existing = session.exec(
@@ -143,7 +143,7 @@ def generate_idempotency_key(operation: str, trace_id: str, client_id: str, refe
 
 def cleanup_expired_idempotency_keys(session: Session) -> int:
     """Clean up expired idempotency keys (maintenance task)."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     expired = session.exec(
         select(IdempotencyKey).where(IdempotencyKey.expires_at < now)
     ).all()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlmodel import Session, select
@@ -11,6 +11,8 @@ from openstore.config import Settings
 from openstore.core.audit import audit_log
 from openstore.core.compiler import CompilerContext, CompilerResult, compile_decision
 from openstore.core.database import (
+    check_spend_cap,
+    compute_policy_exposure,
     get_or_create_checkout,
     update_checkout_state,
 )
@@ -105,9 +107,10 @@ def create_checkout(
                 }
 
     # Compute cumulative spend for this policy (§3.2c / Q-003: per-policy via
-    # reference_id -> Checkout.policy_id; server-side R0.8)
-    from openstore.core.database import compute_policy_spend
-    cumulative_spend = compute_policy_spend(session, policy_id)
+    # reference_id -> Checkout.policy_id; server-side R0.8). Exposure (settled +
+    # in-flight RESERVE legs on open checkouts) is authoritative, so concurrent
+    # checkouts cannot silently exceed the signed budget (TOCTOU, INV-11).
+    cumulative_spend = compute_policy_exposure(session, policy_id)
 
     # Count checkouts for this policy
     checkout_count = len(list(session.exec(
@@ -148,7 +151,7 @@ def create_checkout(
         cumulative_spend_minor=cumulative_spend,
         has_webauthn_assertion=has_assertion and assertion_verified,
         assertion_age_seconds=assertion_age,
-        now_unix=int(datetime.utcnow().timestamp()),
+        now_unix=int(datetime.now(UTC).replace(tzinfo=None).timestamp()),
         campaign_lookup=campaign_lookup,
     )
 
@@ -190,7 +193,7 @@ def create_checkout(
         policy_id=policy_id,
         policy_hash=policy.policy_hash,
         aal_level=result.aal_level,
-        expires_at=datetime.utcnow(),  # Will be updated by initiate_hold
+        expires_at=datetime.now(UTC).replace(tzinfo=None),  # Will be updated by initiate_hold
         idempotency_key=idem_key,
         cart_snapshot=cart_snapshot,
         agent_plan=agent_plan,
@@ -245,11 +248,17 @@ def confirm_checkout(
     checkout_id: str,
     psp_order_id: str,
     psp_payment_link_id: str,
+    webauthn_assertion: dict[str, Any] | None = None,
 ) -> Checkout:
     """
-    Confirm checkout after payment link created.
+    Confirm a checkout after the payment link was paid.
 
-    Updates checkout with PSP references, state -> HELD.
+    Re-verifies on the server, never trusts client state (R0.8):
+      - HELD → RELEASED (a real transition; no HELD→HELD no-op). Already-terminal
+        checkouts are returned idempotently.
+      - AAL0 (no_human_authority) authorizes the agent, so per-cart human
+        authority verification is skipped; the spend cap is still re-checked.
+      - AAL1+ requires (and re-verifies) a fresh WebAuthn assertion.
     """
     audit_log(session, trace_id, client_id, "confirm_checkout", "checkout",
               resource_id=checkout_id, request_method="POST")
@@ -261,25 +270,66 @@ def confirm_checkout(
     if not checkout:
         raise CommerceError("checkout_not_found", "Checkout not found", 404)
 
+    # Terminal states are absorbing: confirm is idempotent once released/refunded.
+    if checkout.state in (OrderState.RELEASED, OrderState.PAID, OrderState.REFUNDED):
+        return checkout
+
     if checkout.state != OrderState.HELD:
         raise CommerceError("invalid_state", f"Checkout not in HELD state: {checkout.state}", 400)
 
+    policy = None
+    if checkout.policy_id:
+        policy = session.exec(
+            select(IntentPolicy).where(IntentPolicy.id == checkout.policy_id)
+        ).first()
+
+    # AAL0 (no_human_authority): the agent is authorized to transact autonomously,
+    # so no per-cart human assertion is required at confirm time.
+    allow_autonomous = bool(policy and policy.no_human_authority)
+
+    # AAL1+ requires a fresh, verified WebAuthn assertion at confirm time.
+    if not allow_autonomous:
+        if not webauthn_assertion:
+            raise CommerceError("assertion_required", "Cataloged purchase requires a WebAuthn assertion to confirm", 400)
+        try:
+            verified, _sign_count = complete_assertion(
+                session=session,
+                config=config,
+                user_handle=checkout.merchant_id,
+                credential_id=webauthn_assertion["credential_id"],
+                client_data_json=webauthn_assertion["client_data_json"],
+                authenticator_data=webauthn_assertion["authenticator_data"],
+                signature=webauthn_assertion["signature"],
+                challenge_b64url=webauthn_assertion["challenge"],
+            )
+        except Exception:
+            verified = False
+        if not verified:
+            raise CommerceError("assertion_required", "WebAuthn assertion failed to verify", 400)
+
+    # Re-check the spend cap server-side (exposure: settled + in-flight RESERVE
+    # legs for this policy under evaluation) so a confirm cannot blow the budget.
+    if policy:
+        allowed, reason = check_spend_cap(
+            session=session,
+            merchant_id=checkout.merchant_id,
+            policy_id=checkout.policy_id or "",
+            amount_minor=checkout.amount_minor,
+            max_spend_per_tx_minor=policy.max_spend_per_tx_minor,
+            max_spend_total_minor=policy.max_spend_total_minor,
+        )
+        if not allowed:
+            raise CommerceError(reason, f"Spend cap exceeded at confirm time: {reason}", 400)
+
+    # HELD -> RELEASED: the funds are reserved and settlement confirmed. This is a
+    # real transition (stamps released_at / paid_at), not a HELD->HELD no-op.
     checkout = update_checkout_state(
         session=session,
         checkout_id=checkout_id,
-        new_state=OrderState.HELD,
-        psp_order_id=psp_order_id,
-        psp_payment_link_id=psp_payment_link_id,
+        new_state=OrderState.RELEASED,
+        psp_order_id=psp_order_id or checkout.psp_order_id,
+        psp_payment_link_id=psp_payment_link_id or checkout.psp_payment_link_id,
     )
-
-    # Generate cancel token for hold/cancel link.
-    # Must be a high-entropy unguessable bearer secret (not derived from
-    # caller-known IDs) so only the holder can cancel the hold.
-    import secrets
-    cancel_token = secrets.token_urlsafe(32)
-    checkout.cancel_token = cancel_token
-    session.add(checkout)
-    session.flush()
 
     return checkout
 

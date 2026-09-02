@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
@@ -45,7 +45,7 @@ def create_reserve_entry(
     if existing:
         return existing
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Debit: customer_hold (money held from customer)
     debit = LedgerEntry(
@@ -108,7 +108,7 @@ def create_capture_entry(
     if existing:
         return existing
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Reverse RESERVE: release customer_hold
     reserve_reversal = LedgerEntry(
@@ -200,7 +200,7 @@ def create_release_entry(
     if existing:
         return existing
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Release customer_hold
     customer_release = LedgerEntry(
@@ -262,7 +262,7 @@ def create_refund_entry(
     if existing:
         return existing
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Reverse merchant_revenue
     revenue_reversal = LedgerEntry(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlmodel import Session
@@ -41,7 +41,7 @@ def audit_log(
         request_path=request_path,
         response_status=response_status,
         metadata=metadata,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
     session.add(entry)
@@ -78,7 +78,7 @@ class AuditContext:
         self.request_path = request_path
         self.response_status: int | None = None
         self.metadata: dict[str, Any] | None = None
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(UTC).replace(tzinfo=None)
 
     def set_response_status(self, status: int) -> None:
         self.response_status = status

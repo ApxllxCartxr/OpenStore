@@ -56,6 +56,38 @@ REASON_CODES = {
 }
 
 
+def _campaign_validity(
+    ctx: CompilerContext,
+) -> tuple[bool, str | None]:
+    """Resolve/validate every campaign referenced by the cart exactly once.
+
+    Returns (valid, reason_code_or_None). A campaign referenced by an item must
+    exist in campaign_lookup, be ACTIVE, and be inside its offer window; any
+    violation fails fast with the closed-set reason code. This runs BEFORE any
+    discount is computed so an inactive/out-of-window campaign can never
+    silently discount the per-tx / cumulative spend-cap checks.
+    """
+    for item in ctx.cart_items:
+        campaign_id = item.get("campaign_id")
+        if not campaign_id:
+            continue
+        if campaign_id not in ctx.campaign_lookup:
+            return False, "policy.campaign_inactive"
+        campaign = ctx.campaign_lookup[campaign_id]
+        if campaign.get("state") != "ACTIVE":
+            return False, "policy.campaign_inactive"
+        starts_at = campaign.get("offer_terms", {}).get("starts_at")
+        ends_at = campaign.get("offer_terms", {}).get("ends_at")
+        if starts_at and ends_at:
+            start_str = starts_at.replace("Z", "+00:00").replace("+00:00+00:00", "+00:00")
+            end_str = ends_at.replace("Z", "+00:00").replace("+00:00+00:00", "+00:00")
+            start_ts = int(datetime.fromisoformat(start_str).timestamp())
+            end_ts = int(datetime.fromisoformat(end_str).timestamp())
+            if ctx.now_unix < start_ts or ctx.now_unix >= end_ts:
+                return False, "policy.campaign_outside_window"
+    return True, None
+
+
 def compile_decision(ctx: CompilerContext) -> CompilerResult:
     """
     Intent Compiler — 12 checks in normative order.
@@ -75,7 +107,9 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
     9. spend_per_tx
     10. spend_envelope (delegated only)
     11. spend_cumulative (root budget)
-    12. campaign_validity (v3.0, appended)
+    v3.0+ campaign_validity is validated BEFORE the discount math (not appended
+    after check 11) so an invalid campaign can never silently discount the
+    spend-cap checks; its transcript entry therefore appears after check 8.
     """
     transcript: list[dict[str, Any]] = []
 
@@ -100,12 +134,14 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
         )
 
     # 0. human_authority_present (Q-004, §3.2)
-    # Runs BEFORE check 1. When the policy requires human authority and no valid
-    # WebAuthn assertion accompanies the cart, deny with assertion_required —
-    # returned, never raised (R0.5). One no_human_authority field does not exist on
-    # the policy model; treat authority as required (matches the hardcoded False in
-    # the AAL path below).
-    if not ctx.has_webauthn_assertion:
+    # Runs BEFORE check 1. When the policy requires human authority (the default,
+    # no_human_authority=False) and no valid WebAuthn assertion accompanies the
+    # cart, deny with assertion_required — returned, never raised (R0.5). A policy
+    # signed with no_human_authority=True authorizes the agent to transact
+    # autonomously: check 0 is gated off and the cart proceeds to check 1. Such
+    # autonomous purchases still run checks 1-12 and produce a PoAI bundle; only
+    # the per-cart human assertion (and thus the AAL1+ evidentiary tier) is waived.
+    if not ctx.policy.no_human_authority and not ctx.has_webauthn_assertion:
         add_check("human_authority_present", False, "assertion_required")
         return fail("assertion_required")
     add_check("human_authority_present", True)
@@ -188,9 +224,21 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
     # 9. spend_per_tx
     cart_total = sum(item.get("qty", 0) * item.get("unit_minor", 0) for item in ctx.cart_items)
 
-    # Apply campaign discounts if present. Discount is computed on the per-cart subtotal
-    # of items sharing a campaign (not per-item), so the cumulative floor of integer
-    # division cannot leak 1 paise per line into a multi-item cart.
+    # Campaign validity (check 12) is resolved BEFORE any discount is computed.
+    # It must never be possible for an inactive or out-of-window campaign to
+    # silently discount effective_total and thereby relax the spend-cap checks
+    # (9/11) below. Fail fast with the existing reason codes. Its transcript entry
+    # is still recorded in the trailing (check-12) position to preserve canonical
+    # compiler output; only the underlying validation is promoted ahead of the
+    # discount math.
+    _, campaign_reason = _campaign_validity(ctx)
+    if campaign_reason is not None:
+        add_check("campaign_validity", False, campaign_reason)
+        return fail(campaign_reason)  # type: ignore[arg-type]
+
+    # Apply campaign discounts if present. Discount is computed on the per-cart
+    # subtotal of items sharing a campaign (not per-item), so the cumulative floor
+    # of integer division cannot leak 1 paise per line into a multi-item cart.
     discount_total = 0
     campaign_subtotals: dict[str, int] = {}
     for item in ctx.cart_items:
@@ -221,39 +269,15 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
         return fail("policy.spend_cumulative_exceeded")
     add_check("spend_cumulative", True)
 
-    # 12. campaign_validity (v3.0 - appended)
-    for item in ctx.cart_items:
-        campaign_id = item.get("campaign_id")
-        if campaign_id:
-            if campaign_id not in ctx.campaign_lookup:
-                add_check("campaign_validity", False, "policy.campaign_inactive")
-                return fail("policy.campaign_inactive")
-
-            campaign = ctx.campaign_lookup[campaign_id]
-            if campaign.get("state") != "ACTIVE":
-                add_check("campaign_validity", False, "policy.campaign_inactive")
-                return fail("policy.campaign_inactive")
-
-            # Check window
-            starts_at = campaign.get("offer_terms", {}).get("starts_at")
-            ends_at = campaign.get("offer_terms", {}).get("ends_at")
-            if starts_at and ends_at:
-                start_str = starts_at.replace("Z", "+00:00").replace("+00:00+00:00", "+00:00")
-                end_str = ends_at.replace("Z", "+00:00").replace("+00:00+00:00", "+00:00")
-                start_ts = int(datetime.fromisoformat(start_str).timestamp())
-                end_ts = int(datetime.fromisoformat(end_str).timestamp())
-
-                if ctx.now_unix < start_ts or ctx.now_unix >= end_ts:
-                    add_check("campaign_validity", False, "policy.campaign_outside_window")
-                    return fail("policy.campaign_outside_window")
-
+    # 12. campaign_validity (trailing, canonical position). Validation itself ran
+    # before the discount math (see above); validated campaigns here recorded pass.
     add_check("campaign_validity", True)
 
     # All checks passed - compute AAL level
     from openstore.core.holdcancel import compute_aal_level as compute_aal
     aal_level = compute_aal(
         has_webauthn_assertion=ctx.has_webauthn_assertion,
-        policy_allows_no_human_authority=False,  # Would come from policy
+        policy_allows_no_human_authority=ctx.policy.no_human_authority,
         amount_minor=effective_total,
     )
 
@@ -274,6 +298,15 @@ def get_compiler_version() -> str:
 
 
 def get_compiler_digest() -> str:
-    """Return compiler code digest for PoAI bundle."""
-    # In production, this would be a hash of the compiler source
-    return "sha256:placeholder-compiler-digest"
+    """Return compiler code digest for PoAI bundle.
+
+    Real digest over the compiler module's own source, computed at call time so
+    it always reflects the running code. The PoAI bundle claims a compiler
+    identity; the verifier independently checks it against a known-good set
+    (REGISTRY has unsupported_compiler_digest for unknown digests).
+    """
+    import hashlib
+    from pathlib import Path
+
+    source = Path(__file__).read_bytes()
+    return "sha256:" + hashlib.sha256(source).hexdigest()

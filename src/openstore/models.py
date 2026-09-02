@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import DateTime, LargeBinary
 from sqlalchemy import Enum as SQLEnum
 from sqlmodel import JSON, Column, Field, Index, SQLModel
+
+
+def _utcnow() -> datetime:
+    """Naive UTC now, usable as a SQLModel default_factory.
+
+    Replaces the deprecated datetime.utcnow() without changing semantics: the
+    SQL DateTime columns are naive on SQLite, so a tz-aware value would break
+    aware-vs-naive comparisons after a DB round-trip.
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class LedgerEntryType(str, enum.Enum):
@@ -58,7 +68,7 @@ class LedgerEntry(SQLModel, table=True):
     counterparty_account: str = Field(max_length=64)  # double-entry pair
     idempotency_key: str = Field(max_length=128, unique=True, index=True)
     description: str = Field(max_length=512)
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
 
     __table_args__ = (
         Index("ix_ledger_trace_client", "trace_id", "client_id"),
@@ -86,9 +96,10 @@ class Checkout(SQLModel, table=True):
     psp_provider: str | None = Field(default=None, max_length=32)
     psp_order_id: str | None = Field(default=None, max_length=64)
     psp_payment_link_id: str | None = Field(default=None, max_length=64)
+    short_url: str | None = Field(default=None, max_length=512)
     cancel_token: str | None = Field(default=None, max_length=64, unique=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
-    updated_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
     paid_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
     released_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
     cancelled_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
@@ -114,7 +125,7 @@ class IdempotencyKey(SQLModel, table=True):
     request_hash: str = Field(max_length=64)  # hash of request body
     response_status: int
     response_body: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
     expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False, index=True))
 
     __table_args__ = (
@@ -136,7 +147,7 @@ class WebhookEvent(SQLModel, table=True):
     retry_count: int = Field(default=0, ge=0)
     last_error: str | None = Field(default=None, max_length=1024)
     processed_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
 
     __table_args__ = (
         Index("ix_webhook_trace_client", "trace_id", "client_id"),
@@ -159,7 +170,7 @@ class AuditLog(SQLModel, table=True):
     request_path: str | None = Field(default=None, max_length=256)
     response_status: int | None = Field(default=None)
     audit_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
 
     __table_args__ = (
         Index("ix_audit_trace_client", "trace_id", "client_id"),
@@ -179,8 +190,8 @@ class OAuthClient(SQLModel, table=True):
     jwks_uri: str | None = Field(default=None, max_length=512)
     jwks: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
-    updated_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
 
 
 class OAuthAuthorizationCode(SQLModel, table=True):
@@ -192,7 +203,7 @@ class OAuthAuthorizationCode(SQLModel, table=True):
     scopes: list[str] = Field(sa_column=Column(JSON, nullable=False))
     code_challenge: str | None = Field(default=None, max_length=128)
     code_challenge_method: str | None = Field(default=None, max_length=16)
-    auth_time: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    auth_time: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
     expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False, index=True))
     used_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
     code_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
@@ -206,7 +217,7 @@ class OAuthToken(SQLModel, table=True):
     token_type: str = Field(max_length=32)  # "access_token" or "refresh_token"
     scopes: list[str] = Field(sa_column=Column(JSON, nullable=False))
     subject: str | None = Field(default=None, max_length=256)
-    issued_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    issued_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
     expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False, index=True))
     revoked_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
     access_token_hash: str | None = Field(default=None, max_length=128)
@@ -224,7 +235,7 @@ class WebAuthnCredential(SQLModel, table=True):
     attestation_format: str | None = Field(default=None, max_length=64)
     attestation_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
     last_used_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
 
 
@@ -245,13 +256,14 @@ class IntentPolicy(SQLModel, table=True):
     not_before: int  # Unix seconds
     expires_at: int  # Unix seconds
     assertion_max_age_seconds: int = Field(default=86400, ge=0)
+    no_human_authority: bool = Field(default=False)
     fulfilment_mode: str = Field(max_length=32, default="all_or_nothing")
     required_skus: list[str] = Field(sa_column=Column(JSON, nullable=False))
     webauthn_credential_id: str = Field(max_length=256)
     webauthn_sign_count: int
     signed_at: datetime = Field(sa_column=Column(DateTime, nullable=False))
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
 
     __table_args__ = (
         Index("ix_policy_merchant_active", "merchant_id", "is_active"),
@@ -277,8 +289,8 @@ class Campaign(SQLModel, table=True):
     approver_credential_id: str | None = Field(default=None, max_length=256)
     approved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
     webauthn_assertion: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
-    updated_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column=Column(DateTime, nullable=False))
 
     __table_args__ = (
         Index("ix_campaign_merchant_state", "merchant_id", "state"),

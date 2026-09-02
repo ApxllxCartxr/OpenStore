@@ -13,7 +13,7 @@ from openstore.models import IntentPolicy
 AGGREGATE = 4102444800  # far-future Unix seconds
 
 
-def _policy() -> IntentPolicy:
+def _policy(no_human_authority: bool = False) -> IntentPolicy:
     return IntentPolicy(
         id="pol",
         merchant_id="m_test",
@@ -35,13 +35,14 @@ def _policy() -> IntentPolicy:
         webauthn_sign_count=0,
         signed_at=datetime.utcnow(),
         is_active=True,
+        no_human_authority=no_human_authority,
     )
 
 
-def _ctx(has_assertion: bool) -> CompilerContext:
+def _ctx(has_assertion: bool, no_human_authority: bool = False) -> CompilerContext:
     return CompilerContext(
         cart_items=[{"sku": "SKU_A", "qty": 1, "unit_minor": 10000, "tags": [], "campaign_id": None}],
-        policy=_policy(),
+        policy=_policy(no_human_authority=no_human_authority),
         merchant_id="m_test",
         currency="INR",
         checkout_count=0,
@@ -70,6 +71,26 @@ def test_present_assertion_passes_check0_and_proceeds():
         "result": "pass",
         "reason_code": None,
     }
-    # With authority present, the compiler proceeds: this cart passes checks 0-11.
+    # With authority present, the compiler proceeds: this cart passes checks 0-12.
     assert result.allowed is True
+    # campaign_validity is validated before the discount math, but its transcript
+    # entry is recorded in the canonical trailing position (check 12).
     assert result.transcript[-1]["check"] == "campaign_validity"
+
+
+def test_no_human_authority_policy_skips_check0_assertion():
+    # A policy signed with no_human_authority=True authorizes autonomous
+    # purchase: check 0 is gated off, so a cart with no WebAuthn assertion still
+    # proceeds through checks 1-12 (it does not return assertion_required).
+    ctx = _ctx(has_assertion=False, no_human_authority=True)
+
+    result = compile_decision(ctx)
+
+    assert result.allowed is True
+    assert result.transcript[0] == {
+        "check": "human_authority_present",
+        "result": "pass",
+        "reason_code": None,
+    }
+    # AAL is 0 in the autonomous path (no per-cart authority evidence).
+    assert result.aal_level == 0

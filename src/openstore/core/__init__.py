@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .aal import AALPredicates, compute_aal_from_predicates, evaluate_predicates, get_aal_reasons
 from .api import (
     CommerceError,
     cancel_hold_flow,
@@ -22,6 +21,8 @@ from .compiler import (
 )
 from .database import (
     check_spend_cap,
+    compute_policy_exposure,
+    compute_policy_spend,
     get_engine,
     get_or_create_checkout,
     get_session,
@@ -110,11 +111,6 @@ __all__ = [
     "cancel_hold_flow",
     "verify_checkout_evidence",
     "run_sweepers",
-    # aal
-    "AALPredicates",
-    "evaluate_predicates",
-    "compute_aal_from_predicates",
-    "get_aal_reasons",
     # compiler
     "CompilerContext",
     "CompilerResult",
@@ -128,6 +124,8 @@ __all__ = [
     "session_scope",
     "immediate_session",
     "check_spend_cap",
+    "compute_policy_spend",
+    "compute_policy_exposure",
     "get_or_create_checkout",
     "update_checkout_state",
     # holdcancel
