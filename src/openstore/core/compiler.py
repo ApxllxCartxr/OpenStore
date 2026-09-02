@@ -12,7 +12,10 @@ from openstore.models import IntentPolicy
 @dataclass(frozen=True)
 class CompilerContext:
     """Input context for compile_decision()."""
-    cart_items: list[dict[str, Any]]  # [{"sku": str, "qty": int, "unit_minor": int, "tags": list[str], "campaign_id": Optional[str]}]
+
+    cart_items: list[
+        dict[str, Any]
+    ]  # [{"sku": str, "qty": int, "unit_minor": int, "tags": list[str], "campaign_id": Optional[str]}]
     policy: IntentPolicy
     merchant_id: str
     currency: str
@@ -27,13 +30,17 @@ class CompilerContext:
 @dataclass(frozen=True)
 class CompilerResult:
     """Output of compile_decision()."""
+
     allowed: bool
     reason_code: str | None
-    transcript: list[dict[str, Any]]  # PoAI §3.3.6: {"check": str, "result": "pass"|"fail", "reason_code": Optional[str]}
+    transcript: list[
+        dict[str, Any]
+    ]  # PoAI §3.3.6: {"check": str, "result": "pass"|"fail", "reason_code": Optional[str]}
     aal_level: int
     spend_per_tx_minor: int
     spend_cumulative_minor: int
     effective_amount_minor: int  # after campaign discounts
+    checkout_id: str | None = None
 
 
 # Reason codes (closed set from REGISTRY.json, Part 7 — policy.* namespaced)
@@ -115,11 +122,13 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
 
     def add_check(name: str, passed: bool, reason_code: str | None = None) -> None:
         """Record check result (PoAI §3.3.6: check name / pass-fail / reason code)."""
-        transcript.append({
-            "check": name,
-            "result": "pass" if passed else "fail",
-            "reason_code": reason_code,
-        })
+        transcript.append(
+            {
+                "check": name,
+                "result": "pass" if passed else "fail",
+                "reason_code": reason_code,
+            }
+        )
 
     def fail(reason_code: str, details: dict[str, Any] | None = None) -> CompilerResult:
         """Early return on failure."""
@@ -275,6 +284,7 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
 
     # All checks passed - compute AAL level
     from openstore.core.holdcancel import compute_aal_level as compute_aal
+
     aal_level = compute_aal(
         has_webauthn_assertion=ctx.has_webauthn_assertion,
         policy_allows_no_human_authority=ctx.policy.no_human_authority,

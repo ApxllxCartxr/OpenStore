@@ -155,12 +155,14 @@ def create_app(config: Settings) -> FastAPI:
     @app.get("/.well-known/agent-commerce.json")
     async def agent_commerce(request: Request) -> dict[str, Any]:
         from openstore.surfaces.wellknown import build_agent_commerce_manifest
+
         origin = resolve_public_origin(config, request)
         return build_agent_commerce_manifest(config, origin)
 
     @app.get("/.well-known/agent-policy.json")
     async def agent_policy() -> dict[str, Any]:
         from openstore.surfaces.wellknown import build_agent_policy_manifest
+
         return build_agent_policy_manifest(config)
 
     @app.get("/.well-known/agent-card.json")
@@ -182,7 +184,12 @@ def create_app(config: Settings) -> FastAPI:
             "authorization_endpoint": f"{origin}/oauth/authorize",
             "token_endpoint": f"{origin}/oauth/token",
             "jwks_uri": f"{origin}/oauth/jwks.json",
-            "scopes_supported": ["catalog:read", "cart:write", "checkout:initiate", "checkout:confirm"],
+            "scopes_supported": [
+                "catalog:read",
+                "cart:write",
+                "checkout:initiate",
+                "checkout:confirm",
+            ],
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code"],
             "code_challenge_methods_supported": ["S256"],
@@ -191,12 +198,14 @@ def create_app(config: Settings) -> FastAPI:
     @app.get("/.well-known/poai-jwks.json")
     async def poai_jwks() -> dict[str, Any]:
         from openstore.surfaces.wellknown import get_poai_jwks
+
         return get_poai_jwks(config)
 
     @app.get("/.well-known/agent-campaigns.json")
     async def agent_campaigns_signed(request: Request) -> dict[str, Any]:
         origin = resolve_public_origin(config, request)
         from openstore.surfaces.wellknown import get_signed_campaign_feed
+
         return get_signed_campaign_feed(config, origin)
 
     # Agent catalog (S6.5)
@@ -204,8 +213,10 @@ def create_app(config: Settings) -> FastAPI:
     async def agent_catalog(request: Request) -> dict[str, Any]:
         from openstore.surfaces.catalog import serve_catalog_feed
         from openstore.surfaces.wellknown import get_catalog_signing_key
+
         return serve_catalog_feed(
-            config, merchant_id=_mid(config),
+            config,
+            merchant_id=_mid(config),
             private_key_pem=get_catalog_signing_key(_mid(config)),
         )
 
@@ -236,8 +247,11 @@ def create_app(config: Settings) -> FastAPI:
         tool_name = body.get("tool", "")
         arguments = body.get("arguments", {})
 
-        session = get_session(config)
-        try:
+        from openstore.core.database import session_scope
+
+        # session_scope commits on success / rolls back on error (INV-11) — a
+        # plain get_session()+close() silently drops every write this call makes.
+        with session_scope(config) as session:
             result = handle_mcp_request(
                 config=config,
                 session=session,
@@ -247,8 +261,6 @@ def create_app(config: Settings) -> FastAPI:
                 trace_id=None,
                 client_id=client_id,
             )
-        finally:
-            session.close()
         return result
 
     # ACP endpoint (stub)
@@ -260,6 +272,7 @@ def create_app(config: Settings) -> FastAPI:
     @app.get("/agent/campaigns")
     async def agent_campaigns_feed(request: Request) -> dict[str, Any]:
         from openstore.surfaces.wellknown import get_signed_campaign_feed
+
         origin = resolve_public_origin(config, request)
         return get_signed_campaign_feed(config, origin)
 
@@ -283,7 +296,11 @@ def create_app(config: Settings) -> FastAPI:
                     webauthn_assertion=webauthn_assertion,
                 )
                 session.commit()
-                return {"status": "approved", "campaign_id": campaign.id, "state": campaign.state.value}
+                return {
+                    "status": "approved",
+                    "campaign_id": campaign.id,
+                    "state": campaign.state.value,
+                }
             except CampaignValidationError as e:
                 session.rollback()
                 return {"error": e.reason_code, "message": e.message}
@@ -301,9 +318,13 @@ def create_app(config: Settings) -> FastAPI:
         session = _get_session(config)
         try:
             from sqlmodel import select as _select
+
             campaign = session.exec(_select(Campaign).where(Campaign.id == campaign_id)).first()
             if not campaign:
-                return {"error": "campaign.not_found", "message": f"Campaign {campaign_id} not found"}
+                return {
+                    "error": "campaign.not_found",
+                    "message": f"Campaign {campaign_id} not found",
+                }
             campaign.state = CampaignState.REJECTED
             campaign.updated_at = datetime.now(UTC)
             session.add(campaign)

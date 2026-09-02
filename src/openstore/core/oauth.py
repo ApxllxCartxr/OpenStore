@@ -93,9 +93,7 @@ def validate_client(
     client_secret: str | None = None,
 ) -> OAuthClient:
     """Validate client credentials."""
-    client = session.exec(
-        select(OAuthClient).where(OAuthClient.client_id == client_id)
-    ).first()
+    client = session.exec(select(OAuthClient).where(OAuthClient.client_id == client_id)).first()
 
     if not client:
         raise OAuthError("invalid_client", "Client not found", 401)
@@ -129,7 +127,8 @@ def create_authorization_code(
         scopes=scopes,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
-        expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=AUTH_CODE_TTL_SECONDS),
+        expires_at=datetime.now(UTC).replace(tzinfo=None)
+        + timedelta(seconds=AUTH_CODE_TTL_SECONDS),
         metadata=metadata,
     )
 
@@ -272,8 +271,8 @@ def _create_jwt_token(
         "iss": "openstore",
         "sub": subject or client_id,
         "aud": client_id,
-        "iat": int(datetime.now(UTC).replace(tzinfo=None).timestamp()),
-        "exp": int(expires_at.timestamp()),
+        "iat": int(datetime.now(UTC).timestamp()),
+        "exp": int(expires_at.replace(tzinfo=UTC).timestamp()),
         "scope": " ".join(scopes),
         "token_type": token_type,
     }
@@ -299,11 +298,14 @@ def _token_private_key(merchant_jwks: dict[str, Any] | None) -> Any:
     """
     if merchant_jwks and merchant_jwks.get("private_key"):
         from cryptography.hazmat.primitives import serialization
+
         return serialization.load_der_private_key(merchant_jwks["private_key"], password=None)
 
     from openstore.surfaces.wellknown import _load_or_generate_poai_keys
+
     data = _load_or_generate_poai_keys("merchant")
     from cryptography.hazmat.primitives import serialization
+
     return serialization.load_der_private_key(data["private_key"], password=None)
 
 
@@ -311,6 +313,7 @@ def _resolve_token_kid(merchant_jwks: dict[str, Any] | None) -> str:
     """kid for the signing key: per-merchant default (DECISIONS §11.1.10
     namespaced kid for merchant_id 'merchant')."""
     from openstore.surfaces.wellknown import _load_or_generate_poai_keys
+
     kid = _load_or_generate_poai_keys("merchant")["jwk"].get("kid")
     if not isinstance(kid, str):
         raise ValueError("merchant JWK kid must be a string")
@@ -356,9 +359,7 @@ def validate_access_token(
         header = json.loads(header_json)
 
         if header.get("alg") not in _JWS_ALG_ALLOWLIST:
-            raise OAuthError(
-                "auth.token_verification_failed", "Unsupported token algorithm", 401
-            )
+            raise OAuthError("auth.token_verification_failed", "Unsupported token algorithm", 401)
 
         kid = header.get("kid")
         if not kid:
@@ -378,7 +379,7 @@ def validate_access_token(
             raise OAuthError("invalid_token", "Missing jti claim", 401)
 
         exp = claims.get("exp")
-        if exp and datetime.now(UTC).replace(tzinfo=None).timestamp() > exp:
+        if exp and datetime.now(UTC).timestamp() > exp:
             raise OAuthError("invalid_token", "Token expired", 401)
 
         token_record = session.exec(
@@ -414,9 +415,7 @@ def _resolve_public_key(kid: str, jwks: dict[str, Any] | None) -> Any:
         keys = jwks.get("keys", [])
         jwk = next((k for k in keys if k.get("kid") == kid), None)
         if jwk is None:
-            raise OAuthError(
-                "auth.token_verification_failed", f"Unknown token kid {kid!r}", 401
-            )
+            raise OAuthError("auth.token_verification_failed", f"Unknown token kid {kid!r}", 401)
         x = _b64.urlsafe_b64decode(jwk["x"] + "==")
         y = _b64.urlsafe_b64decode(jwk["y"] + "==")
         return _build_public_key(x, y)
@@ -433,9 +432,7 @@ def _resolve_public_key(kid: str, jwks: dict[str, Any] | None) -> Any:
         None,
     )
     if data is None:
-        raise OAuthError(
-            "auth.token_verification_failed", f"Unknown token kid {kid!r}", 401
-        )
+        raise OAuthError("auth.token_verification_failed", f"Unknown token kid {kid!r}", 401)
     return data["public_key"]
 
 
@@ -459,9 +456,7 @@ def _verify_es256(signing_input: str, sig_b64: str, public_key: Any) -> bool:
         r = int.from_bytes(raw_sig[:32], "big")
         s = int.from_bytes(raw_sig[32:], "big")
         der_sig = encode_dss_signature(r, s)
-        public_key.verify(
-            der_sig, signing_input.encode("ascii"), ec.ECDSA(hashes.SHA256())
-        )
+        public_key.verify(der_sig, signing_input.encode("ascii"), ec.ECDSA(hashes.SHA256()))
         return True
     except Exception:
         return False
@@ -493,4 +488,5 @@ def get_jwks(config: Settings) -> dict[str, Any]:
     Resource servers fetch this to validate ES256 signatures.
     """
     from openstore.surfaces.wellknown import get_poai_jwks
+
     return get_poai_jwks(config)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 from typing import Any
 
@@ -71,8 +72,15 @@ def create_checkout(
     4. Return CompilerResult with AAL level
     """
     # Audit log
-    audit_log(session, trace_id, client_id, "create_checkout", "checkout",
-              request_path="/checkout", request_method="POST")
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "create_checkout",
+        "checkout",
+        request_path="/checkout",
+        request_method="POST",
+    )
 
     # Load policy
     policy = session.exec(
@@ -91,9 +99,7 @@ def create_checkout(
     for item in cart_items:
         campaign_id = item.get("campaign_id")
         if campaign_id and campaign_id not in campaign_lookup:
-            campaign = session.exec(
-                select(Campaign).where(Campaign.id == campaign_id)
-            ).first()
+            campaign = session.exec(select(Campaign).where(Campaign.id == campaign_id)).first()
             if campaign:
                 campaign_lookup[campaign_id] = {
                     "id": campaign.id,
@@ -113,9 +119,9 @@ def create_checkout(
     cumulative_spend = compute_policy_exposure(session, policy_id)
 
     # Count checkouts for this policy
-    checkout_count = len(list(session.exec(
-        select(Checkout).where(Checkout.policy_id == policy_id)
-    ).all()))
+    checkout_count = len(
+        list(session.exec(select(Checkout).where(Checkout.policy_id == policy_id)).all())
+    )
 
     # Verify WebAuthn assertion if provided
     has_assertion = False
@@ -134,6 +140,7 @@ def create_checkout(
                 authenticator_data=webauthn_assertion["authenticator_data"],
                 signature=webauthn_assertion["signature"],
                 challenge_b64url=webauthn_assertion["challenge"],
+                binding={"mode": "cart", "cart_hash": cart_hash},
             )
             assertion_verified = verified
             # Calculate assertion age
@@ -151,7 +158,7 @@ def create_checkout(
         cumulative_spend_minor=cumulative_spend,
         has_webauthn_assertion=has_assertion and assertion_verified,
         assertion_age_seconds=assertion_age,
-        now_unix=int(datetime.now(UTC).replace(tzinfo=None).timestamp()),
+        now_unix=int(datetime.now(UTC).timestamp()),
         campaign_lookup=campaign_lookup,
     )
 
@@ -160,9 +167,16 @@ def create_checkout(
 
     if not result.allowed:
         # Audit failure
-        audit_log(session, trace_id, client_id, "checkout_denied", "checkout",
-                  resource_id=policy_id, response_status=400,
-                  metadata={"reason_code": result.reason_code, "transcript": result.transcript})
+        audit_log(
+            session,
+            trace_id,
+            client_id,
+            "checkout_denied",
+            "checkout",
+            resource_id=policy_id,
+            response_status=400,
+            metadata={"reason_code": result.reason_code, "transcript": result.transcript},
+        )
         return result
 
     # Generate checkout ID if not provided
@@ -178,7 +192,9 @@ def create_checkout(
         "campaign_lookup": campaign_lookup,
     }
 
-    idem_key = idempotency_key or generate_idempotency_key("checkout", trace_id, client_id, checkout_id)
+    idem_key = idempotency_key or generate_idempotency_key(
+        "checkout", trace_id, client_id, checkout_id
+    )
 
     checkout, created = get_or_create_checkout(
         session=session,
@@ -218,11 +234,18 @@ def create_checkout(
         )
 
     # Audit success
-    audit_log(session, trace_id, client_id, "checkout_created", "checkout",
-              resource_id=checkout.id, response_status=201,
-              metadata={"aal_level": result.aal_level, "amount_minor": result.effective_amount_minor})
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "checkout_created",
+        "checkout",
+        resource_id=checkout.id,
+        response_status=201,
+        metadata={"aal_level": result.aal_level, "amount_minor": result.effective_amount_minor},
+    )
 
-    return result
+    return dataclasses.replace(result, checkout_id=checkout.id)
 
 
 def get_checkout(
@@ -232,12 +255,18 @@ def get_checkout(
     checkout_id: str,
 ) -> Checkout | None:
     """Get checkout by ID with audit."""
-    audit_log(session, trace_id, client_id, "get_checkout", "checkout",
-              resource_id=checkout_id, request_path=f"/checkout/{checkout_id}", request_method="GET")
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "get_checkout",
+        "checkout",
+        resource_id=checkout_id,
+        request_path=f"/checkout/{checkout_id}",
+        request_method="GET",
+    )
 
-    return session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    return session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
 
 def confirm_checkout(
@@ -260,12 +289,17 @@ def confirm_checkout(
         authority verification is skipped; the spend cap is still re-checked.
       - AAL1+ requires (and re-verifies) a fresh WebAuthn assertion.
     """
-    audit_log(session, trace_id, client_id, "confirm_checkout", "checkout",
-              resource_id=checkout_id, request_method="POST")
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "confirm_checkout",
+        "checkout",
+        resource_id=checkout_id,
+        request_method="POST",
+    )
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise CommerceError("checkout_not_found", "Checkout not found", 404)
@@ -290,7 +324,11 @@ def confirm_checkout(
     # AAL1+ requires a fresh, verified WebAuthn assertion at confirm time.
     if not allow_autonomous:
         if not webauthn_assertion:
-            raise CommerceError("assertion_required", "Cataloged purchase requires a WebAuthn assertion to confirm", 400)
+            raise CommerceError(
+                "assertion_required",
+                "Cataloged purchase requires a WebAuthn assertion to confirm",
+                400,
+            )
         try:
             verified, _sign_count = complete_assertion(
                 session=session,
@@ -345,12 +383,9 @@ def cancel_hold_flow(
 
     Called from /hold/{cancel_token}/cancel endpoint.
     """
-    audit_log(session, trace_id, client_id, "cancel_hold", "checkout",
-              request_method="POST")
+    audit_log(session, trace_id, client_id, "cancel_hold", "checkout", request_method="POST")
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.cancel_token == cancel_token)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.cancel_token == cancel_token)).first()
 
     if not checkout:
         raise CommerceError("invalid_cancel_token", "Cancel token not found", 404)
@@ -372,22 +407,20 @@ def verify_checkout_evidence(
     checkout_id: str,
 ) -> dict[str, Any]:
     """Get complete evidence for a checkout (for PoAI bundle)."""
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         return {"error": "checkout_not_found"}
 
     # Get ledger entries
-    ledger_entries = list(session.exec(
-        select(LedgerEntry).where(LedgerEntry.reference_id == checkout_id)
-    ).all())
+    ledger_entries = list(
+        session.exec(select(LedgerEntry).where(LedgerEntry.reference_id == checkout_id)).all()
+    )
 
     # Get audit logs
-    audit_logs = list(session.exec(
-        select(AuditLog).where(AuditLog.resource_id == checkout_id)
-    ).all())
+    audit_logs = list(
+        session.exec(select(AuditLog).where(AuditLog.resource_id == checkout_id)).all()
+    )
 
     # Verify ledger balances
     balanced = verify_ledger_balances(session, checkout_id)
@@ -408,7 +441,9 @@ def verify_checkout_evidence(
             "created_at": checkout.created_at.isoformat() + "Z",
             "paid_at": checkout.paid_at.isoformat() + "Z" if checkout.paid_at else None,
             "released_at": checkout.released_at.isoformat() + "Z" if checkout.released_at else None,
-            "cancelled_at": checkout.cancelled_at.isoformat() + "Z" if checkout.cancelled_at else None,
+            "cancelled_at": checkout.cancelled_at.isoformat() + "Z"
+            if checkout.cancelled_at
+            else None,
         },
         "ledger_entries": [
             {

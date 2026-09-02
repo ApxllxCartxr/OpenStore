@@ -21,7 +21,9 @@ def _require_scope(token_scopes: list[str], required: str) -> None:
 
 
 class MCPToolResult:
-    def __init__(self, success: bool, data: dict[str, Any] | None = None, error: dict[str, Any] | None = None):
+    def __init__(
+        self, success: bool, data: dict[str, Any] | None = None, error: dict[str, Any] | None = None
+    ):
         self.success = success
         self.data = data or {}
         self.error = error or {}
@@ -36,12 +38,17 @@ def search_products(
     """MCP tool: search_products. Returns matching catalog items."""
     try:
         from openstore.surfaces.catalog import search_catalog_items
+
         items = search_catalog_items(config, query, tags=tags, limit=limit)
         return MCPToolResult(success=True, data={"items": items, "count": len(items)})
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def get_product(
@@ -51,14 +58,22 @@ def get_product(
     """MCP tool: get_product. Returns a single catalog item by SKU."""
     try:
         from openstore.surfaces.catalog import get_catalog_item
+
         item = get_catalog_item(config, sku)
         if item is None:
-            return MCPToolResult(success=False, error={"reason_code": "catalog.sku_not_found", "message": f"SKU {sku} not found"})
+            return MCPToolResult(
+                success=False,
+                error={"reason_code": "catalog.sku_not_found", "message": f"SKU {sku} not found"},
+            )
         return MCPToolResult(success=True, data={"item": item})
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def create_cart(
@@ -78,6 +93,7 @@ def create_cart(
     _require_scope(token_scopes, "cart:write")
     try:
         from openstore.core.api import create_checkout
+
         result = create_checkout(
             config=config,
             session=session,
@@ -90,17 +106,25 @@ def create_cart(
             policy_id=policy_id,
             webauthn_assertion=webauthn_assertion,
         )
-        return MCPToolResult(success=True, data={
-            "allowed": result.allowed,
-            "reason_code": result.reason_code,
-            "aal_level": result.aal_level,
-            "effective_amount_minor": result.effective_amount_minor,
-            "transcript": result.transcript,
-        })
+        return MCPToolResult(
+            success=True,
+            data={
+                "allowed": result.allowed,
+                "reason_code": result.reason_code,
+                "aal_level": result.aal_level,
+                "effective_amount_minor": result.effective_amount_minor,
+                "transcript": result.transcript,
+                "checkout_id": result.checkout_id,
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def update_cart(
@@ -125,9 +149,7 @@ def update_cart(
         from openstore.core.holdcancel import cancel_hold
         from openstore.models import Checkout, OrderState
 
-        old = session.exec(
-            select(Checkout).where(Checkout.id == checkout_id)
-        ).first()
+        old = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
         if old and old.state == OrderState.HELD:
             cancel_hold(
                 session=session,
@@ -137,15 +159,26 @@ def update_cart(
                 reason="Replaced by agent update_cart",
             )
         return create_cart(
-            config=config, session=session, client_id=client_id, trace_id=trace_id,
-            merchant_id=merchant_id, items=items, policy_id=policy_id,
-            cart_hash=cart_hash, cart_version=cart_version, token_scopes=token_scopes,
+            config=config,
+            session=session,
+            client_id=client_id,
+            trace_id=trace_id,
+            merchant_id=merchant_id,
+            items=items,
+            policy_id=policy_id,
+            cart_hash=cart_hash,
+            cart_version=cart_version,
+            token_scopes=token_scopes,
             webauthn_assertion=webauthn_assertion,
         )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def checkout_initiate(
@@ -164,28 +197,44 @@ def checkout_initiate(
         from openstore.models import Checkout
         from openstore.psp.razorpay_driver import create_payment_link
 
-        checkout = session.exec(
-            select(Checkout).where(Checkout.id == checkout_id)
-        ).first()
+        checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
         if checkout is None:
-            return MCPToolResult(success=False, error={"reason_code": "checkout.not_found", "message": f"Checkout {checkout_id} not found"})
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "checkout.not_found",
+                    "message": f"Checkout {checkout_id} not found",
+                },
+            )
 
         checkout = create_payment_link(
-            config=config, session=session, trace_id=trace_id, client_id=client_id,
-            checkout_id=checkout_id, amount_minor=checkout.amount_minor, currency=checkout.currency,
+            config=config,
+            session=session,
+            trace_id=trace_id,
+            client_id=client_id,
+            checkout_id=checkout_id,
+            amount_minor=checkout.amount_minor,
+            currency=checkout.currency,
         )
-        return MCPToolResult(success=True, data={
-            "checkout_id": checkout.id,
-            "payment_link_id": checkout.psp_payment_link_id,
-            "short_url": checkout.short_url,
-            "cancel_token": checkout.cancel_token,
-            "amount_minor": checkout.amount_minor,
-            "currency": checkout.currency,
-        })
+        return MCPToolResult(
+            success=True,
+            data={
+                "checkout_id": checkout.id,
+                "payment_link_id": checkout.psp_payment_link_id,
+                "short_url": checkout.short_url,
+                "cancel_token": checkout.cancel_token,
+                "amount_minor": checkout.amount_minor,
+                "currency": checkout.currency,
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def checkout_confirm(
@@ -210,26 +259,36 @@ def checkout_confirm(
         from openstore.core.api import confirm_checkout
         from openstore.models import Checkout
 
-        stored = session.exec(
-            select(Checkout).where(Checkout.id == checkout_id)
-        ).first()
+        stored = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
         psp_order_id = stored.psp_order_id if stored else checkout_id
         psp_payment_link_id = stored.psp_payment_link_id if stored else ""
 
         checkout = confirm_checkout(
-            config=config, session=session, trace_id=trace_id, client_id=client_id,
-            checkout_id=checkout_id, psp_order_id=psp_order_id,
-            psp_payment_link_id=psp_payment_link_id, webauthn_assertion=webauthn_assertion,
+            config=config,
+            session=session,
+            trace_id=trace_id,
+            client_id=client_id,
+            checkout_id=checkout_id,
+            psp_order_id=psp_order_id,
+            psp_payment_link_id=psp_payment_link_id,
+            webauthn_assertion=webauthn_assertion,
         )
-        return MCPToolResult(success=True, data={
-            "checkout_id": checkout.id,
-            "state": checkout.state.value,
-            "cancel_token": checkout.cancel_token,
-        })
+        return MCPToolResult(
+            success=True,
+            data={
+                "checkout_id": checkout.id,
+                "state": checkout.state.value,
+                "cancel_token": checkout.cancel_token,
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def get_order(
@@ -242,23 +301,39 @@ def get_order(
     """MCP tool: get_order. Returns the current state of an order/checkout."""
     try:
         from openstore.core.api import get_checkout
-        checkout = get_checkout(session=session, trace_id=trace_id, client_id=client_id, checkout_id=checkout_id)
+
+        checkout = get_checkout(
+            session=session, trace_id=trace_id, client_id=client_id, checkout_id=checkout_id
+        )
         if checkout is None:
-            return MCPToolResult(success=False, error={"reason_code": "checkout.not_found", "message": f"Checkout {checkout_id} not found"})
-        return MCPToolResult(success=True, data={
-            "checkout_id": checkout.id,
-            "state": checkout.state.value,
-            "amount_minor": checkout.amount_minor,
-            "currency": checkout.currency,
-            "aal_level": checkout.aal_level,
-            "cart_hash": checkout.cart_hash,
-            "created_at": checkout.created_at.isoformat() if checkout.created_at else None,
-            "expires_at": checkout.expires_at.isoformat() if checkout.expires_at else None,
-        })
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "checkout.not_found",
+                    "message": f"Checkout {checkout_id} not found",
+                },
+            )
+        return MCPToolResult(
+            success=True,
+            data={
+                "checkout_id": checkout.id,
+                "state": checkout.state.value,
+                "amount_minor": checkout.amount_minor,
+                "currency": checkout.currency,
+                "aal_level": checkout.aal_level,
+                "cart_hash": checkout.cart_hash,
+                "created_at": checkout.created_at.isoformat() if checkout.created_at else None,
+                "expires_at": checkout.expires_at.isoformat() if checkout.expires_at else None,
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def get_audit_log(
@@ -274,30 +349,38 @@ def get_audit_log(
         from sqlmodel import select
 
         from openstore.models import AuditLog
+
         query = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)  # type: ignore[attr-defined]
         if checkout_id:
             query = query.where(AuditLog.resource_id == checkout_id)
         logs = list(session.exec(query).all())
-        return MCPToolResult(success=True, data={
-            "entries": [
-                {
-                    "id": log.id,
-                    "action": log.action,
-                    "resource_type": log.resource_type,
-                    "resource_id": log.resource_id,
-                    "trace_id": log.trace_id,
-                    "client_id": log.client_id,
-                    "response_status": log.response_status,
-                    "created_at": log.created_at.isoformat() if log.created_at else None,
-                }
-                for log in logs
-            ],
-            "count": len(logs),
-        })
+        return MCPToolResult(
+            success=True,
+            data={
+                "entries": [
+                    {
+                        "id": log.id,
+                        "action": log.action,
+                        "resource_type": log.resource_type,
+                        "resource_id": log.resource_id,
+                        "trace_id": log.trace_id,
+                        "client_id": log.client_id,
+                        "response_status": log.response_status,
+                        "created_at": log.created_at.isoformat() if log.created_at else None,
+                    }
+                    for log in logs
+                ],
+                "count": len(logs),
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def webauthn_register_begin(
@@ -309,22 +392,33 @@ def webauthn_register_begin(
     """MCP tool: webauthn_register_begin. Starts WebAuthn registration ceremony."""
     try:
         from openstore.core.webauthn_rp import begin_registration
+
         result = begin_registration(
-            config=config, user_handle=user_id, user_name=user_id, display_name=user_id,
+            config=config,
+            user_handle=user_id,
+            user_name=user_id,
+            display_name=user_id,
         )
-        return MCPToolResult(success=True, data={
-            "challenge": result.get("challenge"),
-            "rp": result.get("rp"),
-            "user": result.get("user"),
-            "pub_key_cred_params": result.get("pubKeyCredParams"),
-            "timeout": result.get("timeout"),
-            "exclude_credentials": result.get("excludeCredentials", []),
-            "authenticator_selection": result.get("authenticatorSelection"),
-        })
+        return MCPToolResult(
+            success=True,
+            data={
+                "challenge": result.get("challenge"),
+                "rp": result.get("rp"),
+                "user": result.get("user"),
+                "pub_key_cred_params": result.get("pubKeyCredParams"),
+                "timeout": result.get("timeout"),
+                "exclude_credentials": result.get("excludeCredentials", []),
+                "authenticator_selection": result.get("authenticatorSelection"),
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def webauthn_register_complete(
@@ -337,8 +431,11 @@ def webauthn_register_complete(
     """MCP tool: webauthn_register_complete. Completes WebAuthn registration."""
     try:
         from openstore.core.webauthn_rp import complete_registration
+
         cred = complete_registration(
-            session=session, config=config, user_handle=user_id,
+            session=session,
+            config=config,
+            user_handle=user_id,
             credential_id=credential.get("id", ""),
             client_data_json=credential.get("response", {}).get("clientDataJSON", ""),
             attestation_object=credential.get("response", {}).get("attestationObject", ""),
@@ -346,9 +443,13 @@ def webauthn_register_complete(
         )
         return MCPToolResult(success=True, data={"credential_id": cred.credential_id})
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def webauthn_begin_assertion(
@@ -361,17 +462,25 @@ def webauthn_begin_assertion(
     """MCP tool: webauthn_begin_assertion. Starts assertion ceremony."""
     try:
         from openstore.core.webauthn_rp import begin_assertion
+
         result = begin_assertion(config=config, user_handle=user_id, binding=challenge_binding)
-        return MCPToolResult(success=True, data={
-            "challenge": result.get("challenge"),
-            "rp_id": result.get("rpId"),
-            "timeout": result.get("timeout"),
-            "allow_credentials": result.get("allowCredentials", []),
-        })
+        return MCPToolResult(
+            success=True,
+            data={
+                "challenge": result.get("challenge"),
+                "rp_id": result.get("rpId"),
+                "timeout": result.get("timeout"),
+                "allow_credentials": result.get("allowCredentials", []),
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def webauthn_complete_assertion(
@@ -385,8 +494,11 @@ def webauthn_complete_assertion(
     """MCP tool: webauthn_complete_assertion. Completes assertion ceremony."""
     try:
         from openstore.core.webauthn_rp import complete_assertion
+
         verified, sign_count = complete_assertion(
-            session=session, config=config, user_handle=user_id,
+            session=session,
+            config=config,
+            user_handle=user_id,
             credential_id=credential_id,
             client_data_json=assertion.get("clientDataJSON", ""),
             authenticator_data=assertion.get("authenticatorData", ""),
@@ -396,9 +508,13 @@ def webauthn_complete_assertion(
         )
         return MCPToolResult(success=True, data={"verified": verified, "sign_count": sign_count})
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def list_campaigns(
@@ -411,31 +527,41 @@ def list_campaigns(
         from sqlmodel import select
 
         from openstore.models import Campaign, CampaignState
-        campaigns = list(session.exec(
-            select(Campaign).where(
-                Campaign.merchant_id == merchant_id,
-                Campaign.state == CampaignState.ACTIVE,
-            )
-        ).all())
-        return MCPToolResult(success=True, data={
-            "campaigns": [
-                {
-                    "campaign_id": c.id,
-                    "title": c.title,
-                    "discount_bps": c.discount_bps,
-                    "applies_to_skus": c.applies_to_skus,
-                    "starts_at": c.starts_at.isoformat() if c.starts_at else None,
-                    "ends_at": c.ends_at.isoformat() if c.ends_at else None,
-                    "state": c.state.value,
-                }
-                for c in campaigns
-            ],
-            "count": len(campaigns),
-        })
+
+        campaigns = list(
+            session.exec(
+                select(Campaign).where(
+                    Campaign.merchant_id == merchant_id,
+                    Campaign.state == CampaignState.ACTIVE,
+                )
+            ).all()
+        )
+        return MCPToolResult(
+            success=True,
+            data={
+                "campaigns": [
+                    {
+                        "campaign_id": c.id,
+                        "title": c.title,
+                        "discount_bps": c.discount_bps,
+                        "applies_to_skus": c.applies_to_skus,
+                        "starts_at": c.starts_at.isoformat() if c.starts_at else None,
+                        "ends_at": c.ends_at.isoformat() if c.ends_at else None,
+                        "state": c.state.value,
+                    }
+                    for c in campaigns
+                ],
+                "count": len(campaigns),
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
 def get_campaign(
@@ -448,35 +574,60 @@ def get_campaign(
         from sqlmodel import select
 
         from openstore.models import Campaign
+
         campaign = session.exec(select(Campaign).where(Campaign.id == campaign_id)).first()
         if campaign is None:
-            return MCPToolResult(success=False, error={"reason_code": "campaign.not_found", "message": f"Campaign {campaign_id} not found"})
-        return MCPToolResult(success=True, data={
-            "campaign": {
-                "campaign_id": campaign.id,
-                "merchant_id": campaign.merchant_id,
-                "title": campaign.title,
-                "discount_bps": campaign.discount_bps,
-                "applies_to_skus": campaign.applies_to_skus,
-                "starts_at": campaign.starts_at.isoformat() if campaign.starts_at else None,
-                "ends_at": campaign.ends_at.isoformat() if campaign.ends_at else None,
-                "state": campaign.state.value,
-                "rationale": campaign.rationale,
-            }
-        })
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "campaign.not_found",
+                    "message": f"Campaign {campaign_id} not found",
+                },
+            )
+        return MCPToolResult(
+            success=True,
+            data={
+                "campaign": {
+                    "campaign_id": campaign.id,
+                    "merchant_id": campaign.merchant_id,
+                    "title": campaign.title,
+                    "discount_bps": campaign.discount_bps,
+                    "applies_to_skus": campaign.applies_to_skus,
+                    "starts_at": campaign.starts_at.isoformat() if campaign.starts_at else None,
+                    "ends_at": campaign.ends_at.isoformat() if campaign.ends_at else None,
+                    "state": campaign.state.value,
+                    "rationale": campaign.rationale,
+                }
+            },
+        )
     except CommerceError as e:
-        return MCPToolResult(success=False, error={"reason_code": e.reason_code, "message": e.message})
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
     except Exception as e:
-        return MCPToolResult(success=False, error={"reason_code": "internal_error", "message": str(e)})
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
 
 
-TOOL_NAMES = frozenset({
-    "search_products", "get_product", "create_cart", "update_cart",
-    "checkout_initiate", "checkout_confirm", "get_order", "get_audit_log",
-    "webauthn_register_begin", "webauthn_register_complete",
-    "webauthn_begin_assertion", "webauthn_complete_assertion",
-    "list_campaigns", "get_campaign",
-})
+TOOL_NAMES = frozenset(
+    {
+        "search_products",
+        "get_product",
+        "create_cart",
+        "update_cart",
+        "checkout_initiate",
+        "checkout_confirm",
+        "get_order",
+        "get_audit_log",
+        "webauthn_register_begin",
+        "webauthn_register_complete",
+        "webauthn_begin_assertion",
+        "webauthn_complete_assertion",
+        "list_campaigns",
+        "get_campaign",
+    }
+)
 
 
 def handle_mcp_request(
@@ -506,12 +657,20 @@ def handle_mcp_request(
     cid = client_id or "anonymous"
 
     if tool_name == "search_products":
-        result = search_products(config, query=arguments.get("query", ""), tags=arguments.get("tags"), limit=arguments.get("limit", 20))
+        result = search_products(
+            config,
+            query=arguments.get("query", ""),
+            tags=arguments.get("tags"),
+            limit=arguments.get("limit", 20),
+        )
     elif tool_name == "get_product":
         result = get_product(config, sku=arguments["sku"])
     elif tool_name == "create_cart":
         result = create_cart(
-            config=config, session=session, client_id=cid, trace_id=tid,
+            config=config,
+            session=session,
+            client_id=cid,
+            trace_id=tid,
             merchant_id=arguments.get("merchant_id", ""),
             items=arguments.get("items", []),
             policy_id=arguments.get("policy_id", ""),
@@ -522,7 +681,10 @@ def handle_mcp_request(
         )
     elif tool_name == "update_cart":
         result = update_cart(
-            config=config, session=session, client_id=cid, trace_id=tid,
+            config=config,
+            session=session,
+            client_id=cid,
+            trace_id=tid,
             merchant_id=arguments.get("merchant_id", ""),
             checkout_id=arguments.get("checkout_id", ""),
             items=arguments.get("items", []),
@@ -534,64 +696,92 @@ def handle_mcp_request(
         )
     elif tool_name == "checkout_initiate":
         result = checkout_initiate(
-            config=config, session=session, client_id=cid, trace_id=tid,
+            config=config,
+            session=session,
+            client_id=cid,
+            trace_id=tid,
             checkout_id=arguments.get("checkout_id", ""),
             token_scopes=token_scopes,
         )
     elif tool_name == "checkout_confirm":
         result = checkout_confirm(
-            config=config, session=session, client_id=cid, trace_id=tid,
+            config=config,
+            session=session,
+            client_id=cid,
+            trace_id=tid,
             checkout_id=arguments.get("checkout_id", ""),
             token_scopes=token_scopes,
             webauthn_assertion=arguments.get("webauthn_assertion"),
         )
     elif tool_name == "get_order":
         result = get_order(
-            config=config, session=session, trace_id=tid, client_id=cid,
+            config=config,
+            session=session,
+            trace_id=tid,
+            client_id=cid,
             checkout_id=arguments.get("checkout_id", ""),
         )
     elif tool_name == "get_audit_log":
         result = get_audit_log(
-            config=config, session=session, trace_id=tid, client_id=cid,
+            config=config,
+            session=session,
+            trace_id=tid,
+            client_id=cid,
             checkout_id=arguments.get("checkout_id"),
             limit=arguments.get("limit", 100),
         )
     elif tool_name == "webauthn_register_begin":
         result = webauthn_register_begin(
-            config=config, session=session, trace_id=tid,
+            config=config,
+            session=session,
+            trace_id=tid,
             user_id=arguments.get("user_id", ""),
         )
     elif tool_name == "webauthn_register_complete":
         result = webauthn_register_complete(
-            config=config, session=session, trace_id=tid,
+            config=config,
+            session=session,
+            trace_id=tid,
             user_id=arguments.get("user_id", ""),
             credential=arguments.get("credential", {}),
         )
     elif tool_name == "webauthn_begin_assertion":
         result = webauthn_begin_assertion(
-            config=config, session=session, trace_id=tid,
+            config=config,
+            session=session,
+            trace_id=tid,
             user_id=arguments.get("user_id", ""),
             challenge_binding=arguments.get("challenge_binding"),
         )
     elif tool_name == "webauthn_complete_assertion":
         result = webauthn_complete_assertion(
-            config=config, session=session, trace_id=tid,
+            config=config,
+            session=session,
+            trace_id=tid,
             user_id=arguments.get("user_id", ""),
             credential_id=arguments.get("credential_id", ""),
             assertion=arguments.get("assertion", {}),
         )
     elif tool_name == "list_campaigns":
         result = list_campaigns(
-            config=config, session=session,
+            config=config,
+            session=session,
             merchant_id=arguments.get("merchant_id", ""),
         )
     elif tool_name == "get_campaign":
         result = get_campaign(
-            config=config, session=session,
+            config=config,
+            session=session,
             campaign_id=arguments.get("campaign_id", ""),
         )
     else:
-        return {"success": False, "error": {"reason_code": "auth.unknown_tool", "message": f"Unreachable tool: {tool_name}"}}
+        return {
+            "success": False,
+            "error": {
+                "reason_code": "auth.unknown_tool",
+                "message": f"Unreachable tool: {tool_name}",
+            },
+        }
 
     return {
         "success": result.success,

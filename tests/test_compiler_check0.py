@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from openstore.core.compiler import CompilerContext, CompilerResult, compile_decision
 from openstore.models import IntentPolicy
@@ -33,7 +33,7 @@ def _policy(no_human_authority: bool = False) -> IntentPolicy:
         required_skus=[],
         webauthn_credential_id="cred",
         webauthn_sign_count=0,
-        signed_at=datetime.utcnow(),
+        signed_at=datetime.now(UTC).replace(tzinfo=None),
         is_active=True,
         no_human_authority=no_human_authority,
     )
@@ -41,7 +41,9 @@ def _policy(no_human_authority: bool = False) -> IntentPolicy:
 
 def _ctx(has_assertion: bool, no_human_authority: bool = False) -> CompilerContext:
     return CompilerContext(
-        cart_items=[{"sku": "SKU_A", "qty": 1, "unit_minor": 10000, "tags": [], "campaign_id": None}],
+        cart_items=[
+            {"sku": "SKU_A", "qty": 1, "unit_minor": 10000, "tags": [], "campaign_id": None}
+        ],
         policy=_policy(no_human_authority=no_human_authority),
         merchant_id="m_test",
         currency="INR",
@@ -49,7 +51,7 @@ def _ctx(has_assertion: bool, no_human_authority: bool = False) -> CompilerConte
         cumulative_spend_minor=0,
         has_webauthn_assertion=has_assertion,
         assertion_age_seconds=0,
-        now_unix=int(datetime.utcnow().timestamp()),
+        now_unix=int(datetime.now(UTC).timestamp()),
         campaign_lookup={},
     )
 

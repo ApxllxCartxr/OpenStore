@@ -32,18 +32,23 @@ def load_catalog(config: Settings) -> list[dict[str, Any]]:
     with open(path) as f:
         data = yaml.safe_load(f) or {}
 
-    items = data.get("items", [])
+    if isinstance(data, list):
+        items = data
+    else:
+        items = data.get("items", [])
     normalized = []
     for item in items:
-        normalized.append({
-            "sku": str(item["sku"]),
-            "name": str(item["name"]),
-            "unit_minor": int(item["unit_minor"]),
-            "tags": sorted([str(t) for t in item.get("tags", [])]),
-            "related_skus": [str(s) for s in item.get("related_skus", [])],
-            "description": str(item.get("description", "")),
-            "offers": item.get("offers", []),
-        })
+        normalized.append(
+            {
+                "sku": str(item["sku"]),
+                "name": str(item.get("name", item["sku"])),
+                "unit_minor": int(item.get("unit_minor", item.get("price_minor", 0))),
+                "tags": sorted([str(t) for t in item.get("tags", [])]),
+                "related_skus": [str(s) for s in item.get("related_skus", [])],
+                "description": str(item.get("description", "")),
+                "offers": item.get("offers", []),
+            }
+        )
     CATALOG_CACHE = normalized
     return normalized
 
@@ -83,6 +88,7 @@ def get_catalog_item(config: Settings, sku: str) -> dict[str, Any] | None:
 def compute_catalog_digest(config: Settings) -> str:
     """Compute SHA-256 digest over the normalized catalog."""
     import hashlib
+
     items = load_catalog(config)
     normalized = json.dumps(items, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return f"sha256:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
@@ -121,7 +127,9 @@ def build_catalog_attestation(
         raise ValueError("Catalog attestation requires EC P-256 (secp256r1)")
 
     kid = key.public_key().public_numbers().x.to_bytes(32, "big").hex()[:8]
-    header = json.dumps({"alg": "ES256", "kid": f"openstore-key-{kid}", "typ": "JWT"}, sort_keys=True).encode("utf-8")
+    header = json.dumps(
+        {"alg": "ES256", "kid": f"openstore-key-{kid}", "typ": "JWT"}, sort_keys=True
+    ).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode().rstrip("=")
     header_b64 = base64.urlsafe_b64encode(header).decode().rstrip("=")
 
@@ -133,11 +141,14 @@ def build_catalog_attestation(
     return f"{signing_input}.{sig_b64}"
 
 
-def serve_catalog_feed(config: Settings, merchant_id: str, private_key_pem: bytes | None = None) -> dict[str, Any]:
+def serve_catalog_feed(
+    config: Settings, merchant_id: str, private_key_pem: bytes | None = None
+) -> dict[str, Any]:
     """Serve the catalog feed with attestations (S6.5)."""
     items = load_catalog(config)
     catalog_digest = compute_catalog_digest(config)
     import time
+
     iat = int(time.time())
 
     served_items = []
@@ -157,10 +168,12 @@ def serve_catalog_feed(config: Settings, merchant_id: str, private_key_pem: byte
             except Exception:
                 pass
 
-        served_items.append({
-            **item,
-            "catalog_attestation": attestation,
-        })
+        served_items.append(
+            {
+                **item,
+                "catalog_attestation": attestation,
+            }
+        )
 
     return {
         "merchant_id": merchant_id,

@@ -25,8 +25,11 @@ def config() -> Settings:
         merchant=MerchantConfig(name="Test Merchant", currency="INR"),
         razorpay=RazorpayConfig(key_id="rzp_test_xxx", key_secret="s"),
         discord=DiscordConfig(
-            bot_token="token", buyer_trace_channel_id=1,
-            merchant_trace_channel_id=2, money_trace_channel_id=3, alerts_channel_id=4,
+            bot_token="token",
+            buyer_trace_channel_id=1,
+            merchant_trace_channel_id=2,
+            money_trace_channel_id=3,
+            alerts_channel_id=4,
         ),
         webauthn=WebAuthnConfig(rp_id="localhost", rp_name="OpenStore", origin="http://localhost"),
         database=DatabaseConfig(url="sqlite://"),
@@ -35,17 +38,36 @@ def config() -> Settings:
     )
 
 
+class FakeMCPClient:
+    """Minimal stand-in for InProcessMCPClient in unit tests (no DB, no OAuth)."""
+
+    async def call(self, tool_name: str, arguments: dict) -> dict:
+        return {"success": False, "data": {}, "error": {"reason_code": "fake.noop"}}
+
+    async def search_products(self, query: str, limit: int = 10) -> dict:
+        return {"success": True, "data": {"items": []}, "error": None}
+
+    async def get_order(self, checkout_id: str) -> dict:
+        return {"success": False, "data": {}, "error": {"reason_code": "fake.noop"}}
+
+
+@pytest.fixture()
+def mcp_client() -> FakeMCPClient:
+    return FakeMCPClient()
+
+
 class TestBuyerAgent:
-    def test_plan_returns_cart(self, config):
+    def test_plan_returns_cart(self, config, mcp_client):
         import asyncio
-        agent = BuyerAgent(config)
+
+        agent = BuyerAgent(config, mcp_client)
         result = asyncio.run(agent.plan("vanilla gelato", policy_id="p_001", trace_id="trace_001"))
         assert "trace_id" in result
         assert result["trace_id"] == "trace_001"
 
-    def test_agent_holds_no_payment_keys(self, config):
+    def test_agent_holds_no_payment_keys(self, config, mcp_client):
         """R0.10: agent has no Razorpay credentials."""
-        agent = BuyerAgent(config)
+        agent = BuyerAgent(config, mcp_client)
         # No way to access razorpay.key_secret
         assert not hasattr(agent, "razorpay_key_secret")
         assert not hasattr(agent, "key_secret")
@@ -102,7 +124,11 @@ class TestMerchantAgent:
     def test_narrator_writes_prose(self, config):
         agent = MerchantAgent(config)
         bundle = {
-            "transaction": {"merchant_id": "gelateria", "checkout_id": "chk_001", "amount_minor": 21000},
+            "transaction": {
+                "merchant_id": "gelateria",
+                "checkout_id": "chk_001",
+                "amount_minor": 21000,
+            },
             "adjudication": {"verdict": "ALLOW"},
             "aal": {"level": 2},
         }
@@ -117,30 +143,47 @@ class TestMerchantAgent:
 class TestNegotiationStates:
     def test_valid_states(self):
         from openstore.agents.merchant_agent import NEGOTIATION_STATES
-        for state in ("PROPOSED", "COUNTERED", "ACCEPTED", "NO_COMPLIANT_PATH", "AMENDMENT_REQUESTED"):
+
+        for state in (
+            "PROPOSED",
+            "COUNTERED",
+            "ACCEPTED",
+            "NO_COMPLIANT_PATH",
+            "AMENDMENT_REQUESTED",
+        ):
             assert state in NEGOTIATION_STATES
 
     def test_invalid_state_raises(self):
         with pytest.raises(ValueError):
             NegotiationMessage(
-                negotiation_id="neg_1", round=1, from_="buyer_agent",
-                state="INVALID_STATE", cart_delta={}, reason_code="x", trace_id="t",
+                negotiation_id="neg_1",
+                round=1,
+                from_="buyer_agent",
+                state="INVALID_STATE",
+                cart_delta={},
+                reason_code="x",
+                trace_id="t",
             )
 
     def test_invalid_from_raises(self):
         with pytest.raises(ValueError):
             NegotiationMessage(
-                negotiation_id="neg_1", round=1, from_="random",
-                state="PROPOSED", cart_delta={}, reason_code="x", trace_id="t",
+                negotiation_id="neg_1",
+                round=1,
+                from_="random",
+                state="PROPOSED",
+                cart_delta={},
+                reason_code="x",
+                trace_id="t",
             )
 
 
 class TestR0NoAgentBypass:
     """R0.9: agents can never bypass compile_decision()."""
 
-    def test_buyer_agent_no_spend_cap(self, config):
+    def test_buyer_agent_no_spend_cap(self, config, mcp_client):
         """Buyer agent cannot have a 'skip_spend_cap' knob."""
-        agent = BuyerAgent(config)
+        agent = BuyerAgent(config, mcp_client)
         assert not hasattr(agent, "skip_spend_cap")
         assert not hasattr(agent, "override_total")
         assert not hasattr(agent, "force_allow")

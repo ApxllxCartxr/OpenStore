@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -65,25 +65,27 @@ def _account_balances(session: Session, ref: str) -> dict[str, int]:
 
 
 def _seed_checkout(session: Session, checkout_id: str) -> None:
-    session.add(Checkout(
-        id=checkout_id,
-        trace_id="t",
-        client_id="c",
-        merchant_id="m",
-        cart_hash="h",
-        cart_version=1,
-        amount_minor=10000,
-        currency="INR",
-        state=OrderState.CREATED,
-        policy_id="pol_A",
-        policy_hash="ph",
-        aal_level=0,
-        expires_at=datetime.utcnow(),
-        idempotency_key=f"ik_{checkout_id}",
-        cart_snapshot={"items": []},
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    ))
+    session.add(
+        Checkout(
+            id=checkout_id,
+            trace_id="t",
+            client_id="c",
+            merchant_id="m",
+            cart_hash="h",
+            cart_version=1,
+            amount_minor=10000,
+            currency="INR",
+            state=OrderState.CREATED,
+            policy_id="pol_A",
+            policy_hash="ph",
+            aal_level=0,
+            expires_at=datetime.now(UTC).replace(tzinfo=None),
+            idempotency_key=f"ik_{checkout_id}",
+            cart_snapshot={"items": []},
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+            updated_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+    )
     session.commit()
 
 
