@@ -420,7 +420,6 @@ def check_compiler_digest(ctx: VerifierContext) -> CheckResult:
 
     KNOWN_COMPILER_DIGESTS = frozenset({
         "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "sha256:placeholder-compiler-digest",
     })
 
     if not compiler_digest:

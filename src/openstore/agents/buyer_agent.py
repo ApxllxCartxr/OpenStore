@@ -163,7 +163,7 @@ def compute_cart_hash(cart: list[dict[str, Any]]) -> str:
 
 # Discord bot (S7.2) — runs the planning loop when invoked
 class BuyerBot:
-    def __init__(self, config: Settings, agent: BuyerAgent | None = None):
+    def __init__(self, config: Settings, agent: BuyerAgent):
         self.config = config
         self.agent = agent
         self._client: Any | None = None

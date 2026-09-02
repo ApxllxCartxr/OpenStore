@@ -243,7 +243,7 @@ def compile_decision(ctx: CompilerContext) -> CompilerResult:
     _, campaign_reason = _campaign_validity(ctx)
     if campaign_reason is not None:
         add_check("campaign_validity", False, campaign_reason)
-        return fail(campaign_reason)  # type: ignore[arg-type]
+        return fail(campaign_reason)
 
     # Apply campaign discounts if present. Discount is computed on the per-cart
     # subtotal of items sharing a campaign (not per-item), so the cumulative floor
