@@ -3,11 +3,38 @@
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
+from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_VAR_PATTERN = re.compile(r"^\$\{([A-Z_][A-Z0-9_]*)\}$")
+
+
+def _interpolate_env(value: Any) -> Any:
+    """Replace whole-string ${VAR_NAME} placeholders with their env var value.
+
+    Fails loud (R0.5): an undefined placeholder is a hard error, never a
+    silent blank or a literal "${...}" leaking into config.
+    """
+    if isinstance(value, str):
+        match = _ENV_VAR_PATTERN.match(value)
+        if match is None:
+            return value
+        var_name = match.group(1)
+        if var_name not in os.environ:
+            raise ValueError(f"Config references undefined environment variable: {var_name}")
+        return os.environ[var_name]
+    if isinstance(value, dict):
+        return {k: _interpolate_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_interpolate_env(v) for v in value]
+    return value
 
 
 class MerchantConfig(BaseModel):
@@ -74,9 +101,10 @@ class Settings(BaseSettings):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> Settings:
+        load_dotenv()
         with open(path) as f:
             data = yaml.safe_load(f) or {}
-        # Merge with env vars (pydantic-settings handles this)
+        data = _interpolate_env(data)
         return cls.model_validate(data)
 
 
