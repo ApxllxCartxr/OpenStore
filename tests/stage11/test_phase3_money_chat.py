@@ -106,7 +106,10 @@ class TestCancelCheckoutById:
         checkout = _make_held_checkout(session, checkout_id="chk_cancel_ok", chat_user_id="u1")
 
         mock_client = MagicMock()
-        mock_client.payment_link.cancel.return_value = {"id": "plink_chk_cancel_ok", "status": "cancelled"}
+        mock_client.payment_link.cancel.return_value = {
+            "id": "plink_chk_cancel_ok",
+            "status": "cancelled",
+        }
 
         result = driver.cancel_checkout_by_id(
             config=settings,
@@ -123,7 +126,9 @@ class TestCancelCheckoutById:
         assert checkout.state == OrderState.CANCELLED
 
     def test_rejects_non_held_checkout(self, settings, session):
-        checkout = _make_held_checkout(session, checkout_id="chk_cancel_bad_state", chat_user_id="u1")
+        checkout = _make_held_checkout(
+            session, checkout_id="chk_cancel_bad_state", chat_user_id="u1"
+        )
         checkout.state = OrderState.PAID
         session.add(checkout)
         session.commit()
@@ -143,10 +148,15 @@ class TestBuyerBotCancelCommand:
     async def test_cancel_own_checkout_succeeds(self, settings, session):
         from openstore.agents.buyer_agent import BuyerAgent, BuyerBot
 
-        checkout = _make_held_checkout(session, checkout_id="chk_bot_cancel_ok", chat_user_id="555001")
+        checkout = _make_held_checkout(
+            session, checkout_id="chk_bot_cancel_ok", chat_user_id="555001"
+        )
 
         mock_client = MagicMock()
-        mock_client.payment_link.cancel.return_value = {"id": checkout.psp_payment_link_id, "status": "cancelled"}
+        mock_client.payment_link.cancel.return_value = {
+            "id": checkout.psp_payment_link_id,
+            "status": "cancelled",
+        }
         original_get_client = driver._get_client
         driver._get_client = lambda _cfg: mock_client  # type: ignore[assignment]
         try:
@@ -177,7 +187,9 @@ class TestBuyerBotCancelCommand:
     async def test_cancel_rejects_other_users_checkout(self, settings, session):
         from openstore.agents.buyer_agent import BuyerAgent, BuyerBot
 
-        checkout = _make_held_checkout(session, checkout_id="chk_bot_cancel_other", chat_user_id="555001")
+        checkout = _make_held_checkout(
+            session, checkout_id="chk_bot_cancel_other", chat_user_id="555001"
+        )
 
         bot = BuyerBot(settings, BuyerAgent(settings, None))
 
@@ -210,7 +222,9 @@ class TestBuyerBotCancelCommand:
 
 
 class TestWebhookChatPush:
-    def test_payment_link_paid_dms_buyer_and_pushes_money_trace(self, settings, session, monkeypatch):
+    def test_payment_link_paid_dms_buyer_and_pushes_money_trace(
+        self, settings, session, monkeypatch
+    ):
         checkout = _make_held_checkout(
             session, checkout_id="chk_webhook_paid", amount_minor=15000, chat_user_id="d42"
         )
@@ -512,4 +526,7 @@ class TestCallbackUrlPrecedence:
             mock_razorpay=mock_client,
         )
 
-        assert captured_request["callback_url"] == "https://shop.example.com/webhooks/razorpay"
+        # callback_url is the post-payment browser redirect, not the webhook
+        # receiver — it must be a GET-able route (the storefront root), not
+        # /webhooks/razorpay (POST-only, always 405s a real redirect).
+        assert captured_request["callback_url"] == "https://shop.example.com/"

@@ -112,6 +112,14 @@ def create_app(config: Settings) -> FastAPI:
         # Startup
         console_print(f"OpenStore server starting for {config.merchant.name}")
 
+        # Register this loop so notifier.run_from_worker_thread (called from
+        # FastAPI's sync BackgroundTasks threadpool, e.g. webhook processing)
+        # can hand DM/trace coroutines back here instead of spinning up an
+        # unrelated loop that breaks the live discord.Client's aiohttp session.
+        from openstore.notifier import set_main_loop
+
+        set_main_loop(asyncio.get_running_loop())
+
         # SID-3 boot order: config → migrations → keys → workers → serve.
         try:
             from openstore.psp.router import set_psp_config
@@ -162,6 +170,8 @@ def create_app(config: Settings) -> FastAPI:
         hold_release_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await hold_release_task
+
+        set_main_loop(None)
 
         console_print("OpenStore server shutting down")
 

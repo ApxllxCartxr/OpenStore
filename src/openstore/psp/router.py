@@ -167,8 +167,10 @@ def _push_chat_notification(cfg: Settings, session: Any, event: WebhookEvent) ->
     """DM the buyer and mirror to #money-trace when a webhook-driven state
     transition lands on a chat-originated checkout (Checkout.chat_user_id).
     Runs inside the sync BackgroundTasks worker (FastAPI runs it in a
-    threadpool), so asyncio.run() is safe here — there is no running loop to
-    conflict with."""
+    threadpool) — notifier.run_from_worker_thread hands the coroutine back to
+    server.py's main loop (where the live discord.Client actually runs)
+    rather than spinning up an unrelated one via bare asyncio.run(), which
+    broke discord.py's loop-bound aiohttp session."""
     if event.event_type not in _CHAT_PUSH_EVENTS:
         return
 
@@ -188,12 +190,10 @@ def _push_chat_notification(cfg: Settings, session: Any, event: WebhookEvent) ->
         message = "Hold cancelled."
         trace_action = "CANCELLED"
 
-    import asyncio
+    from openstore.notifier import DiscordNotifier, run_from_worker_thread, send_dm
 
-    from openstore.notifier import DiscordNotifier, send_dm
-
-    asyncio.run(send_dm(cfg, checkout.chat_user_id, message))
-    asyncio.run(
+    run_from_worker_thread(send_dm(cfg, checkout.chat_user_id, message))
+    run_from_worker_thread(
         DiscordNotifier(cfg).money_trace(
             checkout.trace_id, trace_action, checkout.amount_minor, checkout.currency
         )
@@ -297,14 +297,12 @@ def _build_and_store_evidence(
 def _push_evidence_link(cfg: Settings, checkout: Checkout) -> None:
     """DM the buyer a receipt link to the evidence viewer (plan item #22:
     "mount evidence_viewer.html, DM the receipt link")."""
-    import asyncio
-
-    from openstore.notifier import send_dm
+    from openstore.notifier import run_from_worker_thread, send_dm
 
     origin = (cfg.public_base_url or cfg.webauthn.origin or "").rstrip("/")
     link = f"{origin}/orders/{checkout.id}/evidence/view"
     assert checkout.chat_user_id is not None
-    asyncio.run(send_dm(cfg, checkout.chat_user_id, f"Evidence: {link}"))
+    run_from_worker_thread(send_dm(cfg, checkout.chat_user_id, f"Evidence: {link}"))
 
 
 def _get_client(config: Settings) -> Any:

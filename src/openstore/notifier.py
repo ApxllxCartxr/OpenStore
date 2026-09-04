@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +15,7 @@ from openstore.config import Settings
 logger = logging.getLogger("openstore.notifier")
 
 _discord_client: Any | None = None
+_main_loop: asyncio.AbstractEventLoop | None = None
 
 
 def set_discord_client(client: Any | None) -> None:
@@ -25,6 +28,48 @@ def set_discord_client(client: Any | None) -> None:
 
 def get_discord_client() -> Any | None:
     return _discord_client
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop | None) -> None:
+    """Register the event loop server.py's lifespan (and the live
+    discord.Client's own task) runs on. FastAPI's sync BackgroundTasks run in
+    a threadpool worker thread, not on this loop — a worker thread that wants
+    to push a DM must hand the coroutine to *this* loop rather than starting
+    its own via asyncio.run(), because discord.py's aiohttp session is bound
+    to whichever loop the client itself is running on and breaks
+    ("Timeout context manager should be used inside a task") when driven from
+    a different one. See run_from_worker_thread below."""
+    global _main_loop
+    _main_loop = loop
+
+
+def run_from_worker_thread(coro: Coroutine[Any, Any, Any]) -> Any:
+    """Run an async notifier call from a sync BackgroundTasks worker thread.
+    Schedules onto the registered main loop (where the live discord.Client
+    lives) when one is registered and running; falls back to a fresh
+    asyncio.run() otherwise (offline/tests, where no such loop exists to
+    conflict with)."""
+    loop = _main_loop
+    if loop is not None and loop.is_running():
+        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+    return asyncio.run(coro)
+
+
+def _to_discord_embed(fields: dict[str, Any]) -> Any:
+    """Build a real discord.Embed from the plain dict the trace methods
+    assemble. discord.py's Messageable.send(embed=...) calls .to_dict() on
+    whatever it's given — a raw dict has no such method and raised
+    AttributeError on every trace/alert push."""
+    import discord
+
+    embed = discord.Embed(
+        title=fields.get("title"),
+        description=fields.get("description"),
+        timestamp=datetime.fromisoformat(fields["timestamp"]) if fields.get("timestamp") else None,
+    )
+    for f in fields.get("fields", []):
+        embed.add_field(name=f["name"], value=f["value"], inline=f.get("inline", False))
+    return embed
 
 
 def _init_discord(config: Settings) -> Any | None:
@@ -79,10 +124,11 @@ class DiscordNotifier:
         if not channel_id:
             return
         try:
+            discord_embed = _to_discord_embed(embed) if embed else None
             for guild in client.guilds:
                 for ch in guild.channels:
                     if ch.id == channel_id:
-                        await ch.send(message, embed=embed)
+                        await ch.send(message, embed=discord_embed)
                         break
         except Exception as e:
             logger.warning(f"Discord send error: {e}")
