@@ -225,17 +225,23 @@ def create_payment_link(
         "currency": currency,
         "reference_id": checkout_id,
         "description": description or f"Order {checkout_id}",
-        "customer": customer or {},
         "notes": notes_with_trace,
         # SID-1 precedence (mirrors server.py's resolve_public_origin for the
         # request=None case): public_base_url wins when set (subdomain /
         # explicit deployment), else the WebAuthn origin, else localhost.
+        # callback_url is Razorpay's post-payment BROWSER redirect (a GET),
+        # distinct from the server-to-server webhook POST below — pointing it
+        # at /webhooks/razorpay (POST-only) made every real payment redirect
+        # into a 405. "/" is the storefront's own GET landing page.
         "callback_url": (
-            f"{(config.public_base_url or config.webauthn.origin or 'http://localhost:8000').rstrip('/')}"
-            "/webhooks/razorpay"
+            f"{(config.public_base_url or config.webauthn.origin or 'http://localhost:8000').rstrip('/')}/"
         ),
         "callback_method": "get",
     }
+    # Razorpay rejects an empty {} customer object outright — only attach the
+    # key when the caller actually has identity to send (R0.3: never fabricate).
+    if customer:
+        link_request["customer"] = customer
 
     try:
         if mock_razorpay is not None:
