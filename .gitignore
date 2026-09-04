@@ -45,4 +45,4 @@ catalog.yaml
 .env.example
 
 # Local opencode tooling
-.opencode/
+.opencode/mutants/
