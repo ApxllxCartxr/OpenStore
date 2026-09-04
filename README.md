@@ -172,7 +172,7 @@ Three agent modules ship in the package, all keyless, all proposal-only:
 - **Merchant agent** — negotiates with buyer agents over structured counter-offers; when no in-policy path exists, drafts a **signed policy amendment** that only activates with a human's passkey tap.
 - **Campaign agent** — reads a privacy-bounded aggregate analytics view (never raw orders or PII), drafts campaigns, passes them through a deterministic validator, and publishes **only** after merchant signature.
 
-**Honest status:** the infrastructure for agents to safely transact is solid and heavily tested; the agents themselves are structurally complete but not yet battle-tested against a live LLM in a live conversation. See *What's real / what's next* below.
+**Honest status:** the infrastructure for agents to safely transact is solid and heavily tested; the chat-native purchase flow (Discord DM → policy signing → checkout → hold → negotiation/amendment → evidence) is wired end-to-end and server-verified. See *What's real / what's next* below.
 
 ---
 
@@ -252,7 +252,7 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 
 ## What's real / what's next
 
-Built by one person with an AI agent over 10 spec'd stages. Here's the honest ledger:
+Built by one person with an AI agent over 11 spec'd stages. Here's the honest ledger:
 
 **Real and tested:**
 - ✅ The full money path — compiler, ledger, idempotency, hold/cancel, webhooks, reconciliation
@@ -260,13 +260,33 @@ Built by one person with an AI agent over 10 spec'd stages. Here's the honest le
 - ✅ PoAI bundles + offline verifier + tamper detection, with golden fixtures
 - ✅ MCP tools, discovery manifests, catalog attestations, campaign pipeline
 - ✅ Red-team and sentinel suites green
+- ✅ **Chat-native purchase flow (Stage 11)** — a live `discord.Client` runs in the server's
+  lifespan; a buyer DMs the bot, gets a `handoffs`-table signing link if no policy exists,
+  auto-resumes the errand on signature, gets the Razorpay pay link and hold/cancel status
+  in-DM, and a `cancel` command backed by a single-use capability token. A denied cart
+  triggers `MerchantAgent.negotiate()` over the same DM thread; when no in-policy path
+  exists, the merchant drafts a one-time policy amendment the human approves with a second
+  passkey tap (`{"mode":"amendment",...}` WebAuthn binding), which recompiles the cart
+  against an unpersisted, relieved `IntentPolicy` snapshot — never mutating the standing
+  signed policy. `/orders/{checkout_id}/evidence` assembles the PoAI bundle with the chat
+  request text as `human_intent` and the DM receipt as `notification`, reaching AAL2.
+  394/394 tests pass; 394-test suite plus a live server boot were used to verify this (real
+  Razorpay/Discord credentials still required to transact for real).
 
 **Not yet:**
-- ❌ **End-to-end live agent demo** — the pipes are laid; the live-LLM conversation isn't connected. The agents run on mocked LLM responses in tests.
-- ❌ **Frontend HTML** — Policy Studio/Campaign Studio routes and logic exist; the served single-file pages are next.
-- ❌ **Live Razorpay capture** — driver is tested against golden fixtures; live test-mode constant capture is a documented, gated step.
-- ❌ **Deployment story** — runs locally on SQLite; Docker/cloud and the sidecar integration contract (health endpoints, origin rules) are specced, not built.
-- ❌ **Third-party agent discovery** — the manifest surface exists; indexing by real platforms (ChatGPT/UCP/Merchant Center) is the market gap, not a code gap.
+- ❌ **Live third-party LLM planning loop** — the buyer/merchant agents' negotiation and
+  amendment-drafting logic is deterministic and tested against mocked LLM responses; a
+  live LLM driving free-form conversation end-to-end hasn't been run against it.
+- ❌ **Frontend polish** — Policy Studio/Campaign Studio/Evidence Viewer are served and
+  functional (WebAuthn registration bug fixed in Stage 11), but they're utilitarian, not
+  designed.
+- ❌ **Live Razorpay capture at scale** — driver is tested against golden fixtures and has
+  been exercised against real test-mode payment links; sustained live-mode traffic is
+  untested.
+- ❌ **Deployment story** — runs locally on SQLite; Docker/cloud and the sidecar integration
+  contract (health endpoints, origin rules) are specced, not built.
+- ❌ **Third-party agent discovery** — the manifest surface exists; indexing by real
+  platforms (ChatGPT/UCP/Merchant Center) is the market gap, not a code gap.
 
 The infrastructure is deliberately overbuilt relative to the agent layer — for a system where getting the money wrong is worse than getting the UX wrong, that's the right trade.
 
@@ -276,7 +296,7 @@ The infrastructure is deliberately overbuilt relative to the agent layer — for
 
 Python 3.12 · FastAPI · SQLModel · SQLite (`BEGIN IMMEDIATE`) · Razorpay test mode · WebAuthn (`py_webauthn`) · ES256 JWS · Sigstore Rekor · discord.py · uv
 
-Built by [Joseph Fernando](https://github.com/) with [OpenCode](https://github.com/sst/opencode), across 10 stages in ~9 days, from a PRD that treats identifiers as law. The PRD and stage specs are in this repo — `OPENSTORE_PRD_v3.md` and `SPECS/` are arguably the real product.
+Built by [Joseph Fernando](https://github.com/) with [OpenCode](https://github.com/sst/opencode), across 11 stages, from a PRD that treats identifiers as law. The PRD and stage specs are in this repo — `OPENSTORE_PRD_v3.md` and `SPECS/` are arguably the real product.
 
 ## License
 

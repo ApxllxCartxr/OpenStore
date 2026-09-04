@@ -77,8 +77,7 @@ entries; `tests/test_registry_compliance.py` and
   `None`, no crash). No PRD/config-pinned timeout constant exists to fill it
   with — left as-is; inventing one would violate R0.3.
 
-### S11.2 The handoff table + chat loop (Phase 2 — NOT built in this
-execution)
+### S11.2 The handoff table + chat loop (Phase 2 — built; see Q-014, Q-018)
 `alembic/versions/0003_handoffs.py` (explicit `op.create_table`, real
 `upgrade()`/`downgrade()`, safe on fresh and existing DBs — `0001` uses
 `create_all`, `0003` must not); `models.Handoff` (token PK, `kind` closed set
@@ -91,15 +90,14 @@ checks for an active policy before shopping, creates a handoff + DM's the
 link on none, and auto-resumes `request_text` on signing success (wired
 through `studio.py`'s success path once Phase 2 lands).
 
-### S11.3 Money reaches chat (Phase 3 — NOT built in this execution)
+### S11.3 Money reaches chat (Phase 3 — built; see Q-019)
 Deliver `short_url`/amount/hold-deadline in the DM; deliver `cancel_token` as
 a bot `cancel` command (POST, not a link, per PRD §3.7); schedule
 `hold_release_worker_tick` on a 30s lifespan loop; pass a real `customer`
 object to Razorpay; fix `callback_url` to prefer `public_base_url`; fix
 `shop()["state"]` and `confirm()`'s missing WebAuthn assertion.
 
-### S11.4 Negotiation, amendment, evidence (Phase 4 — NOT built in this
-execution)
+### S11.4 Negotiation, amendment, evidence (Phase 4 — built; see Q-020, Q-021)
 Wire `MerchantAgent.negotiate` into the DENY branch of `shop()`; build the
 missing `cart_delta` executor (today `negotiate` returns intent flags, not
 carts); amendment flow: `draft_amendment` → handoff(`kind=amendment`) →
@@ -142,9 +140,13 @@ reach AAL2; mount `evidence_viewer.html`; DM the receipt link.
   negotiation, an amendment link, and an ALLOW after approval;
   `openstore-verify orders/<checkout_id>/evidence` reports AAL2.
 
-NOTE: this execution delivers S11.0 (Protocol) and S11.1 (Make signing real)
-only. S11.2-S11.4 remain future work — the DONE WHEN block above describes
-the full stage's eventual exit criteria, not this execution's.
+STATUS: all four phases (S11.0-S11.4) are built and merged (see commits
+`8442c8e`, `5844ac1`). The DONE WHEN block's automated checks
+(`registry_diff.py`, `pytest -q` — 394/394 passing, sentinel suite, ruff,
+mypy) are green as of this stage's completion; the "Human-verified" line
+items (live Discord DM, live Razorpay test-link payment, live
+`openstore-verify` AAL2 verdict) still require an operator with real
+Razorpay/Discord credentials to confirm.
 
 ## COMMIT GATE
 `stage(11): chat flow`
