@@ -76,7 +76,34 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.mutmut]
+# Full package must be copied so imports resolve; mutation itself is scoped
+# to the money-path modules via only_mutate.
+source_paths = ["src"]
+only_mutate = [
+    "src/openstore/core/ledger.py",
+    "src/openstore/core/holdcancel.py",
+    "src/openstore/core/idempotency.py",
+    "src/openstore/core/compiler.py",
+    "src/openstore/core/policy_signing.py",
+]
+tests_dir = [
+    "tests/test_ledger_golden.py",
+    "tests/test_ledger_properties.py",
+    "tests/test_compiler_goldens.py",
+    "tests/test_compiler_check0.py",
+    "tests/test_spend_cap.py",
+    "tests/redteam/test_inv1_cart_swap.py",
+    "tests/redteam/test_inv3_idempotency.py",
+    "tests/redteam/test_inv4_inv8_inv11.py",
+    "tests/redteam/test_inv5_ledger.py",
+    "tests/redteam/test_inv6_inv7_webhooks.py",
+]
+also_copy = ["REGISTRY.json", "GOLDEN"]
+
 [dependency-groups]
 dev = [
+    "hypothesis>=6.167.1",
+    "mutmut>=3.7.0",
     "types-pyyaml>=6.0.12.20260815",
 ]
