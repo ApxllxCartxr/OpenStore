@@ -108,6 +108,19 @@ class Settings(BaseSettings):
         return cls.model_validate(data)
 
 
+def merchant_id(config: Settings) -> str:
+    """Canonical merchant_id slug derived from the merchant name.
+
+    Single source of truth: checkout looks policies up by (policy_id,
+    merchant_id), so the slug the studio signs into an IntentPolicy and the
+    slug the buyer agent sends to create_cart MUST be byte-identical. This
+    was previously duplicated in four modules, one of which omitted the
+    apostrophe strip — a merchant named "Joe's Gelato" signed "joes-gelato"
+    but shopped as "joe's-gelato", yielding policy_not_found at checkout.
+    """
+    return config.merchant.name.lower().replace(" ", "-").replace("'", "")
+
+
 def load_config(config_path: str | Path) -> Settings:
     """Load configuration from YAML file and environment variables.
 

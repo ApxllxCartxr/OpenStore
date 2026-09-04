@@ -12,7 +12,9 @@
     "hold.*","authority.*","orchestration.*"],
   "authority_reason_codes": ["authority.unknown_scheme","authority.scheme_capped_native_webauthn",
     "authority.scheme_capped_ap2_intent_mandate","authority.scheme_capped_ap2_cart_mandate",
-    "authority.scheme_capped_acp_delegated_token","authority.scheme_capped_none"],
+    "authority.scheme_capped_acp_delegated_token","authority.scheme_capped_none",
+    "authority.handoff_not_found","authority.handoff_expired",
+    "authority.handoff_consumed","authority.policy_unsigned"],
   "mcp_tools": ["search_products","get_product","create_cart","update_cart",
     "checkout_initiate","checkout_confirm","get_order","get_audit_log",
     "webauthn_register_begin","webauthn_register_complete","webauthn_begin_assertion",
@@ -53,10 +55,16 @@
     "/orders/<id>/evidence/view",
     "/orders/intent/<intent_id>/evidence",
     "/internal/webauthn/*",
+    "/internal/webauthn/register/begin",
+    "/internal/webauthn/register/complete",
+    "/internal/webauthn/assertion/begin",
+    "/internal/webauthn/assertion/complete",
     "/internal/policy/blast-radius",
     "/health/live",
     "/health/ready",
     "/internal/metrics",
-    "/admin/*"
+    "/admin/*",
+    "/intent/amendment/<amendment_id>/approve",
+    "/intent/amendment/<amendment_id>/reject"
   ]
 }

@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
-from openstore.config import Settings
+from openstore.config import Settings, merchant_id
 from openstore.core.holdcancel import AAL_HOLD_SECONDS, AALLevel
 
 # DECISIONS §11.1.10: per-merchant keypairs, kid = "{merchant_id}-key-{n}".
@@ -30,6 +30,7 @@ def _load_or_generate_poai_keys(merchant_id: str) -> dict[str, Any]:
     if merchant_id in POAI_KEYS:
         return POAI_KEYS[merchant_id]
     from cryptography.hazmat.primitives.asymmetric import ec
+
     key = ec.generate_private_key(ec.SECP256R1())
     priv_bytes = key.private_bytes(
         encoding=serialization.Encoding.DER,
@@ -59,7 +60,7 @@ def build_agent_commerce_manifest(config: Settings, origin: str) -> dict[str, An
         "version": "0.2",
         "merchant": {
             "name": config.merchant.name,
-            "id": _merchant_id(config),
+            "id": merchant_id(config),
         },
         "storefront": f"{origin}/",
         "catalog_endpoint": f"{origin}/agent/catalog",
@@ -68,7 +69,12 @@ def build_agent_commerce_manifest(config: Settings, origin: str) -> dict[str, An
         "auth": {
             "type": "oauth2",
             "authorization_server": f"{origin}/.well-known/oauth-authorization-server",
-            "scopes_supported": ["catalog:read", "cart:write", "checkout:initiate", "checkout:confirm"],
+            "scopes_supported": [
+                "catalog:read",
+                "cart:write",
+                "checkout:initiate",
+                "checkout:confirm",
+            ],
         },
         "policy": {
             "currency": "INR",
@@ -122,12 +128,8 @@ def build_agent_policy_manifest(config: Settings) -> dict[str, Any]:
     }
 
 
-def _merchant_id(config: Settings) -> str:
-    return config.merchant.name.lower().replace(" ", "-").replace("'", "")
-
-
 def get_poai_jwks(config: Settings) -> dict[str, Any]:
-    keys_data = _load_or_generate_poai_keys(_merchant_id(config))
+    keys_data = _load_or_generate_poai_keys(merchant_id(config))
     return {"keys": [keys_data["jwk"]]}
 
 
@@ -139,9 +141,9 @@ def get_signed_campaign_feed(config: Settings, origin: str) -> dict[str, Any]:
 
     session = get_session(config)
     try:
-        all_active = list(session.exec(
-            select(Campaign).where(Campaign.state == CampaignState.ACTIVE)
-        ).all())
+        all_active = list(
+            session.exec(select(Campaign).where(Campaign.state == CampaignState.ACTIVE)).all()
+        )
     finally:
         session.close()
 
@@ -173,15 +175,19 @@ def get_signed_campaign_feed(config: Settings, origin: str) -> dict[str, Any]:
         }
         for c in eligible
     ]
-    payload_bytes = json.dumps({"campaigns": campaigns_data}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    payload_bytes = json.dumps(
+        {"campaigns": campaigns_data}, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode().rstrip("=")
 
-    keys_data = _load_or_generate_poai_keys(_merchant_id(config))
+    keys_data = _load_or_generate_poai_keys(merchant_id(config))
     priv_bytes = keys_data["private_key"]
     key = serialization.load_der_private_key(priv_bytes, password=None)
     if isinstance(key, ec.EllipticCurvePrivateKey):
         kid = keys_data["jwk"]["kid"]
-        header = json.dumps({"alg": "ES256", "kid": kid, "typ": "JWT"}, sort_keys=True).encode("utf-8")
+        header = json.dumps({"alg": "ES256", "kid": kid, "typ": "JWT"}, sort_keys=True).encode(
+            "utf-8"
+        )
         header_b64 = base64.urlsafe_b64encode(header).decode().rstrip("=")
         signing_input = f"{header_b64}.{payload_b64}"
         der_sig = key.sign(signing_input.encode("ascii"), ec.ECDSA(hashes.SHA256()))

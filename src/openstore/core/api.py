@@ -71,17 +71,6 @@ def create_checkout(
     3. If allowed: create checkout record, initiate hold
     4. Return CompilerResult with AAL level
     """
-    # Audit log
-    audit_log(
-        session,
-        trace_id,
-        client_id,
-        "create_checkout",
-        "checkout",
-        request_path="/checkout",
-        request_method="POST",
-    )
-
     # Load policy
     policy = session.exec(
         select(IntentPolicy).where(
@@ -93,6 +82,84 @@ def create_checkout(
 
     if not policy:
         raise CommerceError("policy_not_found", "Active policy not found for merchant", 404)
+
+    # Verify WebAuthn assertion if provided
+    assertion_verified = False
+    assertion_age = 0
+
+    if webauthn_assertion:
+        try:
+            verified, sign_count = complete_assertion(
+                session=session,
+                config=config,
+                user_handle=merchant_id,
+                credential_id=webauthn_assertion["credential_id"],
+                client_data_json=webauthn_assertion["client_data_json"],
+                authenticator_data=webauthn_assertion["authenticator_data"],
+                signature=webauthn_assertion["signature"],
+                challenge_b64url=webauthn_assertion["challenge"],
+                binding={"mode": "cart", "cart_hash": cart_hash},
+            )
+            assertion_verified = verified
+            # Calculate assertion age
+            assertion_age = webauthn_assertion.get("age_seconds", 0)
+        except Exception:
+            assertion_verified = False
+
+    return create_checkout_from_policy(
+        config=config,
+        session=session,
+        trace_id=trace_id,
+        client_id=client_id,
+        merchant_id=merchant_id,
+        cart_items=cart_items,
+        cart_hash=cart_hash,
+        cart_version=cart_version,
+        policy=policy,
+        assertion_verified=assertion_verified,
+        assertion_age_seconds=assertion_age,
+        agent_plan=agent_plan,
+        idempotency_key=idempotency_key,
+    )
+
+
+def create_checkout_from_policy(
+    config: Settings,
+    session: Session,
+    trace_id: str,
+    client_id: str,
+    merchant_id: str,
+    cart_items: list[dict[str, Any]],
+    cart_hash: str,
+    cart_version: int,
+    policy: IntentPolicy,
+    assertion_verified: bool = False,
+    assertion_age_seconds: int = 0,
+    agent_plan: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+) -> CompilerResult:
+    """
+    Checkout creation against an already-resolved policy object.
+
+    create_checkout()'s body (policy lookup, campaign resolution, compile,
+    checkout persistence) minus the policy lookup and WebAuthn re-verification
+    — factored out so a caller that already has a policy snapshot (S11 Phase
+    4: an amendment-relieved, unpersisted, one-time policy override — Q-020)
+    can drive the exact same compile-and-persist path without a second DB
+    round-trip re-fetching the (unrelieved) real policy row.
+    """
+    # Audit log
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "create_checkout",
+        "checkout",
+        request_path="/checkout",
+        request_method="POST",
+    )
+
+    policy_id = policy.id
 
     # Load campaigns referenced in cart
     campaign_lookup = {}
@@ -123,31 +190,6 @@ def create_checkout(
         list(session.exec(select(Checkout).where(Checkout.policy_id == policy_id)).all())
     )
 
-    # Verify WebAuthn assertion if provided
-    has_assertion = False
-    assertion_verified = False
-    assertion_age = 0
-
-    if webauthn_assertion:
-        has_assertion = True
-        try:
-            verified, sign_count = complete_assertion(
-                session=session,
-                config=config,
-                user_handle=merchant_id,
-                credential_id=webauthn_assertion["credential_id"],
-                client_data_json=webauthn_assertion["client_data_json"],
-                authenticator_data=webauthn_assertion["authenticator_data"],
-                signature=webauthn_assertion["signature"],
-                challenge_b64url=webauthn_assertion["challenge"],
-                binding={"mode": "cart", "cart_hash": cart_hash},
-            )
-            assertion_verified = verified
-            # Calculate assertion age
-            assertion_age = webauthn_assertion.get("age_seconds", 0)
-        except Exception:
-            assertion_verified = False
-
     # Build compiler context
     ctx = CompilerContext(
         cart_items=cart_items,
@@ -156,8 +198,8 @@ def create_checkout(
         currency=policy.currency,
         checkout_count=checkout_count,
         cumulative_spend_minor=cumulative_spend,
-        has_webauthn_assertion=has_assertion and assertion_verified,
-        assertion_age_seconds=assertion_age,
+        has_webauthn_assertion=assertion_verified,
+        assertion_age_seconds=assertion_age_seconds,
         now_unix=int(datetime.now(UTC).timestamp()),
         campaign_lookup=campaign_lookup,
     )
@@ -231,6 +273,8 @@ def create_checkout(
             aal_level=AALLevel(result.aal_level),
             policy_id=policy_id,
             policy_hash=policy.policy_hash,
+            max_spend_per_tx_minor=policy.max_spend_per_tx_minor,
+            max_spend_total_minor=policy.max_spend_total_minor,
         )
 
     # Audit success

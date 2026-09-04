@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from openstore import __version__
-from openstore.config import Settings
+from openstore.config import Settings, merchant_id
 
 
 def console_print(msg: str) -> None:
@@ -42,6 +44,67 @@ def _paths_match(route_path: str, gated_template: str) -> bool:
     return route_path == gated_template
 
 
+# S11 Phase 3 (plan item #17): hold_release_worker_tick existed with zero
+# callers. This loop runs it every 30s for the life of the process, and DMs
+# chat-originated checkouts (Checkout.chat_user_id) a pre-expiry warning and
+# a post-release notice. "Already warned" is a plain in-memory set scoped to
+# this loop's closure — a soft UX nicety, not a money-critical invariant, so
+# it does not need to survive a restart.
+_HOLD_RELEASE_INTERVAL_SECONDS = 30
+_HOLD_WARNING_WINDOW_SECONDS = 120
+
+
+async def _hold_release_loop(config: Settings) -> None:
+    from sqlmodel import select
+
+    from openstore.core.database import get_session
+    from openstore.models import Checkout, OrderState
+    from openstore.notifier import send_dm
+    from openstore.psp.razorpay_driver import hold_release_worker_tick_with_notifications
+
+    warned: set[str] = set()
+    while True:
+        await asyncio.sleep(_HOLD_RELEASE_INTERVAL_SECONDS)
+        session = get_session(config)
+        try:
+            now = datetime.now(UTC).replace(tzinfo=None)
+            warn_cutoff = now + timedelta(seconds=_HOLD_WARNING_WINDOW_SECONDS)
+            soon = session.exec(
+                select(Checkout).where(
+                    Checkout.state == OrderState.HELD,
+                    Checkout.expires_at <= warn_cutoff,
+                    Checkout.expires_at > now,
+                    Checkout.chat_user_id.is_not(None),  # type: ignore[union-attr]
+                )
+            ).all()
+            for checkout in soon:
+                if checkout.id in warned:
+                    continue
+                warned.add(checkout.id)
+                assert checkout.chat_user_id is not None
+                await send_dm(
+                    config,
+                    checkout.chat_user_id,
+                    "Your hold expires in under 2 minutes — pay soon or it will be released.",
+                )
+
+            released = hold_release_worker_tick_with_notifications(config, session)
+            session.commit()
+            for item in released:
+                warned.discard(item["checkout_id"])
+                await send_dm(
+                    config,
+                    item["chat_user_id"],
+                    "Hold released — order not completed in time.",
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            console_print(f"Warning: hold-release loop tick failed: {exc}")
+        finally:
+            session.close()
+
+
 def create_app(config: Settings) -> FastAPI:
 
     @asynccontextmanager
@@ -57,9 +120,49 @@ def create_app(config: Settings) -> FastAPI:
         except Exception as exc:
             console_print(f"Warning: PSP workers not started: {exc}")
 
+        # S11 Phase 2: one discord.Client for the whole process, started here
+        # and shared by the notifier (four trace channels + DMs) and the buyer
+        # bot's DM-first command handler — never two separate Discord logins.
+        # No-op when the token is absent/"token" so tests stay offline.
+        discord_task: asyncio.Task[None] | None = None
+        token = config.discord.bot_token
+        if token and token != "token":
+            try:
+                import discord
+
+                from openstore.agents.buyer_agent import BuyerAgent, BuyerBot
+                from openstore.agents.mcp_client import InProcessMCPClient
+                from openstore.notifier import set_discord_client
+
+                intents = discord.Intents.default()
+                intents.message_content = True  # privileged; toggle in the Discord dev portal
+                client = discord.Client(intents=intents)
+                set_discord_client(client)
+                BuyerBot(config, BuyerAgent(config, InProcessMCPClient(config))).register(client)
+                discord_task = asyncio.create_task(client.start(token))
+            except Exception as exc:
+                console_print(f"Warning: Discord client not started: {exc}")
+
+        # S11 Phase 3 (plan item #17): hold_release_worker_tick had zero
+        # callers. Second background task, alongside the Discord client,
+        # cancelled the same way on shutdown.
+        hold_release_task: asyncio.Task[None] = asyncio.create_task(_hold_release_loop(config))
+
         yield
 
         # Shutdown
+        if discord_task is not None:
+            discord_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await discord_task
+            from openstore.notifier import set_discord_client
+
+            set_discord_client(None)
+
+        hold_release_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await hold_release_task
+
         console_print("OpenStore server shutting down")
 
     # SID-5: origin security boundary. CORS is restricted to the merchant origin
@@ -149,8 +252,6 @@ def create_app(config: Settings) -> FastAPI:
         return PlainTextResponse(metrics_text(config), media_type="text/plain")
 
     # Well-known manifests (S6.4 per §3.9)
-    def _mid(cfg: Settings) -> str:
-        return cfg.merchant.name.lower().replace(" ", "-").replace("'", "")
 
     @app.get("/.well-known/agent-commerce.json")
     async def agent_commerce(request: Request) -> dict[str, Any]:
@@ -216,8 +317,8 @@ def create_app(config: Settings) -> FastAPI:
 
         return serve_catalog_feed(
             config,
-            merchant_id=_mid(config),
-            private_key_pem=get_catalog_signing_key(_mid(config)),
+            merchant_id=merchant_id(config),
+            private_key_pem=get_catalog_signing_key(merchant_id(config)),
         )
 
     # MCP endpoint (S6.3)
@@ -338,11 +439,6 @@ def create_app(config: Settings) -> FastAPI:
     async def campaign_studio() -> FileResponse:
         return FileResponse(Path(__file__).parent / "surfaces" / "static" / "campaign_studio.html")
 
-    # Policy Studio (stub)
-    @app.get("/intent/studio")
-    async def policy_studio() -> FileResponse:
-        return FileResponse(Path(__file__).parent / "surfaces" / "static" / "policy_studio.html")
-
     # Demo storefront (stub)
     @app.get("/")
     async def storefront() -> FileResponse:
@@ -352,5 +448,17 @@ def create_app(config: Settings) -> FastAPI:
     from openstore.psp.router import psp_router
 
     app.include_router(psp_router(config))
+
+    # Policy Studio (S3.5 / S11 Phase 1): real WebAuthn registration/assertion +
+    # blast-radius endpoints, previously built but never mounted.
+    from openstore.surfaces.studio import policy_studio_router
+
+    app.include_router(policy_studio_router(config))
+
+    # Evidence surface (S11 Phase 4): serves the PoAI bundle produced when a
+    # chat-originated checkout reaches RELEASED (psp/router.py).
+    from openstore.surfaces.evidence import evidence_router
+
+    app.include_router(evidence_router(config))
 
     return app

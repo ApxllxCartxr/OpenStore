@@ -76,18 +76,22 @@ class PspIntent:
 
 
 # Webhook event types the driver handles (PRD Part 4 / S5.1).
-HANDLED_WEBHOOK_EVENTS = frozenset({
-    "payment_link.paid",
-    "payment_link.cancelled",
-    "payment_link.partially_paid",
-    "payment.failed",
-})
+HANDLED_WEBHOOK_EVENTS = frozenset(
+    {
+        "payment_link.paid",
+        "payment_link.cancelled",
+        "payment_link.partially_paid",
+        "payment.failed",
+    }
+)
 
 
 # Allowed order-state transitions (INV-6, terminal states absorbing).
 ALLOWED_TRANSITIONS: dict[OrderState, frozenset[OrderState]] = {
     OrderState.CREATED: frozenset({OrderState.HELD, OrderState.CANCELLED, OrderState.FAILED}),
-    OrderState.HELD: frozenset({OrderState.PAID, OrderState.RELEASED, OrderState.CANCELLED, OrderState.FAILED}),
+    OrderState.HELD: frozenset(
+        {OrderState.PAID, OrderState.RELEASED, OrderState.CANCELLED, OrderState.FAILED}
+    ),
     OrderState.PAID: frozenset({OrderState.RELEASED, OrderState.REFUNDED}),
     OrderState.RELEASED: frozenset({OrderState.REFUNDED}),
     OrderState.CANCELLED: frozenset({OrderState.REFUNDED}),
@@ -111,6 +115,7 @@ def assert_test_mode_key(key_id: str) -> None:
 # ---------------------------------------------------------------------------
 # S5.2: Driver — payment link create/fetch/cancel/refund
 # ---------------------------------------------------------------------------
+
 
 def create_payment_link(
     config: Settings,
@@ -159,9 +164,7 @@ def create_payment_link(
         )
 
     # Lookup the checkout
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise RazorpayError("psp.checkout_not_found", f"Checkout {checkout_id} not found", 404)
@@ -224,7 +227,13 @@ def create_payment_link(
         "description": description or f"Order {checkout_id}",
         "customer": customer or {},
         "notes": notes_with_trace,
-        "callback_url": f"{(config.webauthn.origin or 'http://localhost:8000').rstrip('/')}/webhooks/razorpay",
+        # SID-1 precedence (mirrors server.py's resolve_public_origin for the
+        # request=None case): public_base_url wins when set (subdomain /
+        # explicit deployment), else the WebAuthn origin, else localhost.
+        "callback_url": (
+            f"{(config.public_base_url or config.webauthn.origin or 'http://localhost:8000').rstrip('/')}"
+            "/webhooks/razorpay"
+        ),
         "callback_method": "get",
     }
 
@@ -233,14 +242,17 @@ def create_payment_link(
             link = mock_razorpay.payment_link.create(link_request)
         else:
             from razorpay import Client
+
             rz = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
             link = rz.payment_link.create(link_request)
     except Exception as e:
         err_code = getattr(e, "code", None) or getattr(e, "error", {}).get("code", None)
         err_str = str(e)
 
-        if (err_code == RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE
-                or RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE in err_str):
+        if (
+            err_code == RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE
+            or RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE in err_str
+        ):
             existing_link = _fetch_existing_payment_link_by_reference_id(
                 config, session, checkout_id, mock_razorpay=mock_razorpay
             )
@@ -248,8 +260,15 @@ def create_payment_link(
                 _finalize_payment_link_create(
                     session, trace_id, client_id, checkout, existing_link, idem_key, request_hash
                 )
-                audit_log(session, trace_id, client_id, "psp_link_recovered", "checkout",
-                          resource_id=checkout_id, response_status=200)
+                audit_log(
+                    session,
+                    trace_id,
+                    client_id,
+                    "psp_link_recovered",
+                    "checkout",
+                    resource_id=checkout_id,
+                    response_status=200,
+                )
                 return checkout
             raise RazorpayError(
                 "psp.duplicate_unrecoverable",
@@ -258,10 +277,19 @@ def create_payment_link(
             )
         raise RazorpayError("psp.create_failed", f"Payment link create failed: {err_str}", None)
 
-    _finalize_payment_link_create(session, trace_id, client_id, checkout, link, idem_key, request_hash)
-    audit_log(session, trace_id, client_id, "psp_link_created", "checkout",
-              resource_id=checkout_id, response_status=200,
-              metadata={"payment_link_id": link.get("id"), "short_url": link.get("short_url")})
+    _finalize_payment_link_create(
+        session, trace_id, client_id, checkout, link, idem_key, request_hash
+    )
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "psp_link_created",
+        "checkout",
+        resource_id=checkout_id,
+        response_status=200,
+        metadata={"payment_link_id": link.get("id"), "short_url": link.get("short_url")},
+    )
     return checkout
 
 
@@ -295,9 +323,7 @@ def _finalize_payment_link_create(
         "cancel_token": checkout.cancel_token,
     }
 
-    idem = session.exec(
-        select(IdempotencyKey).where(IdempotencyKey.key == idem_key)
-    ).first()
+    idem = session.exec(select(IdempotencyKey).where(IdempotencyKey.key == idem_key)).first()
     if idem:
         idem.response_status = 200
         idem.response_body = response_body
@@ -319,6 +345,7 @@ def _fetch_existing_payment_link_by_reference_id(
             client = mock_razorpay
         else:
             from razorpay import Client
+
             client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
         resp = client.payment_link.all({"reference_id": reference_id})
         items = resp.get("items", [])
@@ -339,6 +366,7 @@ def fetch_payment_link(
     if mock_razorpay is not None:
         return cast("dict[str, Any]", mock_razorpay.payment_link.fetch(payment_link_id))
     from razorpay import Client
+
     client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
     return cast("dict[str, Any]", client.payment_link.fetch(payment_link_id))
 
@@ -361,9 +389,7 @@ def cancel_payment_link(
     """
     assert_test_mode_key(config.razorpay.key_id)
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise RazorpayError("psp.checkout_not_found", f"Checkout {checkout_id} not found", 404)
@@ -377,25 +403,124 @@ def cancel_payment_link(
             resp = mock_razorpay.payment_link.cancel(payment_link_id)
         else:
             from razorpay import Client
+
             client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
             resp = client.payment_link.cancel(payment_link_id)
     except Exception as e:
         err_str = str(e)
-        if RAZORPAY_CANCEL_ALREADY_PAID_HTTP_STATUS == 400 and ("400" in err_str or "Bad Request" in err_str):
+        if RAZORPAY_CANCEL_ALREADY_PAID_HTTP_STATUS == 400 and (
+            "400" in err_str or "Bad Request" in err_str
+        ):
             refund_checkout(
-                config, session, trace_id, client_id, checkout_id, reason="Cancel-already-paid → refund",
+                config,
+                session,
+                trace_id,
+                client_id,
+                checkout_id,
+                reason="Cancel-already-paid → refund",
                 mock_razorpay=mock_razorpay,
             )
-            audit_log(session, trace_id, client_id, "psp_cancel_refunded", "checkout",
-                      resource_id=checkout_id, response_status=200)
-            return {"action": "refunded", "checkout_id": checkout_id, "reason": "cancel_already_paid"}
+            audit_log(
+                session,
+                trace_id,
+                client_id,
+                "psp_cancel_refunded",
+                "checkout",
+                resource_id=checkout_id,
+                response_status=200,
+            )
+            return {
+                "action": "refunded",
+                "checkout_id": checkout_id,
+                "reason": "cancel_already_paid",
+            }
         raise RazorpayError("psp.cancel_failed", f"Cancel failed: {err_str}", None)
 
     from openstore.core.holdcancel import cancel_hold
+
     cancel_hold(session, checkout_id, trace_id, client_id, reason="Payment link cancelled")
-    audit_log(session, trace_id, client_id, "psp_link_cancelled", "checkout",
-              resource_id=checkout_id, response_status=200)
-    return {"action": "cancelled", "checkout_id": checkout_id, "razorpay_response": dict(resp) if hasattr(resp, "items") else resp}
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "psp_link_cancelled",
+        "checkout",
+        resource_id=checkout_id,
+        response_status=200,
+    )
+    return {
+        "action": "cancelled",
+        "checkout_id": checkout_id,
+        "razorpay_response": dict(resp) if hasattr(resp, "items") else resp,
+    }
+
+
+def cancel_checkout_by_id(
+    config: Settings,
+    session: Session,
+    trace_id: str,
+    client_id: str,
+    checkout: Checkout,
+    mock_razorpay: Any | None = None,
+) -> dict[str, Any]:
+    """Cancel an already-located checkout (S11 Phase 3 / plan item #16).
+
+    Shared by POST /hold/{cancel_token}/cancel (psp/router.py, which looks
+    the checkout up by cancel_token) and the bot `cancel <checkout_id>`
+    command (buyer_agent.py, which looks it up by id and checks ownership).
+    Refactored out of psp/router.py's hold_cancel so the already-paid
+    fallback try/except lives in exactly one place. Caller commits.
+    """
+    if checkout.state not in (OrderState.HELD,):
+        raise RazorpayError(
+            "psp.invalid_state",
+            f"invalid_state: {checkout.state}",
+            400,
+        )
+
+    if mock_razorpay is None:
+        try:
+            mock_razorpay = _get_client(config)
+        except Exception:
+            mock_razorpay = None
+
+    try:
+        resp = cancel_payment_link(
+            config=config,
+            session=session,
+            trace_id=trace_id,
+            client_id=client_id,
+            checkout_id=checkout.id,
+            mock_razorpay=mock_razorpay,
+        )
+    except Exception as e:
+        err_str = str(e)
+        if (
+            "already_paid" in err_str.lower()
+            or "already cancelled" in err_str.lower()
+            or "400" in err_str
+        ):
+            create_release_entry(
+                session=session,
+                trace_id=trace_id,
+                client_id=client_id,
+                checkout_id=checkout.id,
+                amount_minor=checkout.amount_minor,
+                currency=checkout.currency,
+                description="hold_cancel (already-paid/cancelled)",
+            )
+            checkout.state = OrderState.CANCELLED
+            checkout.cancelled_at = datetime.now(UTC)
+            checkout.updated_at = datetime.now(UTC)
+            session.add(checkout)
+            return {"status": "RELEASE", "checkout_id": checkout.id}
+        raise
+
+    return {
+        "status": "RELEASE" if resp.get("action") == "cancelled" else "REFUND",
+        "checkout_id": checkout.id,
+        "psp_action": resp.get("action"),
+    }
 
 
 def refund_checkout(
@@ -411,9 +536,7 @@ def refund_checkout(
     """Issue an idempotent refund against the PSP (refunds are idempotent requests)."""
     assert_test_mode_key(config.razorpay.key_id)
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise RazorpayError("psp.checkout_not_found", f"Checkout {checkout_id} not found", 404)
@@ -435,6 +558,7 @@ def refund_checkout(
             refund = mock_razorpay.payment.refund(payment_id, refund_request)
         else:
             from razorpay import Client
+
             client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
             refund = client.payment.refund(payment_id, refund_request)
     except Exception as e:
@@ -442,10 +566,21 @@ def refund_checkout(
 
     create_refund_entry_local(session, trace_id, client_id, checkout, refund_amount, reason)
 
-    audit_log(session, trace_id, client_id, "psp_refund_issued", "checkout",
-              resource_id=checkout_id, response_status=200,
-              metadata={"refund_id": refund.get("id"), "amount_minor": refund_amount})
-    return dict(refund) if hasattr(refund, "items") else {"refund_id": refund.get("id") if hasattr(refund, "get") else None}
+    audit_log(
+        session,
+        trace_id,
+        client_id,
+        "psp_refund_issued",
+        "checkout",
+        resource_id=checkout_id,
+        response_status=200,
+        metadata={"refund_id": refund.get("id"), "amount_minor": refund_amount},
+    )
+    return (
+        dict(refund)
+        if hasattr(refund, "items")
+        else {"refund_id": refund.get("id") if hasattr(refund, "get") else None}
+    )
 
 
 def create_refund_entry_local(
@@ -507,6 +642,7 @@ def create_refund_entry_local(
 # ---------------------------------------------------------------------------
 # S5.3: Webhook endpoint + worker (INV-6)
 # ---------------------------------------------------------------------------
+
 
 def verify_webhook_signature(
     raw_body: bytes,
@@ -630,9 +766,7 @@ def _apply_payment_link_paid(
     if not reference_id:
         raise RazorpayError("webhook.missing_reference_id", "No reference_id in payment_link", 400)
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == reference_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == reference_id)).first()
     if not checkout:
         return
 
@@ -674,10 +808,12 @@ def _apply_payment_link_cancelled(session: Session, payload: dict[str, Any]) -> 
     reference_id = link.get("reference_id")
     if not reference_id:
         return
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == reference_id)
-    ).first()
-    if not checkout or checkout.state in (OrderState.PAID, OrderState.RELEASED, OrderState.REFUNDED):
+    checkout = session.exec(select(Checkout).where(Checkout.id == reference_id)).first()
+    if not checkout or checkout.state in (
+        OrderState.PAID,
+        OrderState.RELEASED,
+        OrderState.REFUNDED,
+    ):
         return
 
     if checkout.state == OrderState.HELD:
@@ -707,18 +843,20 @@ def _apply_payment_failed(session: Session, payload: dict[str, Any]) -> None:
         return
 
     # Try psp_order_id first, then psp_payment_link_id, then id (notes.checkout_id)
-    checkout = session.exec(
-        select(Checkout).where(Checkout.psp_order_id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.psp_order_id == checkout_id)).first()
     if not checkout:
         checkout = session.exec(
             select(Checkout).where(Checkout.psp_payment_link_id == checkout_id)
         ).first()
     if not checkout:
-        checkout = session.exec(
-            select(Checkout).where(Checkout.id == checkout_id)
-        ).first()
-    if not checkout or checkout.state in (OrderState.CANCELLED, OrderState.PAID, OrderState.RELEASED, OrderState.REFUNDED, OrderState.FAILED):
+        checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
+    if not checkout or checkout.state in (
+        OrderState.CANCELLED,
+        OrderState.PAID,
+        OrderState.RELEASED,
+        OrderState.REFUNDED,
+        OrderState.FAILED,
+    ):
         return
 
     # Only a HELD checkout has an outstanding RESERVE to release. A CREATED
@@ -801,10 +939,14 @@ def reconciliation_sweep(
         if psp_status == "paid" and checkout.state != OrderState.PAID:
             drift_total += checkout.amount_minor
             _apply_payment_link_paid(
-                session, "payment_link.paid",
+                session,
+                "payment_link.paid",
                 {"payload": {"payment_link": {"entity": link}}},
             )
-        elif psp_status == "cancelled" and checkout.state not in (OrderState.CANCELLED, OrderState.REFUNDED):
+        elif psp_status == "cancelled" and checkout.state not in (
+            OrderState.CANCELLED,
+            OrderState.REFUNDED,
+        ):
             drift_total += checkout.amount_minor
             _apply_payment_link_cancelled(
                 session,
@@ -813,9 +955,16 @@ def reconciliation_sweep(
 
     if drift_total > 0:
         from openstore.core.audit import audit_log
-        audit_log(session, "reconciliation_sweep", "system", "reconciliation_drift", "checkout",
-                  response_status=200,
-                  metadata={"drift_minor": drift_total, "processed": processed})
+
+        audit_log(
+            session,
+            "reconciliation_sweep",
+            "system",
+            "reconciliation_drift",
+            "checkout",
+            response_status=200,
+            metadata={"drift_minor": drift_total, "processed": processed},
+        )
 
     return {
         "processed": processed,
@@ -827,11 +976,13 @@ def reconciliation_sweep(
 # S5.5: Hold/cancel live path
 # ---------------------------------------------------------------------------
 
+
 # Cancel token generation (PRD §3.7): 32-byte secrets.token_urlsafe, single-use,
 # expires with the hold. The token IS the capability; do not "improve" with login.
 def _get_client(config: Settings) -> Any:
     """Module-level factory for the Razorpay client (used by tests to mock)."""
     from razorpay import Client
+
     return Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
 
 
@@ -846,6 +997,7 @@ PSPError = RazorpayError
 # ---------------------------------------------------------------------------
 # Webhook endpoint helpers
 # ---------------------------------------------------------------------------
+
 
 def persist_raw_webhook_event(
     session: Session,
@@ -939,4 +1091,40 @@ def hold_release_worker_tick(config: Settings, session: Session) -> int:
     Auto-releases expired HELD checkouts.
     """
     from openstore.core.holdcancel import check_and_expire_checkouts
+
     return check_and_expire_checkouts(session)
+
+
+def hold_release_worker_tick_with_notifications(
+    config: Settings, session: Session
+) -> list[dict[str, Any]]:
+    """S11 Phase 3: wraps hold_release_worker_tick to also report which
+    chat-originated checkouts it just released/cancelled, so the lifespan's
+    30s loop (server.py) knows who to DM. Does not change
+    hold_release_worker_tick's own contract — snapshots the chat-originated
+    candidates before the tick, then diffs against their post-tick state.
+    """
+    now = datetime.now(UTC).replace(tzinfo=None)
+    candidates = session.exec(
+        select(Checkout).where(
+            Checkout.expires_at < now,
+            Checkout.state.in_([OrderState.CREATED, OrderState.HELD]),  # type: ignore[attr-defined]
+            Checkout.chat_user_id.is_not(None),  # type: ignore[union-attr]
+        )
+    ).all()
+    candidate_ids = [c.id for c in candidates]
+
+    hold_release_worker_tick(config, session)
+
+    notified = []
+    for checkout_id in candidate_ids:
+        checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
+        if checkout is not None and checkout.state in (OrderState.CANCELLED, OrderState.RELEASED):
+            notified.append(
+                {
+                    "checkout_id": checkout.id,
+                    "chat_user_id": checkout.chat_user_id,
+                    "state": checkout.state.value,
+                }
+            )
+    return notified

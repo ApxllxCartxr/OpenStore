@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amendment Approval — OpenStore</title>
+<style>
+  :root{--muted:#64748b;--line:#e2e8f0;--bg:#f8fafc;--ok:#16a34a;--err:#dc2626}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,sans-serif;color:#1e293b;background:var(--bg);padding:1.5rem;max-width:640px;margin:0 auto}
+  h1{font-size:1.3rem;margin-bottom:.5rem}
+  p.lede{color:var(--muted);font-size:.85rem;margin-bottom:1.25rem}
+  .panel{border:1px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:1rem;background:#fff}
+  .panel h2{font-size:.9rem;margin-bottom:.5rem;color:#334155}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:.35rem .75rem;font-size:.85rem}
+  dt{color:var(--muted)}
+  .buttons{display:flex;gap:.75rem}
+  button{border:0;border-radius:6px;padding:.6rem 1.1rem;cursor:pointer;font-size:.9rem}
+  #approve-btn{background:var(--ok);color:#fff}
+  #reject-btn{background:var(--err);color:#fff}
+  #status{margin-top:1rem;font-size:.85rem;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<h1>Amendment approval</h1>
+<p class="lede">The merchant agent could not resolve your order within your standing policy and has drafted a one-time exception. Review it and approve or reject with your passkey.</p>
+
+<div class="panel">
+  <h2>Drafted amendment</h2>
+  <dl>
+    <dt>Amendment ID</dt><dd id="amendment-id"></dd>
+    <dt>Reason</dt><dd id="reason-code"></dd>
+    <dt>SKUs added</dt><dd id="add-skus"></dd>
+    <dt>Per-transaction cap bump</dt><dd id="bump-amount"></dd>
+    <dt>Scope</dt><dd>one-time — does not change your standing policy</dd>
+  </dl>
+</div>
+
+<div class="buttons">
+  <button id="approve-btn" onclick="decide('approve')">Approve</button>
+  <button id="reject-btn" onclick="decide('reject')">Reject</button>
+</div>
+<div id="status"></div>
+
+<script>
+const AMENDMENT_ID = __AMENDMENT_ID__;
+const HANDOFF_TOKEN = __HANDOFF_TOKEN__;
+const DRAFT = __DRAFT_JSON__;
+// Challenge issued server-side while rendering this page (bound to
+// {"mode":"amendment","amendment_id":...}) — no separate "begin" HTTP round
+// trip; the two approve/reject routes are the only amendment-specific routes
+// this stage adds (Q-017).
+const ASSERTION_BEGIN = __ASSERTION_BEGIN_JSON__;
+
+document.getElementById("amendment-id").textContent = AMENDMENT_ID;
+document.getElementById("reason-code").textContent = DRAFT.reason_code_triggered || "?";
+document.getElementById("add-skus").textContent = (DRAFT.delta && DRAFT.delta.add_allowed_skus || []).join(", ") || "none";
+document.getElementById("bump-amount").textContent =
+  DRAFT.delta ? "₹" + ((DRAFT.delta.bump_max_spend_per_tx_minor || 0) / 100).toFixed(2) : "?";
+
+function b64uToBuf(s) {
+  const pad = "=".repeat((4 - s.length % 4) % 4);
+  const bin = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr.buffer;
+}
+function bufToB64u(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function decide(action) {
+  const status = document.getElementById("status");
+  if (action === "reject") {
+    const res = await fetch(`/intent/amendment/${AMENDMENT_ID}/reject`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token: HANDOFF_TOKEN}),
+    });
+    status.textContent = JSON.stringify(await res.json(), null, 2);
+    return;
+  }
+
+  try {
+    const cred = await navigator.credentials.get({
+      publicKey: {
+        challenge: b64uToBuf(ASSERTION_BEGIN.challenge),
+        rpId: ASSERTION_BEGIN.rpId,
+        allowCredentials: (ASSERTION_BEGIN.allowCredentials || []).map(c => ({
+          id: b64uToBuf(c.id), type: "public-key",
+        })),
+        userVerification: "required",
+      },
+    });
+
+    const payload = {
+      token: HANDOFF_TOKEN,
+      credential_id: cred.id,
+      client_data_json: bufToB64u(cred.response.clientDataJSON),
+      authenticator_data: bufToB64u(cred.response.authenticatorData),
+      signature: bufToB64u(cred.response.signature),
+      challenge: ASSERTION_BEGIN.challenge,
+    };
+
+    const res = await fetch(`/intent/amendment/${AMENDMENT_ID}/approve`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    status.textContent = JSON.stringify(await res.json(), null, 2);
+  } catch (e) {
+    status.textContent = "Error: " + e.message;
+  }
+}
+</script>
+</body>
+</html>

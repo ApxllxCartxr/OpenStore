@@ -110,6 +110,8 @@ def initiate_hold(
     aal_level: AALLevel,
     policy_id: str | None,
     policy_hash: str | None,
+    max_spend_per_tx_minor: int | None = None,
+    max_spend_total_minor: int | None = None,
 ) -> Checkout:
     """
     Initiate hold period after successful payment authorization.
@@ -117,12 +119,20 @@ def initiate_hold(
     INV-4: Intent-first then outbox (dual-write with reference_id = checkout_id).
     INV-5: Ledger RESERVE entry created.
     INV-8: checkout.expires_at enforced.
+
+    max_spend_per_tx_minor/max_spend_total_minor (S11 Phase 4, Q-020): when
+    given, the INV-11 re-check below uses these caps instead of re-fetching
+    IntentPolicy by policy_id. The caller (create_checkout_from_policy) has
+    already resolved the exact policy snapshot compile_decision evaluated
+    against — which, for a one-time amendment relief, is an unpersisted,
+    in-memory IntentPolicy the DB row does not reflect. Re-querying by
+    policy_id here would silently re-apply the unrelieved caps and defeat
+    the amendment. Omitted (None), this re-fetches from the DB exactly as
+    before — unchanged behavior for every existing (non-amendment) caller.
     """
     from openstore.models import Checkout
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise ValueError(f"Checkout not found: {checkout_id}")
@@ -132,18 +142,23 @@ def initiate_hold(
 
     # INV-11: Check spend cap in IMMEDIATE transaction
     if policy_id:
-        from openstore.models import IntentPolicy
-        policy = session.exec(
-            select(IntentPolicy).where(IntentPolicy.id == policy_id)
-        ).first()
-        if policy:
+        per_tx_cap = max_spend_per_tx_minor
+        total_cap = max_spend_total_minor
+        if per_tx_cap is None or total_cap is None:
+            from openstore.models import IntentPolicy
+
+            policy = session.exec(select(IntentPolicy).where(IntentPolicy.id == policy_id)).first()
+            if policy:
+                per_tx_cap = policy.max_spend_per_tx_minor
+                total_cap = policy.max_spend_total_minor
+        if per_tx_cap is not None and total_cap is not None:
             allowed, reason = check_spend_cap(
                 session=session,
                 merchant_id=merchant_id,
                 policy_id=policy_id,
                 amount_minor=amount_minor,
-                max_spend_per_tx_minor=policy.max_spend_per_tx_minor,
-                max_spend_total_minor=policy.max_spend_total_minor,
+                max_spend_per_tx_minor=per_tx_cap,
+                max_spend_total_minor=total_cap,
             )
             if not allowed:
                 raise ValueError(f"Spend cap check failed: {reason}")
@@ -186,9 +201,7 @@ def release_hold(
     """
     from openstore.models import Checkout
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise ValueError(f"Checkout not found: {checkout_id}")
@@ -231,9 +244,7 @@ def cancel_hold(
     """
     from openstore.models import Checkout
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise ValueError(f"Checkout not found: {checkout_id}")
@@ -275,9 +286,7 @@ def refund_checkout(
     """
     from openstore.models import Checkout
 
-    checkout = session.exec(
-        select(Checkout).where(Checkout.id == checkout_id)
-    ).first()
+    checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
         raise ValueError(f"Checkout not found: {checkout_id}")
@@ -348,7 +357,13 @@ def check_and_expire_checkouts(session: Session) -> int:
                 release_hold(session, checkout.id, checkout.trace_id, checkout.client_id)
             else:
                 # AAL1/AAL2 - hold expired, cancel and release funds
-                cancel_hold(session, checkout.id, checkout.trace_id, checkout.client_id, "Hold period expired")
+                cancel_hold(
+                    session,
+                    checkout.id,
+                    checkout.trace_id,
+                    checkout.client_id,
+                    "Hold period expired",
+                )
             count += 1
 
     session.flush()

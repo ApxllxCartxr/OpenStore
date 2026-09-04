@@ -38,9 +38,7 @@ class ReadinessState:
         out: list[str] = []
         for name, (ok, status) in self.checks.items():
             if not ok:
-                out.append(
-                    f"health.{name}.{status}" if status else f"health.{name}.failed"
-                )
+                out.append(f"health.{name}.{status}" if status else f"health.{name}.failed")
         return out
 
 
@@ -75,9 +73,10 @@ def _schema_present(config: Settings) -> bool:
 
 
 def _signing_keys_ready(config: Settings) -> bool:
-    from openstore.surfaces.wellknown import _load_or_generate_poai_keys, _merchant_id
+    from openstore.config import merchant_id
+    from openstore.surfaces.wellknown import _load_or_generate_poai_keys
 
-    keys = _load_or_generate_poai_keys(_merchant_id(config))
+    keys = _load_or_generate_poai_keys(merchant_id(config))
     return bool(keys.get("private_key") and keys.get("jwk"))
 
 
@@ -149,16 +148,20 @@ def metrics_text(config: Settings) -> str:
     hold_counts = _hold_counts_by_state(config)
     for state_name, count in sorted(hold_counts.items()):
         labeled_gauge(
-            "checkout_hold_state", f"Checkouts held in state {state_name}",
-            state_name, count,
+            "checkout_hold_state",
+            f"Checkouts held in state {state_name}",
+            state_name,
+            count,
         )
 
     # Ledger balances by account.
     ledger = _ledger_balances(config)
     for account, minor in sorted(ledger.items()):
         labeled_gauge(
-            "ledger_balance_minor", f"Ledger balance (paise) for {account}",
-            account, minor,
+            "ledger_balance_minor",
+            f"Ledger balance (paise) for {account}",
+            account,
+            minor,
         )
 
     # Reconciliation drift (R0.8 recompute from the last sweep's audit entry).

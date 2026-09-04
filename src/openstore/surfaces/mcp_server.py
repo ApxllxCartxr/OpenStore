@@ -188,8 +188,24 @@ def checkout_initiate(
     trace_id: str,
     checkout_id: str,
     token_scopes: list[str],
+    chat_platform: str | None = None,
+    chat_user_id: str | None = None,
+    chat_channel_id: str | None = None,
+    request_text: str | None = None,
 ) -> MCPToolResult:
-    """MCP tool: checkout_initiate. Creates a Razorpay payment link for the checkout."""
+    """MCP tool: checkout_initiate. Creates a Razorpay payment link for the checkout.
+
+    chat_platform/chat_user_id/chat_channel_id (S11 Phase 3 / Q-018) are
+    optional: only chat-originated checkouts (BuyerBot._handle_shop) carry
+    them. When present they are stamped onto the Checkout row before the
+    payment link is created, so the webhook worker and hold-release loop
+    know which Discord user to DM, and a minimal `customer` object (name
+    only — no fabricated email/phone, R0.3) is sent to Razorpay.
+
+    request_text (S11 Phase 4 / Q-020) is the original chat goal, stamped
+    alongside the chat-identity columns so a completed purchase's evidence
+    bundle can populate PoAI human_intent.
+    """
     _require_scope(token_scopes, "checkout:initiate")
     try:
         from sqlmodel import select
@@ -207,6 +223,16 @@ def checkout_initiate(
                 },
             )
 
+        if chat_user_id:
+            checkout.chat_platform = chat_platform
+            checkout.chat_user_id = chat_user_id
+            checkout.chat_channel_id = chat_channel_id
+            checkout.request_text = request_text
+            session.add(checkout)
+            session.flush()
+
+        customer = {"name": f"Discord user {chat_user_id}"} if chat_user_id else None
+
         checkout = create_payment_link(
             config=config,
             session=session,
@@ -215,16 +241,19 @@ def checkout_initiate(
             checkout_id=checkout_id,
             amount_minor=checkout.amount_minor,
             currency=checkout.currency,
+            customer=customer,
         )
         return MCPToolResult(
             success=True,
             data={
                 "checkout_id": checkout.id,
+                "state": checkout.state.value,
                 "payment_link_id": checkout.psp_payment_link_id,
                 "short_url": checkout.short_url,
                 "cancel_token": checkout.cancel_token,
                 "amount_minor": checkout.amount_minor,
                 "currency": checkout.currency,
+                "expires_at": checkout.expires_at.isoformat(),
             },
         )
     except CommerceError as e:
@@ -702,6 +731,10 @@ def handle_mcp_request(
             trace_id=tid,
             checkout_id=arguments.get("checkout_id", ""),
             token_scopes=token_scopes,
+            chat_platform=arguments.get("chat_platform"),
+            chat_user_id=arguments.get("chat_user_id"),
+            chat_channel_id=arguments.get("chat_channel_id"),
+            request_text=arguments.get("request_text"),
         )
     elif tool_name == "checkout_confirm":
         result = checkout_confirm(

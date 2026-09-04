@@ -2,12 +2,22 @@
 # testable via TestClient without touching server.py (which is out of scope).
 #
 # Routes (all under registered REGISTRY prefixes):
-#   GET  /intent/studio              -> renders templates/policy_studio.html
+#   GET  /intent/studio              -> renders templates/policy_studio.html,
+#                                        or (kind=amendment) templates/amendment_studio.html
 #   POST /internal/webauthn/register/begin
 #   POST /internal/webauthn/register/complete   (INV-10: user_id from session)
 #   POST /internal/webauthn/assertion/begin     (challenge bound {"mode":"policy"})
 #   POST /internal/webauthn/assertion/complete  (assertion + optional policy sign)
 #   GET  /internal/policy/blast-radius          (per signed-in operator)
+#   POST /intent/amendment/<amendment_id>/approve  (S11 Phase 4 / Q-017, Q-020)
+#   POST /intent/amendment/<amendment_id>/reject   (S11 Phase 4 / Q-017, Q-020)
+#
+# Amendment approval (S11 Phase 4) needs no separate "begin assertion" route:
+# the WebAuthn challenge (bound to {"mode":"amendment","amendment_id":...})
+# is issued inline while rendering /intent/studio?token=... for a
+# kind=amendment handoff, and embedded in the page — the two approve/reject
+# routes above are the only amendment-specific routes this stage adds
+# (Q-017's exact reservation; no third route is invented).
 #
 # Signing-time validation (PRD §3.2a + Q-006 resolution): a policy whose
 # max_spend_total_minor would push the enrolled user's aggregate above the
@@ -32,8 +42,12 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from openstore.config import Settings
+from openstore.agents.buyer_agent import compute_cart_hash, render_shop_result, resume_after_signing
+from openstore.agents.mcp_client import InProcessMCPClient
+from openstore.config import Settings, merchant_id
+from openstore.core.api import create_checkout_from_policy
 from openstore.core.database import get_session
+from openstore.core.handoff import HandoffError, buyer_handle, consume_handoff, resolve_handoff
 from openstore.core.holdcancel import AAL_HOLD_SECONDS
 from openstore.core.policy_signing import (
     PER_USER_AGGREGATE_CAP_MINOR,
@@ -49,8 +63,9 @@ from openstore.core.webauthn_rp import (
     complete_registration,
     get_user_credentials,
 )
-from openstore.models import AuditLog, IntentPolicy
-from openstore.notifier import sync_alert
+from openstore.models import AuditLog, Checkout, Handoff, HandoffKind, IntentPolicy
+from openstore.notifier import send_dm, sync_alert
+from openstore.psp.razorpay_driver import create_payment_link
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
@@ -80,6 +95,26 @@ class AssertionComplete(BaseModel):
     signature: str
     challenge: str
     policy: dict[str, Any] | None = None
+    # S11 Phase 2: carried by the template only when the page was opened via a
+    # chat-issued ?token=... link, so a successful policy signing can consume
+    # the handoff and auto-resume the parked errand (push + auto-resume).
+    handoff_token: str | None = None
+
+
+class AmendmentDecision(BaseModel):
+    """S11 Phase 4 (Q-020): body for POST /intent/amendment/<id>/approve and
+    /reject. `token` is the buyer's handoff token — identity is resolved
+    through it (never a raw header, mirroring the policy-signing handoff
+    path); the assertion fields are required for approve (R0.5: NO
+    self-approval, a fresh WebAuthn assertion is mandatory) and absent for
+    reject."""
+
+    token: str
+    credential_id: str | None = None
+    client_data_json: str | None = None
+    authenticator_data: str | None = None
+    signature: str | None = None
+    challenge: str | None = None
 
 
 class _Operator:
@@ -100,6 +135,197 @@ def _operator(
     return _Operator(x_operator_id.strip())
 
 
+_HANDOFF_STATUS = {
+    "authority.handoff_not_found": 404,
+    "authority.handoff_expired": 410,
+    "authority.handoff_consumed": 409,
+}
+
+
+def _resolve_handoff_token(session_factory: Callable[[], Session], token: str) -> str:
+    """S11 Phase 2 (Q-014 / Q-016): resolve a chat-issued handoff `token` to the
+    signing buyer's webauthn user_handle via the `handoffs` table. Fails loud
+    (R0.5) on an unknown, expired, or already-consumed token — never a silent
+    fallback to the operator-header identity."""
+    return buyer_handle(_resolve_handoff(session_factory, token))
+
+
+def _resolve_handoff(session_factory: Callable[[], Session], token: str) -> Handoff:
+    """Like _resolve_handoff_token, but returns the full row (S11 Phase 4
+    needs kind/amendment_draft, not just the buyer handle)."""
+    session = session_factory()
+    try:
+        return resolve_handoff(session, token)
+    except HandoffError as e:
+        raise HTTPException(
+            status_code=_HANDOFF_STATUS[e.reason_code],
+            detail={"reason_code": e.reason_code, "message": e.message},
+        )
+    finally:
+        session.close()
+
+
+async def _consume_and_resume(
+    config: Settings,
+    session_factory: Callable[[], Session],
+    handoff_token: str,
+    policy_id: str,
+) -> dict[str, Any]:
+    """S11 Phase 2 push + auto-resume: on successful policy signing, consume
+    the handoff, DM the buyer that signing succeeded, and automatically resume
+    the stored request_text (the whole point of the handoff bridge) so they
+    never retype their errand. A handoff that fails to resolve (e.g. already
+    consumed by a second tab) does not undo the policy that was just signed —
+    it is surfaced in the response, not raised, since the signing itself
+    already succeeded and committed."""
+    session = session_factory()
+    try:
+        handoff = consume_handoff(session, handoff_token, result_policy_id=policy_id)
+        session.commit()
+        chat_platform = handoff.chat_platform
+        chat_user_id = handoff.chat_user_id
+        chat_channel_id = handoff.chat_channel_id
+        request_text = handoff.request_text
+    except HandoffError as e:
+        session.rollback()
+        sync_alert("handoff_resume_failed", e.message, {"reason_code": e.reason_code})
+        return {"resumed": False, "reason_code": e.reason_code}
+    finally:
+        session.close()
+
+    await send_dm(config, chat_user_id, "Signed. Resuming your order…")
+    result = await resume_after_signing(
+        config,
+        InProcessMCPClient(config),
+        chat_platform=chat_platform,
+        chat_user_id=chat_user_id,
+        chat_channel_id=chat_channel_id,
+        request_text=request_text,
+        policy_id=policy_id,
+        trace_id=f"trace_handoff_{handoff_token[:8]}",
+    )
+    return {"resumed": True, "shop_result": result}
+
+
+def _apply_amendment_delta(policy: IntentPolicy, delta: dict[str, Any]) -> IntentPolicy:
+    """S11 Phase 4 (Q-020): apply exactly the fields draft_amendment()'s delta
+    names — nothing invented beyond them (R0.3). `add_allowed_skus` exempts
+    those specific SKUs from policy.blocked_skus for this one recompile;
+    `bump_max_spend_per_tx_minor` raises the effective per-tx cap to at least
+    that amount. Returns a new, unpersisted IntentPolicy snapshot (delta's own
+    `one_time: True` — this never mutates the standing policy row)."""
+    add_skus = set(delta.get("add_allowed_skus") or [])
+    bump = delta.get("bump_max_spend_per_tx_minor", 0)
+    return policy.model_copy(
+        update={
+            "blocked_skus": [s for s in policy.blocked_skus if s not in add_skus],
+            "max_spend_per_tx_minor": max(policy.max_spend_per_tx_minor, bump),
+        }
+    )
+
+
+async def _approve_amendment(
+    config: Settings,
+    session_factory: Callable[[], Session],
+    handoff: Handoff,
+    token: str,
+) -> dict[str, Any]:
+    """S11 Phase 4: apply the amendment as a one-time relief (Q-020), recompile,
+    and — on ALLOW — create the checkout + payment link directly (the
+    one-time relief exists only in this call's memory, so re-running the
+    normal shop()/create_cart round-trip through the real, unrelieved policy
+    row would just re-deny). DMs the buyer either way; consumes the handoff
+    exactly once regardless of outcome (a decision was rendered)."""
+    session = session_factory()
+    try:
+        draft_wrapper = handoff.amendment_draft or {}
+        draft = draft_wrapper.get("draft", {})
+        cart = draft_wrapper.get("cart", [])
+        base_policy_hash = draft.get("base_policy_hash")
+
+        policy = session.exec(
+            select(IntentPolicy).where(IntentPolicy.policy_hash == base_policy_hash)
+        ).first()
+        if not policy:
+            consume_handoff(session, token)
+            session.commit()
+            return {"applied": False, "reason_code": "authority.policy_unsigned"}
+
+        amended_policy = _apply_amendment_delta(policy, draft.get("delta", {}))
+        cart_hash = compute_cart_hash(cart)
+        trace_id = f"trace_amend_{token[:8]}"
+        client_id = f"discord:{handoff.chat_user_id}"
+
+        result = create_checkout_from_policy(
+            config=config,
+            session=session,
+            trace_id=trace_id,
+            client_id=client_id,
+            merchant_id=amended_policy.merchant_id,
+            cart_items=cart,
+            cart_hash=cart_hash,
+            cart_version=1,
+            policy=amended_policy,
+            assertion_verified=True,  # the amendment approval assertion just verified
+            agent_plan={"amendment_id": draft.get("amendment_id")},
+        )
+
+        if not result.allowed:
+            consume_handoff(session, token, result_policy_id=policy.id)
+            session.commit()
+            await send_dm(
+                config,
+                handoff.chat_user_id,
+                f"Amendment approved, but the cart still doesn't compile: {result.reason_code}.",
+            )
+            return {
+                "applied": False,
+                "reason_code": result.reason_code,
+                "transcript": result.transcript,
+            }
+
+        checkout = session.exec(select(Checkout).where(Checkout.id == result.checkout_id)).first()
+        assert checkout is not None
+        checkout.chat_platform = handoff.chat_platform
+        checkout.chat_user_id = handoff.chat_user_id
+        checkout.chat_channel_id = handoff.chat_channel_id
+        checkout.request_text = handoff.request_text
+        session.add(checkout)
+        session.flush()
+
+        checkout = create_payment_link(
+            config=config,
+            session=session,
+            trace_id=trace_id,
+            client_id=client_id,
+            checkout_id=checkout.id,
+            amount_minor=checkout.amount_minor,
+            currency=checkout.currency,
+            customer={"name": f"Discord user {handoff.chat_user_id}"},
+        )
+
+        consume_handoff(session, token, result_policy_id=policy.id)
+        session.commit()
+
+        shop_result = {
+            "allowed": True,
+            "checkout_id": checkout.id,
+            "amount_minor": checkout.amount_minor,
+            "currency": checkout.currency,
+            "aal_level": result.aal_level,
+            "short_url": checkout.short_url,
+            "expires_at": checkout.expires_at.isoformat(),
+        }
+        await send_dm(
+            config,
+            handoff.chat_user_id,
+            "Amendment approved. " + render_shop_result(shop_result),
+        )
+        return {"applied": True, "shop_result": shop_result}
+    finally:
+        session.close()
+
+
 def policy_studio_router(
     config: Settings,
     *,
@@ -114,20 +340,50 @@ def policy_studio_router(
 
     router = APIRouter()
 
+    def _render_amendment_page(handoff: Handoff, token: str, store: ChallengeStore) -> HTMLResponse:
+        """S11 Phase 4: render the amendment-approval page. Issues the
+        WebAuthn challenge inline (bound to {"mode":"amendment",
+        "amendment_id":...}) so no separate "begin assertion" route is
+        needed (Q-017 reserves only the two approve/reject routes)."""
+        draft_wrapper = handoff.amendment_draft or {}
+        draft = draft_wrapper.get("draft", {})
+        amendment_id = draft.get("amendment_id", "")
+        buyer = buyer_handle(handoff)
+        begin = begin_assertion(
+            config, buyer, binding={"mode": "amendment", "amendment_id": amendment_id}, store=store
+        )
+        html = (TEMPLATES / "amendment_studio.html").read_text(encoding="utf-8")
+        html = html.replace("__AMENDMENT_ID__", _safe_json(amendment_id))
+        html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
+        html = html.replace("__DRAFT_JSON__", _safe_json(draft))
+        html = html.replace("__ASSERTION_BEGIN_JSON__", _safe_json(begin))
+        return HTMLResponse(html)
+
     # ------------------------------------------------------------------ page
     @router.get("/intent/studio", response_class=HTMLResponse)
     async def studio_page(
-        operator: _Operator = Depends(_operator),
+        token: str | None = None,
+        x_operator_id: str | None = Header(default=None, alias=_NONCE_HEADER),
     ) -> HTMLResponse:
+        if token is not None:
+            handoff = _resolve_handoff(make_session, token)
+            if handoff.kind == HandoffKind.AMENDMENT:
+                return _render_amendment_page(handoff, token, store)
+            user_id = buyer_handle(handoff)
+        else:
+            user_id = _operator(x_operator_id).user_id
         html = (TEMPLATES / "policy_studio.html").read_text(encoding="utf-8")
-        html = html.replace("__OPERATOR_ID__", _safe_json(operator.user_id))
+        html = html.replace("__OPERATOR_ID__", _safe_json(user_id))
+        html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
         html = html.replace("__HOLD_TABLE_ROWS__", _render_hold_rows())
         html = html.replace("__CAP_NOTE_HTML__", _render_cap_note())
         return HTMLResponse(html)
 
     # ------------------------------------------------------------ enrolment
     @router.post("/internal/webauthn/register/begin")
-    async def register_begin(body: RegistrationBegin, operator: _Operator = Depends(_operator)) -> dict[str, Any]:
+    async def register_begin(
+        body: RegistrationBegin, operator: _Operator = Depends(_operator)
+    ) -> dict[str, Any]:
         options = begin_registration(
             config,
             operator.user_id,
@@ -164,13 +420,17 @@ def policy_studio_router(
             session.rollback()
             _record_webauthn_failure(session, operator.user_id, body.credential_id, e, "register")
             session.commit()
-            raise HTTPException(status_code=422, detail={"reason_code": e.reason_code, "message": e.message})
+            raise HTTPException(
+                status_code=422, detail={"reason_code": e.reason_code, "message": e.message}
+            )
         finally:
             session.close()
 
     # ------------------------------------------------------------ assertion
     @router.post("/internal/webauthn/assertion/begin")
-    async def assertion_begin(body: AssertionBegin, operator: _Operator = Depends(_operator)) -> dict[str, Any]:
+    async def assertion_begin(
+        body: AssertionBegin, operator: _Operator = Depends(_operator)
+    ) -> dict[str, Any]:
         binding = {"mode": "policy"}
         options = begin_assertion(config, operator.user_id, binding=binding, store=store)
         options["binding"] = binding
@@ -199,7 +459,9 @@ def policy_studio_router(
             session.rollback()
             _record_webauthn_failure(session, operator.user_id, body.credential_id, e, "assertion")
             session.commit()
-            raise HTTPException(status_code=401, detail={"reason_code": e.reason_code, "message": e.message})
+            raise HTTPException(
+                status_code=401, detail={"reason_code": e.reason_code, "message": e.message}
+            )
         finally:
             session.close()
 
@@ -210,7 +472,7 @@ def policy_studio_router(
         if body.policy is not None:
             outcome = complete_policy_signing(
                 fields=body.policy,
-                merchant_id=operator.user_id,
+                merchant_id=merchant_id(config),
                 user_id=operator.user_id,
                 credential_id=body.credential_id,
                 webauthn_sign_count=new_sign_count,
@@ -219,7 +481,10 @@ def policy_studio_router(
             if not outcome.ok:
                 raise HTTPException(
                     status_code=422,
-                    detail={"reason_code": outcome.reason_code, "message": f"policy-signing gate rejected: {outcome.reason_code}"},
+                    detail={
+                        "reason_code": outcome.reason_code,
+                        "message": f"policy-signing gate rejected: {outcome.reason_code}",
+                    },
                 )
             assert outcome.policy is not None
             psession = make_session()
@@ -234,6 +499,13 @@ def policy_studio_router(
                 }
             finally:
                 psession.close()
+            # S11 Phase 2 push + auto-resume: only when the page was opened via
+            # a chat-issued handoff link. Runs after the policy is committed —
+            # a resume failure never undoes a policy that was actually signed.
+            if body.handoff_token:
+                response["handoff"] = await _consume_and_resume(
+                    config, make_session, body.handoff_token, outcome.policy.id
+                )
             return response
 
         return {"ok": ok, "sign_count": new_sign_count}
@@ -243,18 +515,125 @@ def policy_studio_router(
     async def policy_blast_radius(operator: _Operator = Depends(_operator)) -> dict[str, Any]:
         session = make_session()
         try:
-            policies = list(
-                session.exec(
-                    select(IntentPolicy).where(IntentPolicy.merchant_id == operator.user_id)
-                ).all()
-            )
+            # Scoped by the operator's own credentials, not merchant_id: with
+            # merchant_id now the configured merchant (shared by everyone,
+            # single-tenant), a merchant_id filter would show every operator's
+            # policies pooled together instead of just this one's (see
+            # _current_aggregate for the same fix and its rationale).
             credentials = get_user_credentials(session, operator.user_id)
+            credential_ids = [c.credential_id for c in credentials]
+            policies = (
+                list(
+                    session.exec(
+                        select(IntentPolicy).where(
+                            IntentPolicy.webauthn_credential_id.in_(credential_ids)  # type: ignore[attr-defined]
+                        )
+                    ).all()
+                )
+                if credential_ids
+                else []
+            )
             envelope_ids = [p.policy_hash for p in policies]
             radius = blast_radius(policies, envelope_ids)
             radius["credentials"] = len(credentials)
             return radius
         finally:
             session.close()
+
+    # ------------------------------------------------------------ amendment ceremony (S11 Phase 4)
+    @router.post("/intent/amendment/{amendment_id}/approve")
+    async def amendment_approve(amendment_id: str, body: AmendmentDecision) -> dict[str, Any]:
+        handoff = _resolve_handoff(make_session, body.token)
+        if handoff.kind != HandoffKind.AMENDMENT:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "not an amendment handoff",
+                },
+            )
+        draft = (handoff.amendment_draft or {}).get("draft", {})
+        if draft.get("amendment_id") != amendment_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "amendment_id mismatch",
+                },
+            )
+        if not (
+            body.credential_id
+            and body.client_data_json
+            and body.authenticator_data
+            and body.signature
+            and body.challenge
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "reason_code": "assertion_required",
+                    "message": "amendment approval requires a WebAuthn assertion",
+                },
+            )
+
+        buyer = buyer_handle(handoff)
+        vsession = make_session()
+        try:
+            complete_assertion(
+                vsession,
+                config,
+                buyer,
+                body.credential_id,
+                body.client_data_json,
+                body.authenticator_data,
+                body.signature,
+                body.challenge,
+                binding={"mode": "amendment", "amendment_id": amendment_id},
+                store=store,
+            )
+            vsession.commit()
+        except WebAuthnError as e:
+            vsession.rollback()
+            _record_webauthn_failure(vsession, buyer, body.credential_id, e, "amendment")
+            vsession.commit()
+            raise HTTPException(
+                status_code=401, detail={"reason_code": e.reason_code, "message": e.message}
+            )
+        finally:
+            vsession.close()
+
+        return await _approve_amendment(config, make_session, handoff, body.token)
+
+    @router.post("/intent/amendment/{amendment_id}/reject")
+    async def amendment_reject(amendment_id: str, body: AmendmentDecision) -> dict[str, Any]:
+        handoff = _resolve_handoff(make_session, body.token)
+        if handoff.kind != HandoffKind.AMENDMENT:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "not an amendment handoff",
+                },
+            )
+        draft = (handoff.amendment_draft or {}).get("draft", {})
+        if draft.get("amendment_id") != amendment_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "amendment_id mismatch",
+                },
+            )
+
+        session = make_session()
+        try:
+            consume_handoff(session, body.token)
+            session.commit()
+        finally:
+            session.close()
+
+        await send_dm(config, handoff.chat_user_id, "Amendment rejected, order not placed.")
+        return {"applied": False, "state": "REJECTED"}
 
     return router
 
@@ -287,22 +666,43 @@ def _record_webauthn_failure(
         action=f"webauthn_{ceremony}_rejected",
         resource_type="webauthn",
         resource_id=credential_id,
-        audit_metadata={"reason_code": err.reason_code, "failure_type": err.failure_type, "message": err.message},
+        audit_metadata={
+            "reason_code": err.reason_code,
+            "failure_type": err.failure_type,
+            "message": err.message,
+        },
     )
     session.add(entry)
     session.flush()
-    sync_alert("webauthn_failure", err.message, {"failure_type": err.failure_type, "reason_code": err.reason_code})
+    sync_alert(
+        "webauthn_failure",
+        err.message,
+        {"failure_type": err.failure_type, "reason_code": err.reason_code},
+    )
 
 
 def _current_aggregate(session_factory: Callable[[], Session], user_id: str) -> int:
     """Recompute the enrolled operator's current active aggregate server-side
-    (R0.8). Never trusted from the client."""
+    (R0.8). Never trusted from the client.
+
+    IntentPolicy has no user/buyer column. A user's policies are reached by
+    joining through webauthn_credential_id to the credentials enrolled under
+    this user_handle (S11 plan: "Buyer identity rides on the existing
+    credential join"). This used to filter on
+    IntentPolicy.merchant_id == user_id, which was only correct by accident
+    because merchant_id and user_id were the same unverified header string;
+    now that merchant_id is the configured merchant (see config.merchant_id), the
+    aggregate must be scoped by credential instead.
+    """
     session = session_factory()
     try:
+        credential_ids = [c.credential_id for c in get_user_credentials(session, user_id)]
+        if not credential_ids:
+            return 0
         active = list(
             session.exec(
                 select(IntentPolicy).where(
-                    IntentPolicy.merchant_id == user_id,
+                    IntentPolicy.webauthn_credential_id.in_(credential_ids),  # type: ignore[attr-defined]
                     IntentPolicy.is_active.is_(True),  # type: ignore[attr-defined]
                 )
             ).all()

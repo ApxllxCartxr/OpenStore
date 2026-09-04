@@ -118,6 +118,7 @@ This studio is behind the merchant-operator session (INV-10); reload after signi
 <script>
 "use strict";
 const OPERATOR = __OPERATOR_ID__;
+const HANDOFF_TOKEN = __HANDOFF_TOKEN__;
 
 const headers = {
   "Content-Type": "application/json",
@@ -190,7 +191,13 @@ async function register() {
     display_name: document.getElementById("reg-name").value,
   });
   await enforceUserVerified(begin);
-  const cred = await navigator.credentials.create({ publicKey: begin });
+  const publicKey = {
+    ...begin,
+    challenge: b64d(begin.challenge),
+    user: { ...begin.user, id: b64d(begin.user.id) },
+    excludeCredentials: (begin.excludeCredentials || []).map(c => ({ ...c, id: b64d(c.id) })),
+  };
+  const cred = await navigator.credentials.create({ publicKey });
   const res = await api("/internal/webauthn/register/complete", {
     credential_id: cred.id,
     client_data_json: cred.response.clientDataJSON ? b64url(new Uint8Array(cred.response.clientDataJSON)) : "",
@@ -220,10 +227,14 @@ async function sign(event) {
     signature: b64url(new Uint8Array(assert.response.signature)),
     challenge: begin.challenge,
     policy: collectPolicy(),
+    handoff_token: HANDOFF_TOKEN,
   };
   const res = await api("/internal/webauthn/assertion/complete", body);
   status.textContent = "Signed policy " + res.policy_id + " (policy_hash " +
     res.policy_hash + ", sign_count " + res.sign_count + ").";
+  if (res.handoff && res.handoff.resumed) {
+    status.textContent += " Resuming your order…";
+  }
 }
 
 document.getElementById("enrol-btn").addEventListener("click", register);

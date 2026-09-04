@@ -13,13 +13,15 @@ from openstore.notifier import sync_merchant_trace
 
 logger = logging.getLogger("openstore.merchant_agent")
 
-NEGOTIATION_STATES = frozenset({
-    "PROPOSED",
-    "COUNTERED",
-    "ACCEPTED",
-    "NO_COMPLIANT_PATH",
-    "AMENDMENT_REQUESTED",
-})
+NEGOTIATION_STATES = frozenset(
+    {
+        "PROPOSED",
+        "COUNTERED",
+        "ACCEPTED",
+        "NO_COMPLIANT_PATH",
+        "AMENDMENT_REQUESTED",
+    }
+)
 
 
 class NegotiationMessage:
@@ -57,6 +59,67 @@ class NegotiationMessage:
             "reason_code": self.reason_code,
             "trace_id": self.trace_id,
         }
+
+
+def apply_cart_delta(
+    cart: list[dict[str, Any]],
+    cart_delta: dict[str, Any],
+    policy: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """S11 Phase 4 (plan item #24): the missing executor. `negotiate()` above
+    returns intent flags (`{"remove_violating_tags": True}` etc.), not a real
+    cart — nothing ever applied them. This mechanically mutates `cart`
+    against the flag(s) set in `cart_delta`, using only the policy fields the
+    flag names, never an invented heuristic (R0.3):
+
+      - remove_violating_tags: drop line items whose tags fail the same
+        allowed_tags/tag_mode rule compile_decision's check 8 enforces.
+      - swap_sku: the PRD has no SKU-substitution algorithm (no catalog-
+        matching spec exists) — implemented as "drop the blocked SKU's line
+        item" (Q-021), the same mechanical effect as remove_violating_tags,
+        just keyed by policy.blocked_skus instead of tags.
+      - reduce_qty: deterministic. Sorts by sku for a stable order, then
+        repeatedly removes one unit from the last item (or drops it once its
+        qty reaches 1) until the recomputed total is at or under
+        max_spend_per_tx_minor.
+
+    Returns a new list; `cart` is never mutated in place. Unknown/absent flags
+    are a no-op (returns `cart` unchanged) — `negotiate()`'s three flags are
+    the only ones this executor knows how to apply."""
+    if cart_delta.get("remove_violating_tags"):
+        allowed = set(policy.get("allowed_tags") or [])
+        tag_mode = policy.get("tag_mode", "all")
+
+        def _tags_ok(item: dict[str, Any]) -> bool:
+            if not allowed:
+                return True
+            tags = set(item.get("tags", []))
+            if tag_mode == "all":
+                return tags.issubset(allowed)
+            return bool(tags & allowed)
+
+        return [dict(item) for item in cart if _tags_ok(item)]
+
+    if cart_delta.get("swap_sku"):
+        blocked = set(policy.get("blocked_skus") or [])
+        return [dict(item) for item in cart if item.get("sku") not in blocked]
+
+    if cart_delta.get("reduce_qty"):
+        cap = policy.get("max_spend_per_tx_minor", 0)
+        new_cart = sorted((dict(item) for item in cart), key=lambda i: i.get("sku", ""))
+
+        def _total(c: list[dict[str, Any]]) -> int:
+            return sum(i.get("qty", 0) * i.get("unit_minor", 0) for i in c)
+
+        while new_cart and _total(new_cart) > cap:
+            last = new_cart[-1]
+            if last.get("qty", 0) > 1:
+                last["qty"] -= 1
+            else:
+                new_cart.pop()
+        return new_cart
+
+    return cart
 
 
 class MerchantAgent:
@@ -167,6 +230,7 @@ class MerchantAgent:
         }
 
         import hashlib
+
         draft_bytes = json.dumps(draft, sort_keys=True, separators=(",", ":")).encode("utf-8")
         draft["draft_digest"] = f"sha256:{hashlib.sha256(draft_bytes).hexdigest()}"
 
@@ -196,11 +260,17 @@ class MerchantAgent:
         ]
 
         if aal == 3:
-            notes.append("The human's authenticator signed this exact cart with user verification; this is the strongest merchant-side evidence of authorized intent available.")
+            notes.append(
+                "The human's authenticator signed this exact cart with user verification; this is the strongest merchant-side evidence of authorized intent available."
+            )
         elif aal == 2:
-            notes.append("The human authorized a standing policy with a fresh, user-verified signature, and this cart compiled clean against it; this is evidence of authorized intent, with final allocation resting with the network and issuer.")
+            notes.append(
+                "The human authorized a standing policy with a fresh, user-verified signature, and this cart compiled clean against it; this is evidence of authorized intent, with final allocation resting with the network and issuer."
+            )
         elif aal == 1:
-            notes.append("Authority was presented but one or more freshness, attestation, or verification predicates failed; treat the transaction as contested.")
+            notes.append(
+                "Authority was presented but one or more freshness, attestation, or verification predicates failed; treat the transaction as contested."
+            )
         elif aal == 0:
             notes.append("No verifiable human authority exists; no order is created at this level.")
 

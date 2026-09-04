@@ -7,8 +7,10 @@
 #     (DECISIONS §11.1.4).
 #   * Single-use challenge store with TTL (module constant CHALLENGE_TTL_SECONDS;
 #     config.py is out of scope for this stage). Every challenge carries a
-#     challenge_binding: {"mode": "policy"} at policy signing or
-#     {"mode": "cart", "cart_hash": ...} at checkout, verified on completion.
+#     challenge_binding: {"mode": "policy"} at policy signing,
+#     {"mode": "cart", "cart_hash": ...} at checkout, or (S11 Phase 4, Q-020)
+#     {"mode": "amendment", "amendment_id": ...} at amendment approval,
+#     verified on completion.
 #   * UV flag (bit 0x04 in the flags byte at index 32 of authenticator_data) is
 #     mandatory for assertions.
 #   * Sign-count monotonicity: stored and received both 0 -> accept (counter-less
@@ -92,7 +94,9 @@ _FAILURE_TYPES = frozenset(
 )
 
 # Supported COSE algorithms (DECISIONS §11.1.4).
-_SUPPORTED_ALGS = frozenset({COSEAlgorithmIdentifier.ECDSA_SHA_256, COSEAlgorithmIdentifier.RSASSA_PKCS1_v1_5_SHA_256})
+_SUPPORTED_ALGS = frozenset(
+    {COSEAlgorithmIdentifier.ECDSA_SHA_256, COSEAlgorithmIdentifier.RSASSA_PKCS1_v1_5_SHA_256}
+)
 
 # Challenge TTL. Module constant (S3.3); config key `challenge_ttl_seconds = 120`
 # is in REGISTRY/PRD but config.py is out of scope for this stage.
@@ -208,10 +212,14 @@ def _decode_auth_data_flags_sign_count(authenticator_data: bytes) -> tuple[int, 
     §3.6 check 7). Layout: rpIdHash(32) + flags(1) + signCount(4)."""
     if len(authenticator_data) < 37:
         raise WebAuthnError(
-            _ASSERTION_REQUIRED, "authenticator_data too short", failure_type=assertion_signature_invalid
+            _ASSERTION_REQUIRED,
+            "authenticator_data too short",
+            failure_type=assertion_signature_invalid,
         )
     flags = authenticator_data[_AUTH_DATA_FLAGS_BYTE]
-    sign_count = int.from_bytes(authenticator_data[_AUTH_DATA_FLAGS_BYTE + 1 : _AUTH_DATA_FLAGS_BYTE + 5], "big")
+    sign_count = int.from_bytes(
+        authenticator_data[_AUTH_DATA_FLAGS_BYTE + 1 : _AUTH_DATA_FLAGS_BYTE + 5], "big"
+    )
     return flags, sign_count
 
 
@@ -222,8 +230,12 @@ def _binding_matches(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
     (e5: `challenge_binding.mode == "cart"` and its `cart_hash == goods.cart_hash`).
     Policy mode carries only the mode; any extra metadata (policy_id, policy_hash
     stored by create_policy_signing_challenge) is contextual, not part of the
-    binding contract. Unknown modes never match (R0.3: unknown value => hard
-    error, never a silent pass).
+    binding contract. `amendment` mode (S11 Phase 4, Q-020) mirrors `cart` mode
+    exactly but keys on `amendment_id` instead of `cart_hash`: the buyer's
+    approval assertion must be bound to the specific drafted amendment, not
+    just "some amendment", so a stale or mismatched challenge can never
+    authorize a different amendment (R0.5). Unknown modes never match (R0.3:
+    unknown value => hard error, never a silent pass).
     """
     expected_mode = expected.get("mode")
     actual_mode = actual.get("mode")
@@ -232,7 +244,13 @@ def _binding_matches(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
     if expected_mode != actual_mode:
         return False
     if expected_mode == "cart":
-        return expected.get("cart_hash") is not None and expected.get("cart_hash") == actual.get("cart_hash")
+        return expected.get("cart_hash") is not None and expected.get("cart_hash") == actual.get(
+            "cart_hash"
+        )
+    if expected_mode == "amendment":
+        return expected.get("amendment_id") is not None and expected.get(
+            "amendment_id"
+        ) == actual.get("amendment_id")
     if expected_mode == "policy":
         return True
     return False
@@ -305,9 +323,13 @@ def begin_registration(
             {"type": "public-key", "alg": alg.alg.value} for alg in options.pub_key_cred_params
         ],
         "authenticatorSelection": {
-            "authenticatorAttachment": selection.authenticator_attachment.value if selection.authenticator_attachment else None,
+            "authenticatorAttachment": selection.authenticator_attachment.value
+            if selection.authenticator_attachment
+            else None,
             "residentKey": selection.resident_key.value if selection.resident_key else None,
-            "userVerification": selection.user_verification.value if selection.user_verification else None,
+            "userVerification": selection.user_verification.value
+            if selection.user_verification
+            else None,
         },
         "attestation": options.attestation.value,
         "excludeCredentials": [
@@ -384,9 +406,13 @@ def complete_registration(
         aaguid=str(verification.aaguid) if verification.aaguid else None,
         attestation_format=verification.fmt if verification.fmt else None,
         attestation_data={
-            "credential_type": verification.credential_type.value if verification.credential_type else None,
+            "credential_type": verification.credential_type.value
+            if verification.credential_type
+            else None,
             "user_verified": verification.user_verified,
-            "attestation_object": base64.urlsafe_b64encode(verification.attestation_object).decode().rstrip("=")
+            "attestation_object": base64.urlsafe_b64encode(verification.attestation_object)
+            .decode()
+            .rstrip("=")
             if verification.attestation_object
             else None,
         },
@@ -418,7 +444,9 @@ def begin_assertion(
     challenge_b64 = challenge_to_b64url(options.challenge)
     # Default binding: policy signing mode (used by create_policy_signing_challenge
     # and the studio). Callers at checkout pass {"mode": "cart", "cart_hash": ...}.
-    (store or _DEFAULT_STORE).issue(challenge_b64, binding if binding is not None else {"mode": "policy"})
+    (store or _DEFAULT_STORE).issue(
+        challenge_b64, binding if binding is not None else {"mode": "policy"}
+    )
     return {
         "challenge": challenge_b64,
         "rpId": options.rp_id,
