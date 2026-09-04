@@ -142,6 +142,8 @@ def test_registry_authority_reason_codes():
         "authority.unknown_scheme", "authority.scheme_capped_native_webauthn",
         "authority.scheme_capped_ap2_intent_mandate", "authority.scheme_capped_ap2_cart_mandate",
         "authority.scheme_capped_acp_delegated_token", "authority.scheme_capped_none",
+        "authority.handoff_not_found", "authority.handoff_expired",
+        "authority.handoff_consumed", "authority.policy_unsigned",
     ]
 
 

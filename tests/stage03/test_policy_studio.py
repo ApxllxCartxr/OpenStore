@@ -162,6 +162,16 @@ def test_studio_requires_operator_session(client: TestClient):
     assert res.status_code == 401
 
 
+def test_studio_token_path_unknown_token_fails_loud(client: TestClient):
+    """S11 Phase 2 (Q-014/Q-016): an unresolvable chat-issued handoff token is
+    a hard failure (404, authority.handoff_not_found) — never a silent
+    fallback to a fake identity. (Superseded Phase 1's placeholder 501: the
+    handoffs table now exists and this is a real lookup, not a stub.)"""
+    res = client.get("/intent/studio?token=abc123")
+    assert res.status_code == 404
+    assert res.json()["detail"]["reason_code"] == "authority.handoff_not_found"
+
+
 def test_studio_page_renders_hold_table_and_cap(client: TestClient):
     res = client.get("/intent/studio", headers=HEADERS)
     assert res.status_code == 200

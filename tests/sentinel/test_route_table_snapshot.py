@@ -19,6 +19,10 @@ _REGISTRY_TO_APP = {
     "/campaign/<campaign_id>/approve": "/campaign/{campaign_id}/approve",
     "/campaign/<campaign_id>/reject": "/campaign/{campaign_id}/reject",
     "/hold/<cancel_token>/cancel": "/hold/{cancel_token}/cancel",
+    "/orders/<checkout_id>/evidence": "/orders/{checkout_id}/evidence",
+    "/orders/<id>/evidence/view": "/orders/{id}/evidence/view",
+    "/intent/amendment/<amendment_id>/approve": "/intent/amendment/{amendment_id}/approve",
+    "/intent/amendment/<amendment_id>/reject": "/intent/amendment/{amendment_id}/reject",
 }
 
 # Routes mounted by the app that are NOT in REGISTRY.json because they are
@@ -41,9 +45,6 @@ _EXPECTED_ABSENT = {
     "/admin/agents",
     "/admin/*",
     "/internal/webauthn/*",
-    "/internal/policy/blast-radius",
-    "/orders/<checkout_id>/evidence",
-    "/orders/<id>/evidence/view",
     "/orders/intent/<intent_id>/evidence",
 }
 

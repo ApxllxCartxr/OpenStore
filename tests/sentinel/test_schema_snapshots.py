@@ -17,6 +17,8 @@ EXPECTED_COLUMNS = {
         "expires_at", "idempotency_key", "psp_provider", "psp_order_id",
         "psp_payment_link_id", "short_url", "cancel_token", "created_at", "updated_at", "paid_at",
         "released_at", "cancelled_at", "cart_snapshot", "agent_plan",
+        "chat_platform", "chat_user_id", "chat_channel_id",
+        "request_text", "poai_bundle",
     },
     "intent_policies": {
         "id", "merchant_id", "policy_version", "policy_hash", "currency",
@@ -65,6 +67,11 @@ EXPECTED_COLUMNS = {
     "idempotency_keys": {
         "key", "trace_id", "client_id", "request_hash", "response_status",
         "response_body", "created_at", "expires_at",
+    },
+    "handoffs": {
+        "token", "kind", "merchant_id", "chat_platform", "chat_user_id",
+        "chat_channel_id", "request_text", "created_at", "expires_at",
+        "consumed_at", "result_policy_id", "amendment_draft",
     },
 }
 
