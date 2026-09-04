@@ -57,7 +57,6 @@ from webauthn.helpers.exceptions import (
 )
 from webauthn.helpers.structs import (
     AttestationConveyancePreference,
-    AuthenticatorAttachment,
     AuthenticatorSelectionCriteria,
     ResidentKeyRequirement,
     UserVerificationRequirement,
@@ -290,7 +289,12 @@ def begin_registration(
     specific to enrolment but is still single-use via the store."""
     challenge = generate_challenge()
     selection = AuthenticatorSelectionCriteria(
-        authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+        # No authenticator_attachment restriction: PLATFORM previously forced
+        # a built-in-to-this-device authenticator only, which Chrome enforces
+        # client-side by refusing the cross-device/QR (hybrid) flow entirely
+        # ("Your device can't be used with this site") — excluding the
+        # ordinary case of registering a phone-held passkey against a desktop
+        # browser. begin_assertion (below) never set this restriction either.
         resident_key=ResidentKeyRequirement.REQUIRED,
         user_verification=UserVerificationRequirement.REQUIRED,
     )
@@ -302,7 +306,15 @@ def begin_registration(
         user_display_name=display_name,
         challenge=challenge,
         authenticator_selection=selection,
-        attestation=AttestationConveyancePreference.DIRECT,
+        # NONE, not DIRECT: real-world passkey providers (Android Google
+        # Password Manager, iCloud Keychain, and most platform authenticators)
+        # refuse to produce a direct attestation statement and surface it to
+        # the user as an opaque "Your device can't be used with this site"
+        # failure at registration time. DIRECT bought nothing here — no PRD
+        # text or REGISTRY entry pins attestation conveyance, and
+        # attestation_format is still recorded from whatever statement the
+        # authenticator actually returns.
+        attestation=AttestationConveyancePreference.NONE,
         supported_pub_key_algs=[
             COSEAlgorithmIdentifier.ECDSA_SHA_256,
             COSEAlgorithmIdentifier.RSASSA_PKCS1_v1_5_SHA_256,

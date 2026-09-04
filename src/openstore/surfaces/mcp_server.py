@@ -211,7 +211,7 @@ def checkout_initiate(
         from sqlmodel import select
 
         from openstore.models import Checkout
-        from openstore.psp.razorpay_driver import create_payment_link
+        from openstore.psp.razorpay_driver import RazorpayError, create_payment_link
 
         checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
         if checkout is None:
@@ -259,6 +259,14 @@ def checkout_initiate(
     except CommerceError as e:
         return MCPToolResult(
             success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except RazorpayError as e:
+        # psp.* is a registered REGISTRY namespace (R0.2) — RazorpayError's
+        # error_code already lives there, it was just falling into the
+        # generic-Exception branch below and flattening to "internal_error"
+        # because RazorpayError doesn't subclass CommerceError.
+        return MCPToolResult(
+            success=False, error={"reason_code": e.error_code, "message": e.message}
         )
     except Exception as e:
         return MCPToolResult(
