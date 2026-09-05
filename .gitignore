@@ -29,6 +29,7 @@ Thumbs.db
 
 # Environment files
 .env
+.env.llm
 .env.local
 .env.*.local
 
@@ -45,4 +46,8 @@ catalog.yaml
 .env.example
 
 # Local opencode tooling
+.opencode/
 .opencode/mutants/
+
+# Mutation testing output (mutmut)
+mutants/
