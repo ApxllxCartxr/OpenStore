@@ -63,8 +63,11 @@ MAX_NEGOTIATION_ROUNDS = 3
 # S13: total buyer replies allowed in one conversational-shopping session
 # (BuyerGraph asking a follow-up, the buyer answering) before the bot gives
 # up and asks the buyer to start over with !shop — a hard Python-side cap,
-# outside the LLM's reach, same pattern as MAX_NEGOTIATION_ROUNDS (R0.5).
-MAX_CONVERSATION_TURNS = 5
+# outside the LLM's reach, same pattern as MAX_NEGOTIATION_ROUNDS (R0.5). A
+# free confirmation of an already-built cart never counts against this (see
+# _handle_conversation_reply) — 20 is a bound on genuine back-and-forth
+# (browsing, revisions, questions), not on how long checkout itself takes.
+MAX_CONVERSATION_TURNS = 20
 
 
 class BuyerAgent:
@@ -144,6 +147,10 @@ class BuyerAgent:
         on_negotiation_round: Callable[[int, dict[str, Any]], Awaitable[None]] | None = None,
         on_cart_ready: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
         on_search: Callable[[str], Awaitable[None]] | None = None,
+        on_menu_ready: Callable[[str | None], Awaitable[None]] | None = None,
+        on_cart_shown: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
+        on_order_status: Callable[[], Awaitable[None]] | None = None,
+        on_cancel_requested: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Runs BuyerGraph from a fresh goal (S13: real tool-calling — the LLM
         may search the catalog itself, more than once, before answering or
@@ -164,7 +171,16 @@ class BuyerAgent:
           cart — identical shape/behavior to before this method existed."""
         await DiscordNotifier(self.config).buyer_trace(trace_id, "shop_start", {"goal": goal})
 
-        plan_result = await self._graph.plan(goal, policy_id, trace_id, on_search)
+        plan_result = await self._graph.plan(
+            goal,
+            policy_id,
+            trace_id,
+            on_search,
+            on_menu_ready,
+            on_cart_shown,
+            on_order_status,
+            on_cancel_requested,
+        )
         if plan_result.get("awaiting_reply"):
             pending_cart = plan_result.get("cart") or []
             if pending_cart and on_cart_ready is not None:
@@ -204,6 +220,10 @@ class BuyerAgent:
         on_negotiation_round: Callable[[int, dict[str, Any]], Awaitable[None]] | None = None,
         on_cart_ready: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
         on_search: Callable[[str], Awaitable[None]] | None = None,
+        on_menu_ready: Callable[[str | None], Awaitable[None]] | None = None,
+        on_cart_shown: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
+        on_order_status: Callable[[], Awaitable[None]] | None = None,
+        on_cancel_requested: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Resumes a parked conversation (a prior start_shop/continue_shop
         call that returned awaiting_reply) with the buyer's next message.
@@ -243,7 +263,16 @@ class BuyerAgent:
             )
 
         updated_messages = [*messages, {"role": "user", "content": reply_text}]
-        result = await self._graph.converse(updated_messages, policy_id, trace_id, on_search)
+        result = await self._graph.converse(
+            updated_messages,
+            policy_id,
+            trace_id,
+            on_search,
+            on_menu_ready,
+            on_cart_shown,
+            on_order_status,
+            on_cancel_requested,
+        )
 
         if result.get("awaiting_reply"):
             new_pending_cart = result.get("cart") or []
@@ -914,11 +943,21 @@ class BuyerAgent:
                     f"store(s) before I can shop there — sign here: "
                     f"{base_url}/enroll/{group_id}"
                 )
+            # Preserve the cart as the same tool_result marker _confirm_cart
+            # uses (buyer_graph.py) — not an empty list. This pause used to
+            # discard the buyer's already-confirmed cart entirely: once
+            # signing completed there was nothing left to resume, so the
+            # buyer's next reply ("continue") reached the LLM with zero
+            # context and had to be re-asked from scratch.
+            cart_ready_message = {
+                "role": "user",
+                "content": json.dumps({"tool_result": "cart_ready", "cart": cart}),
+            }
             return {
                 "awaiting_reply": True,
                 "question": question,
                 "cart": cart,
-                "messages": [],
+                "messages": [cart_ready_message],
                 "trace_id": trace_id,
             }
 
@@ -1147,8 +1186,7 @@ def _campaign_discount_field(cart: list[dict[str, Any]]) -> dict[str, Any] | Non
     for entry in by_campaign.values():
         saving_minor = (entry["subtotal_minor"] * entry["discount_bps"]) // 10000
         lines.append(
-            f"{entry['title']} — {entry['discount_bps'] / 100:g}% off "
-            f"(−₹{saving_minor / 100:.2f})"
+            f"{entry['title']} — {entry['discount_bps'] / 100:g}% off (−₹{saving_minor / 100:.2f})"
         )
     return {"name": "Offers applied", "value": "\n".join(lines), "inline": False}
 
@@ -1228,6 +1266,110 @@ def build_federated_cart_preview_embed(
         "description": f"{len(by_merchant)} store" + ("s" if len(by_merchant) != 1 else ""),
         "fields": fields,
     }
+
+
+def _text_matches(haystack: str, needle: str) -> bool:
+    """Case-insensitive substring match used for the `!menu <store>` filter —
+    "chai" matches "Chai House" by name, or "chai-house" by merchant_id."""
+    return needle.strip().lower() in haystack.lower()
+
+
+_ORDER_STATUS_TEXT = {
+    "CREATED": "just started",
+    "HELD": "awaiting payment",
+    "PAID": "paid ✓",
+    "RELEASED": "released (the payment window expired)",
+    "CANCELLED": "cancelled",
+    "REFUNDED": "refunded",
+    "FAILED": "failed",
+}
+
+
+def _format_order_status(order: dict[str, Any], merchant_name: str | None = None) -> str:
+    """check_order_status action (S14): renders one list_orders row. Amount/
+    state always come from the tool result, never composed by the LLM."""
+    where = f" at {merchant_name}" if merchant_name else ""
+    status = _ORDER_STATUS_TEXT.get(order["state"], order["state"])
+    return f"Your latest order{where} — ₹{order['amount_minor'] / 100:.2f} — is {status}."
+
+
+async def _report_cancel_result(message: Any, result: dict[str, Any]) -> None:
+    """cancel_order action (S14): shared by both bots once the cancel_order
+    MCP call has been made — same wording as the pre-existing in-process
+    !cancel path."""
+    if not result.get("success"):
+        reason = result.get("error", {}).get("reason_code", "")
+        if reason == "psp.invalid_state":
+            await message.channel.send("That one's already paid, so there's nothing to cancel.")
+            return
+        await message.channel.send("I couldn't cancel that order — please try again.")
+        return
+    if result.get("data", {}).get("status") == "REFUND":
+        await message.channel.send("That was already paid, so I've refunded it.")
+    else:
+        await message.channel.send("Cancelled.")
+
+
+def build_catalog_embed(merchant_name: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """One store's `!menu` page: every catalog item, name + price + tags.
+    Deterministic catalog read (search_products with an empty query, which
+    core/catalog.py's filter treats as "match everything") — no LLM call."""
+    if not items:
+        return {
+            "title": f"{merchant_name} menu",
+            "description": "Nothing in the catalog right now.",
+        }
+    lines = []
+    for item in items:
+        line = f"**{item['name']}** — ₹{item['unit_minor'] / 100:.2f}"
+        if item.get("tags"):
+            line += f"  _{', '.join(item['tags'])}_"
+        lines.append(line)
+    return {"title": f"{merchant_name} menu", "description": "\n".join(lines)}
+
+
+async def _send_paginated_menu(channel: Any, embeds: list[Any], author_id: int) -> None:
+    """One embed per store, paged with Prev/Next buttons — restricted to the
+    buyer who asked, auto-disabled after 2 minutes idle. Local import: this
+    is the only place in this module that touches discord.py's UI layer, so
+    everything else here stays testable with plain duck-typed fakes."""
+    import discord
+
+    class _MenuPaginator(discord.ui.View):
+        def __init__(self) -> None:
+            super().__init__(timeout=120)
+            self.index = 0
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != author_id:
+                await interaction.response.send_message(
+                    "That's not your menu — run `!menu` yourself to browse.", ephemeral=True
+                )
+                return False
+            return True
+
+        async def _render(self, interaction: discord.Interaction) -> None:
+            await interaction.response.edit_message(embed=embeds[self.index], view=self)
+
+        @discord.ui.button(label="◀ Prev", style=discord.ButtonStyle.secondary)
+        async def prev(
+            self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+        ) -> None:
+            self.index = (self.index - 1) % len(embeds)
+            await self._render(interaction)
+
+        @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
+        async def next(
+            self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+        ) -> None:
+            self.index = (self.index + 1) % len(embeds)
+            await self._render(interaction)
+
+        async def on_timeout(self) -> None:
+            for child in self.children:
+                child.disabled = True  # type: ignore[attr-defined]
+
+    await channel.send(embed=embeds[0], view=_MenuPaginator())
 
 
 def build_federated_shop_result_embed(result: dict[str, Any]) -> dict[str, Any]:
@@ -1431,6 +1573,16 @@ class BuyerBot:
                 await self._handle_cancel(message, checkout_id)
                 return
 
+            # "!menu"/"!cart" always win anywhere, same as !shop/!cancel, and
+            # never touch a parked ShoppingSession — a buyer mid-conversation
+            # can check the menu or their cart without losing their place.
+            if lower.startswith("!menu"):
+                await self._handle_menu(message, content[len("!menu") :].strip() or None)
+                return
+            if lower.startswith("!cart"):
+                await self._handle_cart(message, chat_user_id, chat_channel_id)
+                return
+
             db_session = get_session(self.config)
             expired_goal: str | None = None
             try:
@@ -1456,7 +1608,7 @@ class BuyerBot:
             if expired_goal is not None:
                 await message.channel.send(
                     f"That thread timed out while I waited (I was still on "
-                    f"\"{expired_goal}\"). Starting fresh with what you just said."
+                    f'"{expired_goal}"). Starting fresh with what you just said.'
                 )
 
             if free_text_context and content:
@@ -1504,6 +1656,18 @@ class BuyerBot:
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
+        async def _on_menu_ready(merchant_filter: str | None) -> None:
+            await self._handle_menu(message, merchant_filter)
+
+        async def _on_cart_shown(cart: list[dict[str, Any]]) -> None:
+            await self._render_cart_embed(message, cart)
+
+        async def _on_order_status() -> None:
+            await self._report_order_status(message, "discord", chat_user_id)
+
+        async def _on_cancel_requested() -> None:
+            await self._handle_cancel_request(message, "discord", chat_user_id)
+
         async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.start_shop(
                 goal,
@@ -1515,6 +1679,10 @@ class BuyerBot:
                 on_negotiation_round=_stream_round,
                 on_cart_ready=_show_cart,
                 on_search=_announce_search,
+                on_menu_ready=_on_menu_ready,
+                on_cart_shown=_on_cart_shown,
+                on_order_status=_on_order_status,
+                on_cancel_requested=_on_cancel_requested,
             )
 
             if result.get("awaiting_reply"):
@@ -1585,8 +1753,16 @@ class BuyerBot:
             sess = db_session.get(ShoppingSession, session_id)
             if sess is None or sess.state != ShoppingSessionState.AWAITING_REPLY:
                 return
-            turns_used = sess.turns_used + 1
-            if turns_used >= MAX_CONVERSATION_TURNS:
+            # A plain "yes" to an already-built cart is the zero-LLM-cost fast
+            # path in continue_shop() below — it finishes the interaction
+            # rather than extending it, so it must never be blocked by the
+            # turn cap (a confirmation arriving on the Nth turn was killed by
+            # this check before continue_shop ever got to interpret it).
+            is_free_confirm = pending_cart_from_messages(
+                sess.messages
+            ) is not None and is_affirmative_reply(message.content)
+            turns_used = sess.turns_used if is_free_confirm else sess.turns_used + 1
+            if not is_free_confirm and turns_used >= MAX_CONVERSATION_TURNS:
                 close_session(db_session, sess, ShoppingSessionState.EXPIRED)
                 db_session.commit()
                 await message.channel.send(
@@ -1613,6 +1789,18 @@ class BuyerBot:
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
+        async def _on_menu_ready(merchant_filter: str | None) -> None:
+            await self._handle_menu(message, merchant_filter)
+
+        async def _on_cart_shown(cart: list[dict[str, Any]]) -> None:
+            await self._render_cart_embed(message, cart)
+
+        async def _on_order_status() -> None:
+            await self._report_order_status(message, "discord", chat_user_id)
+
+        async def _on_cancel_requested() -> None:
+            await self._handle_cancel_request(message, "discord", chat_user_id)
+
         async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.continue_shop(
                 messages,
@@ -1624,6 +1812,10 @@ class BuyerBot:
                 chat_channel_id=chat_channel_id,
                 on_negotiation_round=_stream_round,
                 on_cart_ready=_show_cart,
+                on_menu_ready=_on_menu_ready,
+                on_cart_shown=_on_cart_shown,
+                on_order_status=_on_order_status,
+                on_cancel_requested=_on_cancel_requested,
                 on_search=_announce_search,
             )
 
@@ -1744,9 +1936,7 @@ class BuyerBot:
                     return
                 checkout_id = checkout.id
             else:
-                checkout = session.exec(
-                    select(Checkout).where(Checkout.id == checkout_id)
-                ).first()
+                checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
             if checkout is None:
                 await message.channel.send(f"I don't see a checkout called {checkout_id}.")
                 return
@@ -1782,6 +1972,89 @@ class BuyerBot:
                 await message.channel.send("Cancelled.")
         finally:
             session.close()
+
+    async def _handle_menu(self, message: Any, filter_text: str | None) -> None:
+        """`!menu [store]` — single-merchant path: one store, so a filter
+        either matches it or there's nothing else to show."""
+        merchant_name = self.config.merchant.name
+        if filter_text and not _text_matches(merchant_name, filter_text):
+            await message.channel.send(
+                f"I don't recognize that store — I only know {merchant_name}."
+            )
+            return
+        result = await self.agent.mcp.search_products("", limit=100)
+        items = result.get("data", {}).get("items", []) if result.get("success") else []
+        await message.channel.send(
+            embed=build_discord_embed(build_catalog_embed(merchant_name, items))
+        )
+
+    async def _render_cart_embed(self, message: Any, cart: list[dict[str, Any]]) -> None:
+        """Shared by `!cart` and the free-text show_cart action
+        (buyer_graph.py) — one rendering path so both surfaces stay
+        identical."""
+        if not cart:
+            await message.channel.send(
+                "Nothing's in your cart yet — keep replying to build one, "
+                "or `!shop <something>` to start fresh."
+            )
+            return
+        suggestions = suggest_related_items(self.config, [item["sku"] for item in cart])
+        await message.channel.send(
+            embed=build_discord_embed(build_cart_preview_embed(cart, suggestions))
+        )
+
+    async def _handle_cart(self, message: Any, chat_user_id: str, chat_channel_id: str) -> None:
+        """`!cart` — shows the cart from the buyer's currently parked
+        ShoppingSession, if it's paused at a confirmation (pending_cart_from_
+        messages). Read-only: never touches session state."""
+        db_session = get_session(self.config)
+        try:
+            sess = find_active_session(db_session, "discord", chat_user_id, chat_channel_id)
+            messages = sess.messages if sess is not None else []
+        finally:
+            db_session.close()
+        await self._render_cart_embed(message, pending_cart_from_messages(messages) or [])
+
+    async def _report_order_status(
+        self, message: Any, chat_platform: str, chat_user_id: str
+    ) -> None:
+        """check_order_status action (S14): single-merchant path — one
+        list_orders call, report the most recent."""
+        result = await self.agent.mcp.call(
+            "list_orders",
+            {"chat_platform": chat_platform, "chat_user_id": chat_user_id, "limit": 1},
+        )
+        orders = result.get("data", {}).get("orders", []) if result.get("success") else []
+        if not orders:
+            await message.channel.send("I don't see any orders for you yet.")
+            return
+        await message.channel.send(_format_order_status(orders[0]))
+
+    async def _handle_cancel_request(
+        self, message: Any, chat_platform: str, chat_user_id: str
+    ) -> None:
+        """cancel_order action (S14): single-merchant path — cancels the
+        most recent HELD order, same as the existing `!cancel` bang command
+        (_latest_cancellable_checkout also just takes the latest; there's
+        only one store, so no "which store" ambiguity is possible here)."""
+        result = await self.agent.mcp.call(
+            "list_orders",
+            {"chat_platform": chat_platform, "chat_user_id": chat_user_id, "limit": 5},
+        )
+        orders = result.get("data", {}).get("orders", []) if result.get("success") else []
+        held = [o for o in orders if o["state"] == "HELD"]
+        if not held:
+            await message.channel.send("You have no open orders to cancel.")
+            return
+        result = await self.agent.mcp.call(
+            "cancel_order",
+            {
+                "checkout_id": held[0]["checkout_id"],
+                "chat_platform": chat_platform,
+                "chat_user_id": chat_user_id,
+            },
+        )
+        await _report_cancel_result(message, result)
 
 
 # S12 step 7: ShoppingSession.policy_id is meaningless per-session once a
@@ -1831,6 +2104,18 @@ class FederatedBuyerBot(BuyerBot):
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
+        async def _on_menu_ready(merchant_filter: str | None) -> None:
+            await self._handle_menu(message, merchant_filter)
+
+        async def _on_cart_shown(cart: list[dict[str, Any]]) -> None:
+            await self._render_cart_embed(message, cart)
+
+        async def _on_order_status() -> None:
+            await self._report_order_status(message, "discord", chat_user_id)
+
+        async def _on_cancel_requested() -> None:
+            await self._handle_cancel_request(message, "discord", chat_user_id)
+
         async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.start_shop(
                 goal,
@@ -1842,6 +2127,10 @@ class FederatedBuyerBot(BuyerBot):
                 on_negotiation_round=_stream_round,
                 on_cart_ready=_show_cart,
                 on_search=_announce_search,
+                on_menu_ready=_on_menu_ready,
+                on_cart_shown=_on_cart_shown,
+                on_order_status=_on_order_status,
+                on_cancel_requested=_on_cancel_requested,
             )
 
             if result.get("awaiting_reply"):
@@ -1876,8 +2165,13 @@ class FederatedBuyerBot(BuyerBot):
             sess = db_session.get(ShoppingSession, session_id)
             if sess is None or sess.state != ShoppingSessionState.AWAITING_REPLY:
                 return
-            turns_used = sess.turns_used + 1
-            if turns_used >= MAX_CONVERSATION_TURNS:
+            # See BuyerBot._handle_conversation_reply: a free confirmation of
+            # an already-built cart must never be blocked by the turn cap.
+            is_free_confirm = pending_cart_from_messages(
+                sess.messages
+            ) is not None and is_affirmative_reply(message.content)
+            turns_used = sess.turns_used if is_free_confirm else sess.turns_used + 1
+            if not is_free_confirm and turns_used >= MAX_CONVERSATION_TURNS:
                 close_session(db_session, sess, ShoppingSessionState.EXPIRED)
                 db_session.commit()
                 await message.channel.send(
@@ -1902,6 +2196,18 @@ class FederatedBuyerBot(BuyerBot):
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
+        async def _on_menu_ready(merchant_filter: str | None) -> None:
+            await self._handle_menu(message, merchant_filter)
+
+        async def _on_cart_shown(cart: list[dict[str, Any]]) -> None:
+            await self._render_cart_embed(message, cart)
+
+        async def _on_order_status() -> None:
+            await self._report_order_status(message, "discord", chat_user_id)
+
+        async def _on_cancel_requested() -> None:
+            await self._handle_cancel_request(message, "discord", chat_user_id)
+
         async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.continue_shop(
                 messages,
@@ -1914,6 +2220,10 @@ class FederatedBuyerBot(BuyerBot):
                 on_negotiation_round=_stream_round,
                 on_cart_ready=_show_cart,
                 on_search=_announce_search,
+                on_menu_ready=_on_menu_ready,
+                on_cart_shown=_on_cart_shown,
+                on_order_status=_on_order_status,
+                on_cancel_requested=_on_cancel_requested,
             )
 
             db_session = get_session(self.config)
@@ -1936,6 +2246,133 @@ class FederatedBuyerBot(BuyerBot):
             await message.channel.send(
                 embed=build_discord_embed(build_federated_shop_result_embed(result))
             )
+
+    async def _handle_menu(self, message: Any, filter_text: str | None) -> None:
+        """`!menu [store]` — bare `!menu` pages through every merchant's
+        catalog (one embed per store, Prev/Next buttons); `!menu <text>`
+        filters to the one store whose name or merchant_id matches."""
+        merchants = self.agent.mcp.merchants()
+        selected = merchants
+        if filter_text:
+            selected = [
+                m
+                for m in merchants
+                if _text_matches(m.name, filter_text) or _text_matches(m.merchant_id, filter_text)
+            ]
+            if not selected:
+                known = ", ".join(m.name for m in merchants)
+                await message.channel.send(f"I don't recognize that store — I know: {known}.")
+                return
+
+        embeds = []
+        for merchant in selected:
+            result = await self.agent.mcp.client_for(merchant.merchant_id).search_products(
+                "", limit=100
+            )
+            items = result.get("data", {}).get("items", []) if result.get("success") else []
+            embeds.append(build_discord_embed(build_catalog_embed(merchant.name, items)))
+
+        if len(embeds) == 1:
+            await message.channel.send(embed=embeds[0])
+            return
+        await _send_paginated_menu(message.channel, embeds, int(message.author.id))
+
+    async def _render_cart_embed(self, message: Any, cart: list[dict[str, Any]]) -> None:
+        """Federated sibling of BuyerBot._render_cart_embed — multi-store
+        embed, no suggestions (FederatedBuyerBot has no cross-sell path yet,
+        same as its shop-result embed). Shared by `!cart` and show_cart."""
+        if not cart:
+            await message.channel.send(
+                "Nothing's in your cart yet — keep replying to build one, "
+                "or `!shop <something>` to start fresh."
+            )
+            return
+        await message.channel.send(
+            embed=build_discord_embed(build_federated_cart_preview_embed(cart, []))
+        )
+
+    async def _handle_cart(self, message: Any, chat_user_id: str, chat_channel_id: str) -> None:
+        db_session = get_session(self.config)
+        try:
+            sess = find_active_session(db_session, "discord", chat_user_id, chat_channel_id)
+            messages = sess.messages if sess is not None else []
+        finally:
+            db_session.close()
+        await self._render_cart_embed(message, pending_cart_from_messages(messages) or [])
+
+    async def _report_order_status(
+        self, message: Any, chat_platform: str, chat_user_id: str
+    ) -> None:
+        """check_order_status action (S14): federated path — fans out
+        list_orders across every merchant the buyer can reach (there's no
+        local record of which merchant(s) the buyer has actually ordered
+        from), reports the single most recent overall."""
+        merchants = self.agent.mcp.merchants()
+
+        async def _one(merchant: Any) -> tuple[Any, dict[str, Any]]:
+            result = await self.agent.mcp.client_for(merchant.merchant_id).call(
+                "list_orders",
+                {"chat_platform": chat_platform, "chat_user_id": chat_user_id, "limit": 1},
+                require_auth=True,
+            )
+            return merchant, result
+
+        results = await asyncio.gather(*(_one(m) for m in merchants))
+        candidates = [
+            (merchant, orders[0])
+            for merchant, result in results
+            if result.get("success")
+            for orders in [result.get("data", {}).get("orders", [])]
+            if orders
+        ]
+        if not candidates:
+            await message.channel.send("I don't see any orders for you yet.")
+            return
+        merchant, order = max(candidates, key=lambda pair: pair[1]["created_at"] or "")
+        await message.channel.send(_format_order_status(order, merchant.name))
+
+    async def _handle_cancel_request(
+        self, message: Any, chat_platform: str, chat_user_id: str
+    ) -> None:
+        """cancel_order action (S14): federated path — a HELD order at more
+        than one DISTINCT merchant is genuinely ambiguous (unlike the
+        single-merchant path, where "latest" is unambiguous even with
+        multiple holds at the same store) — ask which store rather than
+        guessing which one the buyer means."""
+        merchants = self.agent.mcp.merchants()
+
+        async def _one(merchant: Any) -> tuple[Any, list[dict[str, Any]]]:
+            result = await self.agent.mcp.client_for(merchant.merchant_id).call(
+                "list_orders",
+                {"chat_platform": chat_platform, "chat_user_id": chat_user_id, "limit": 5},
+                require_auth=True,
+            )
+            orders = result.get("data", {}).get("orders", []) if result.get("success") else []
+            return merchant, [o for o in orders if o["state"] == "HELD"]
+
+        results = await asyncio.gather(*(_one(m) for m in merchants))
+        with_held = [(merchant, held) for merchant, held in results if held]
+
+        if not with_held:
+            await message.channel.send("You have no open orders to cancel.")
+            return
+        if len(with_held) > 1:
+            names = ", ".join(merchant.name for merchant, _ in with_held)
+            await message.channel.send(
+                f"You have open orders at more than one store ({names}) — which one do you mean?"
+            )
+            return
+        merchant, held = with_held[0]
+        result = await self.agent.mcp.client_for(merchant.merchant_id).call(
+            "cancel_order",
+            {
+                "checkout_id": held[0]["checkout_id"],
+                "chat_platform": chat_platform,
+                "chat_user_id": chat_user_id,
+            },
+            require_auth=True,
+        )
+        await _report_cancel_result(message, result)
 
 
 async def resume_after_signing(

@@ -198,9 +198,17 @@ def create_payment_link(
                 422,
             )
         if existing_idem.response_status == 200:
+            # Bug (S14): this replay path restored only psp_order_id/
+            # psp_payment_link_id from the cached response, dropping
+            # short_url and cancel_token — the checkout came back "success"
+            # with no way to pay and no way to cancel. _finalize_payment_link_
+            # create (below) stores all four in response_body; a replay must
+            # restore all four too, not a subset.
             existing_resp = existing_idem.response_body
             checkout.psp_order_id = existing_resp.get("psp_order_id")
             checkout.psp_payment_link_id = existing_resp.get("psp_payment_link_id")
+            checkout.short_url = existing_resp.get("short_url")
+            checkout.cancel_token = existing_resp.get("cancel_token") or checkout.cancel_token
             session.add(checkout)
             session.flush()
             return checkout

@@ -213,6 +213,11 @@ class FederatingMCPClient:
                 f"Unknown merchant_id {merchant_id!r}; known merchants: {sorted(self._clients)}"
             ) from None
 
+    def merchants(self) -> list[MerchantOrigin]:
+        """Every merchant this buyer can reach, in registration order —
+        used to list/page a full menu across stores (buyer_agent.py)."""
+        return [client.merchant for client in self._clients.values()]
+
     async def search_products(
         self, query: str, tags: list[str] | None = None, limit: int = 10
     ) -> dict[str, Any]:

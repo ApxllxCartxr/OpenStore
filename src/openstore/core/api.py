@@ -313,6 +313,30 @@ def get_checkout(
     return session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
 
+def list_checkouts_for_buyer(
+    session: Session,
+    chat_platform: str,
+    chat_user_id: str,
+    *,
+    states: list[OrderState] | None = None,
+    limit: int = 20,
+) -> list[Checkout]:
+    """Checkouts belonging to ONE chat identity, newest first — used by the
+    list_orders/cancel_order MCP tools (S14: federated order status/cancel).
+    No existing lookup does this: get_checkout is by id only, and studio.py's
+    admin order listing is unfiltered (operator-only, sees everyone's
+    orders). Scoping by (chat_platform, chat_user_id) is what makes those
+    tools safe for a remote, semi-trusted buyer process to call at all."""
+    query = select(Checkout).where(
+        Checkout.chat_platform == chat_platform,
+        Checkout.chat_user_id == chat_user_id,
+    )
+    if states:
+        query = query.where(Checkout.state.in_(states))  # type: ignore[attr-defined]
+    query = query.order_by(Checkout.created_at.desc()).limit(limit)  # type: ignore[attr-defined]
+    return list(session.exec(query).all())
+
+
 def confirm_checkout(
     config: Settings,
     session: Session,

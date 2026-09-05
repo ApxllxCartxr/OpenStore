@@ -374,6 +374,113 @@ def get_order(
         )
 
 
+def list_orders(
+    config: Settings,
+    session: Any,
+    chat_platform: str,
+    chat_user_id: str,
+    limit: int = 5,
+) -> MCPToolResult:
+    """MCP tool: list_orders (S14). Recent checkouts belonging to ONE chat
+    identity, newest first — read-only, no scope required (matches
+    get_order/list_campaigns). This is what closes the federated buyer's
+    "did my order go through" / "which store has my open order" gap:
+    get_order needs an exact checkout_id, which a remote buyer process
+    never learns on its own."""
+    try:
+        from openstore.core.api import list_checkouts_for_buyer
+
+        checkouts = list_checkouts_for_buyer(session, chat_platform, chat_user_id, limit=limit)
+        return MCPToolResult(
+            success=True,
+            data={
+                "orders": [
+                    {
+                        "checkout_id": c.id,
+                        "state": c.state.value,
+                        "amount_minor": c.amount_minor,
+                        "currency": c.currency,
+                        "created_at": c.created_at.isoformat() if c.created_at else None,
+                    }
+                    for c in checkouts
+                ]
+            },
+        )
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
+def cancel_order(
+    config: Settings,
+    session: Any,
+    trace_id: str,
+    client_id: str,
+    checkout_id: str,
+    chat_platform: str,
+    chat_user_id: str,
+    token_scopes: list[str],
+) -> MCPToolResult:
+    """MCP tool: cancel_order (S14). Wraps the existing cancel_checkout_by_id
+    (psp/razorpay_driver.py — same function POST /hold/{cancel_token}/cancel
+    and the in-process BuyerBot._handle_cancel already use), the first thing
+    this checkout_id-taking path adds that get_order/get_checkout never had:
+    an ownership check. checkout_id is caller-supplied explicitly rather
+    than "find my latest" here — deciding WHICH order across however many
+    merchants a federated buyer reaches is the buyer agent's job (it can see
+    every merchant it's enrolled with; this tool only ever sees one)."""
+    try:
+        _require_scope(token_scopes, "checkout:initiate")
+        from openstore.core.api import get_checkout
+        from openstore.psp.razorpay_driver import RazorpayError, cancel_checkout_by_id
+
+        checkout = get_checkout(
+            session=session, trace_id=trace_id, client_id=client_id, checkout_id=checkout_id
+        )
+        if checkout is None:
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "checkout.not_found",
+                    "message": f"Checkout {checkout_id} not found",
+                },
+            )
+        if checkout.chat_platform != chat_platform or checkout.chat_user_id != chat_user_id:
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "checkout.not_owned",
+                    "message": "This checkout does not belong to the calling identity",
+                },
+            )
+        try:
+            result = cancel_checkout_by_id(
+                config=config,
+                session=session,
+                trace_id=trace_id,
+                client_id=client_id,
+                checkout=checkout,
+            )
+        except RazorpayError as e:
+            return MCPToolResult(
+                success=False, error={"reason_code": e.error_code, "message": e.message}
+            )
+        return MCPToolResult(success=True, data=result)
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
 def get_audit_log(
     config: Settings,
     session: Any,
@@ -773,6 +880,8 @@ TOOL_NAMES = frozenset(
         "get_campaign",
         "resolve_policy",
         "create_policy_handoff",
+        "list_orders",
+        "cancel_order",
     }
 )
 
@@ -947,6 +1056,25 @@ def handle_mcp_request(
             request_text=arguments.get("request_text", ""),
             token_scopes=token_scopes,
             resume_url=arguments.get("resume_url"),
+        )
+    elif tool_name == "list_orders":
+        result = list_orders(
+            config=config,
+            session=session,
+            chat_platform=arguments.get("chat_platform", ""),
+            chat_user_id=arguments.get("chat_user_id", ""),
+            limit=arguments.get("limit", 5),
+        )
+    elif tool_name == "cancel_order":
+        result = cancel_order(
+            config=config,
+            session=session,
+            trace_id=tid,
+            client_id=cid,
+            checkout_id=arguments.get("checkout_id", ""),
+            chat_platform=arguments.get("chat_platform", ""),
+            chat_user_id=arguments.get("chat_user_id", ""),
+            token_scopes=token_scopes,
         )
     else:
         return {

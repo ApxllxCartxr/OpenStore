@@ -253,9 +253,7 @@ def campaign_draft(
     trace_id = f"campaign-draft-{secrets.token_hex(4)}"
 
     with session_scope(config) as session:
-        draft = CampaignAgent(config).draft_campaign(
-            session, mid, calendar_event or None, trace_id
-        )
+        draft = CampaignAgent(config).draft_campaign(session, mid, calendar_event or None, trace_id)
         starts_at = datetime.now(UTC).replace(tzinfo=None)
         campaign = create_campaign(
             session,
@@ -317,7 +315,9 @@ def campaign_list(
         console.print("[yellow]No campaigns.[/yellow]")
         return
     for cid, cstate, title, bps, ends_at in rows:
-        console.print(f"{cid}  [bold]{cstate:<16}[/bold] {bps / 100:>5}%  {title}  (ends {ends_at})")
+        console.print(
+            f"{cid}  [bold]{cstate:<16}[/bold] {bps / 100:>5}%  {title}  (ends {ends_at})"
+        )
 
 
 @campaign_app.command("pause")
@@ -355,6 +355,43 @@ def campaign_expire(
         console.print("[yellow]Nothing due to expire.[/yellow]")
         return
     console.print(f"[green]✓[/green] Expired {len(expired)}: {', '.join(expired)}")
+
+
+@campaign_app.command("check-growth")
+def campaign_check_growth(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+) -> None:
+    """DECISION-034: run the autonomous growth-trigger check once on demand
+    (the server runs it every campaign.growth_check_interval_seconds, default
+    3600s — this is the same check, for testing/demo without waiting)."""
+    from openstore.agents.campaign_agent import auto_draft_campaign_if_stalled
+    from openstore.config import merchant_id as _mid
+    from openstore.core.database import session_scope
+
+    config = _campaign_env(config_path)
+    mid = _mid(config)
+    with session_scope(config) as session:
+        campaign = auto_draft_campaign_if_stalled(session, config, mid)
+        if campaign is None:
+            result = None
+        else:
+            result = (
+                campaign.id,
+                campaign.title,
+                campaign.discount_bps,
+                list(campaign.applies_to_skus),
+                list(campaign.source_signals.get("stalled_skus", [])),
+            )
+
+    if result is None:
+        console.print("[yellow]Nothing stalled — no campaign drafted.[/yellow]")
+        return
+    campaign_id, title, bps, skus, stalled = result
+    console.print(f"[green]✓[/green] Auto-drafted {campaign_id}: {title}")
+    console.print(f"  discount: {bps / 100}%  skus: {', '.join(skus)}")
+    console.print(f"  stalled:  {', '.join(stalled)}")
+    console.print("  state:    PENDING_APPROVAL")
+    console.print("[yellow]Approve it with your passkey at /campaign/studio.[/yellow]")
 
 
 # ----------------------------------------------------------------------- orders
@@ -404,6 +441,57 @@ def catalog_validate(
     console.print(f"[green]✓[/green] {len(items)} item(s) for {_mid(config)}")
     console.print(f"  catalog_path: {config.catalog_path}")
     console.print(f"  digest:       {digest}")
+
+
+@app.command("merchant-bot")
+def merchant_bot_cmd(
+    configs: list[Path] = typer.Argument(..., help="One or more merchant config YAML paths"),
+) -> None:
+    """Start the conversational, read-only MerchantBot (S14/DECISION-028).
+
+    Runs as its OWN process with its OWN Discord identity (env var
+    MERCHANT_BOT_TOKEN — distinct from any merchant's own bot_token, same
+    pattern as BUYER_DISCORD_BOT_TOKEN for the buyer process), reading
+    directly from each merchant's own database. Pass one config for a
+    single-store bot, or several for one bot that reports across all of
+    them.
+    """
+    import os
+
+    from dotenv import load_dotenv
+
+    # Settings.from_yaml() normally triggers this as a side effect of loading
+    # a merchant config — but the token check here runs BEFORE any config is
+    # loaded (fail loud on a missing token before doing anything else), so
+    # .env must be loaded explicitly or MERCHANT_BOT_TOKEN is invisible even
+    # when it's genuinely set there.
+    load_dotenv()
+
+    token = os.environ.get("MERCHANT_BOT_TOKEN")
+    if not token:
+        console.print("[red]MERCHANT_BOT_TOKEN is not set — nothing to log in with.[/red]")
+        raise typer.Exit(1)
+
+    settings_by_name = {}
+    for config_path in configs:
+        cfg = load_config(config_path)
+        settings_by_name[cfg.merchant.name] = cfg
+        console.print(f"[green]✓[/green] Loaded {cfg.merchant.name} ({config_path})")
+
+    import asyncio
+
+    import discord
+
+    from openstore.agents.merchant_bot import MerchantBot
+
+    bot = MerchantBot(settings_by_name)
+    intents = discord.Intents.default()
+    intents.message_content = True  # privileged; enable in the Discord dev portal
+    client = discord.Client(intents=intents)
+    bot.register(client)
+
+    console.print("[blue]Starting merchant bot Discord client...[/blue]")
+    asyncio.run(client.start(token))
 
 
 if __name__ == "__main__":

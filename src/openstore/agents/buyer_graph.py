@@ -41,7 +41,9 @@ _NO_MATCH_AFTER_SEARCH_QUESTION = (
     "about what you're looking for?"
 )
 
-_ACTIONS = frozenset({"search", "ask", "answer"})
+_ACTIONS = frozenset(
+    {"search", "ask", "answer", "show_menu", "show_cart", "check_order_status", "cancel_order"}
+)
 
 
 class BuyerPlanError(Exception):
@@ -65,12 +67,27 @@ class BuyerPlanState(TypedDict):
     # state (not a BuyerGraph instance attribute) because one BuyerGraph is
     # shared across concurrent buyers — an instance attribute would race.
     on_search: NotRequired[Callable[[str], Awaitable[None]] | None]
+    # S18: fired by the show_menu/show_cart actions (free-text "what's on
+    # the menu"/"what's in my cart" — no bang command needed). Same
+    # per-invocation-state reasoning as on_search: these render a Discord
+    # embed as a side effect, but the actual catalog/cart fetch and
+    # rendering live in buyer_agent.py (Discord-specific), not here.
+    on_menu_ready: NotRequired[Callable[[str | None], Awaitable[None]] | None]
+    on_cart_shown: NotRequired[Callable[[list[dict[str, Any]]], Awaitable[None]] | None]
+    # S14: fired by check_order_status/cancel_order (free-text "did my order
+    # go through"/"cancel my order"). Same reasoning as on_menu_ready — the
+    # actual list_orders/cancel_order MCP calls and the buyer's identity
+    # (chat_platform/chat_user_id, which this state doesn't carry at all)
+    # live entirely in buyer_agent.py; these nodes only validate the LLM's
+    # draft and hand off.
+    on_order_status: NotRequired[Callable[[], Awaitable[None]] | None]
+    on_cancel_requested: NotRequired[Callable[[], Awaitable[None]] | None]
 
 
 _SYSTEM_PROMPT = (
     "You are a shopping assistant helping a buyer fulfil a stated goal from a "
-    "merchant's catalog. You have exactly three actions available, and must "
-    "respond with JSON only, matching one of these three shapes:\n"
+    "merchant's catalog. You have exactly seven actions available, and must "
+    "respond with JSON only, matching one of these seven shapes:\n"
     '1. {"action": "search", "query": "<short keyword, e.g. \'vanilla\' or '
     '\'gelato\'>", "tags": ["<optional tag filter>"]} — looks up the catalog. '
     '"query" may ALSO be a list of keywords, e.g. "query": ["vanilla", '
@@ -80,7 +97,13 @@ _SYSTEM_PROMPT = (
     "only get a few search actions per turn). If your first search doesn't "
     "find an exact match, search again with a BROADER term (e.g. the general "
     "category, not the specific flavor) before giving up — you need to "
-    "actually see what's available before you can offer it.\n"
+    "actually see what's available before you can offer it. A search result "
+    'item MAY include "discount_bps" and "campaign_title" — a REAL, already-'
+    "verified live discount on that exact item (never something you add "
+    "yourself). If the buyer asks about offers, deals, or discounts, or if "
+    "an item you're about to mention has one, say so and name the "
+    "campaign_title and the percentage (discount_bps / 100). Items with no "
+    "such field have no active offer — say that plainly, never invent one.\n"
     '2. {"action": "ask", "message": "<plain-text question or offer for the '
     'buyer>"} — use this when nothing you found matches exactly. You may '
     "name a SPECIFIC product in this message ONLY if it literally appeared "
@@ -110,7 +133,33 @@ _SYSTEM_PROMPT = (
     "names something you haven't seen — then respond with a NEW answer "
     "action listing the COMPLETE revised set of selections (not just the "
     "change), which may mean the same cart plus one more item, a swap, fewer "
-    "of something, or something else entirely."
+    "of something, or something else entirely.\n"
+    '4. {"action": "show_menu", "merchant": "<store name, optional>"} — use '
+    "this when the buyer asks what's available, what's on the menu, what a "
+    "store carries, or wants to browse before deciding anything specific. "
+    'Omit "merchant" (or leave it null) to show every store; name one only '
+    "if the buyer named a specific store. This displays the real catalog "
+    "directly (never invent items or prices yourself) and pauses for the "
+    "buyer's next message — you do not need to search first or say "
+    "anything else this turn.\n"
+    '5. {"action": "show_cart"} — use this when the buyer asks what\'s in '
+    "their cart, what they've picked so far, or asks to review the order "
+    "before deciding whether to confirm. This displays whatever cart is "
+    "already pending (empty if nothing's been built yet) and pauses for "
+    "the buyer's next message — never describe cart contents yourself, "
+    "this action shows the real thing.\n"
+    '6. {"action": "check_order_status"} — use this when the buyer asks '
+    "whether their order/payment went through, is still pending, or wants "
+    "an update on an order they already placed. This looks up the real "
+    "order and pauses for the buyer's next message — never guess or state a "
+    "status yourself.\n"
+    '7. {"action": "cancel_order"} — use this ONLY when the buyer clearly '
+    'and explicitly asks to cancel their order or purchase (e.g. "cancel '
+    'my order", "I want to cancel it") — never for a question about '
+    'cancellation policy, a hypothetical ("can I cancel later?"), or '
+    "cancelling the CURRENT in-progress conversation/cart-building (that is "
+    "handled outside you entirely). If genuinely unsure which the buyer "
+    "means, use action 2 (ask) to clarify instead of guessing."
 )
 
 _CART_CONFIRMATION_QUESTION = (
@@ -129,6 +178,7 @@ _AFFIRMATIVE_REPLIES = frozenset(
         "place it",
         "place the order",
         "go ahead",
+        "continue",
         "do it",
         "sounds good",
         "ok",
@@ -222,6 +272,27 @@ def pending_cart_from_messages(messages: list[dict[str, str]]) -> list[dict[str,
         cart = payload.get("cart")
         if isinstance(cart, list):
             return cart
+    return None
+
+
+def _most_recent_cart_ready(messages: list[dict[str, str]]) -> list[dict[str, Any]] | None:
+    """Like pending_cart_from_messages, but scans the whole transcript
+    backward instead of checking only the last message. Needed by show_cart
+    (S18): by the time that node runs, messages[-1] is always the buyer's
+    new reply followed by the LLM's own action JSON for THIS turn — the
+    cart_ready marker from an earlier turn sits further back. A fresh
+    "answer" always appends a new marker superseding the old one, so the
+    most recent match anywhere in the transcript is always the current
+    pending cart."""
+    for msg in reversed(messages):
+        try:
+            payload = json.loads(msg.get("content", ""))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("tool_result") == "cart_ready":
+            cart = payload.get("cart")
+            if isinstance(cart, list):
+                return cart
     return None
 
 
@@ -382,7 +453,16 @@ def _rebuild_search_results_from_messages(
 
     S12: keyed by "merchant_id::sku", not bare sku — merchant_id is already
     serialized into the transcript JSON by _run_search, so this only changes
-    the merge key (no config/merchant_id() call needed here)."""
+    the merge key (no config/merchant_id() call needed here).
+
+    Revision turns ("I also want X"): the prompt tells the model to answer
+    with the COMPLETE revised set, but search-result messages from earlier
+    turns may no longer be in the persisted transcript while the cart_ready
+    marker is. The cart was validated when built and its lines carry
+    server-stamped unit_minor/tags/name, so the most recent pending cart
+    counts as known-good provenance too — otherwise every add-to-cart
+    follow-up fails with hallucinated_sku on its own old lines. Fresh
+    search data wins where both exist."""
     merged: dict[str, dict[str, Any]] = {}
     for msg in messages:
         try:
@@ -393,6 +473,9 @@ def _rebuild_search_results_from_messages(
             for items in payload.get("results", {}).values():
                 for item in items:
                     merged[f"{item['merchant_id']}::{item['sku']}"] = item
+    for line in _most_recent_cart_ready(messages) or []:
+        if isinstance(line, dict) and line.get("merchant_id") and line.get("sku"):
+            merged.setdefault(f"{line['merchant_id']}::{line['sku']}", line)
     return merged
 
 
@@ -482,6 +565,90 @@ def _set_pending_question(state: BuyerPlanState) -> dict[str, Any]:
     return {"pending_question": message}
 
 
+_SHOW_MENU_QUESTION = "Take a look — what would you like?"
+_NOTHING_PICKED_YET_QUESTION = (
+    "You haven't picked anything yet — tell me what you're looking for and I'll build a cart!"
+)
+
+
+async def _show_menu(state: BuyerPlanState) -> dict[str, Any]:
+    """show_menu action (S18): the actual catalog fetch + embed rendering
+    live in buyer_agent.py (Discord-specific) — this node only validates the
+    LLM's draft and fires the callback, same division of labor as on_search."""
+    draft = _parse_agent_action(state["messages"][-1]["content"])
+    merchant_filter = draft.get("merchant")
+    if merchant_filter is not None and not isinstance(merchant_filter, str):
+        raise BuyerPlanError(f"plan: malformed_show_menu_merchant:{merchant_filter!r}")
+    on_menu_ready = state.get("on_menu_ready")
+    if on_menu_ready is not None:
+        await on_menu_ready(merchant_filter or None)
+    shown_message = {"role": "user", "content": json.dumps({"tool_result": "menu_shown"})}
+    return {
+        "messages": [*state["messages"], shown_message],
+        "pending_question": _SHOW_MENU_QUESTION,
+    }
+
+
+async def _show_cart(state: BuyerPlanState) -> dict[str, Any]:
+    """show_cart action (S18): reads whatever cart is already pending from
+    this transcript (_most_recent_cart_ready — messages[-1] here is always
+    this turn's own action JSON, so the plain last-message check
+    pending_cart_from_messages does won't find it) — never state["cart"],
+    so this can never trip continue_shop's cart_signature safety net (which
+    exists to auto-submit an UNCHANGED cart after an unrecognized
+    confirmation) into treating "what's in my cart?" as a confirmation."""
+    cart = _most_recent_cart_ready(state["messages"]) or []
+    on_cart_shown = state.get("on_cart_shown")
+    if on_cart_shown is not None:
+        await on_cart_shown(cart)
+    shown_message = {"role": "user", "content": json.dumps({"tool_result": "cart_shown"})}
+    return {
+        "messages": [*state["messages"], shown_message],
+        "pending_question": _CART_CONFIRMATION_QUESTION if cart else _NOTHING_PICKED_YET_QUESTION,
+    }
+
+
+_ANYTHING_ELSE_QUESTION = "Anything else I can help with?"
+
+
+async def _check_order_status(state: BuyerPlanState) -> dict[str, Any]:
+    """check_order_status action (S14): the actual list_orders fan-out and
+    rendering happen in buyer_agent.py (needs the buyer's chat identity,
+    which this state never carries, and mcp access, which only _run_search
+    touches directly among these nodes) — this node only fires the callback
+    and pauses."""
+    on_order_status = state.get("on_order_status")
+    if on_order_status is not None:
+        await on_order_status()
+    shown_message = {
+        "role": "user",
+        "content": json.dumps({"tool_result": "order_status_shown"}),
+    }
+    return {
+        "messages": [*state["messages"], shown_message],
+        "pending_question": _ANYTHING_ELSE_QUESTION,
+    }
+
+
+async def _cancel_order_action(state: BuyerPlanState) -> dict[str, Any]:
+    """cancel_order action (S14): same division of labor as
+    _check_order_status — buyer_agent.py owns the list_orders fan-out,
+    zero/one/many-HELD-orders branching, and the actual cancel_order MCP
+    call. Never touches state["cart"] (nothing here could ever be mistaken
+    for a cart-confirmation pause)."""
+    on_cancel_requested = state.get("on_cancel_requested")
+    if on_cancel_requested is not None:
+        await on_cancel_requested()
+    shown_message = {
+        "role": "user",
+        "content": json.dumps({"tool_result": "cancel_requested"}),
+    }
+    return {
+        "messages": [*state["messages"], shown_message],
+        "pending_question": _ANYTHING_ELSE_QUESTION,
+    }
+
+
 def _route_after_agent_step(state: BuyerPlanState) -> str:
     draft = _parse_agent_action(state["messages"][-1]["content"])
     action = draft["action"]
@@ -489,6 +656,14 @@ def _route_after_agent_step(state: BuyerPlanState) -> str:
         return "run_search"
     if action == "ask":
         return "set_pending_question"
+    if action == "show_menu":
+        return "show_menu"
+    if action == "show_cart":
+        return "show_cart"
+    if action == "check_order_status":
+        return "check_order_status"
+    if action == "cancel_order":
+        return "cancel_order"
     return "validate_selection"
 
 
@@ -526,6 +701,10 @@ class BuyerGraph:
         graph.add_node("set_pending_question", _set_pending_question)
         graph.add_node("validate_selection", _validate_selection)
         graph.add_node("confirm_cart", _confirm_cart)
+        graph.add_node("show_menu", _show_menu)
+        graph.add_node("show_cart", _show_cart)
+        graph.add_node("check_order_status", _check_order_status)
+        graph.add_node("cancel_order", _cancel_order_action)
 
         graph.add_edge(START, "agent_step")
         graph.add_conditional_edges(
@@ -535,6 +714,10 @@ class BuyerGraph:
                 "run_search": "run_search",
                 "set_pending_question": "set_pending_question",
                 "validate_selection": "validate_selection",
+                "show_menu": "show_menu",
+                "show_cart": "show_cart",
+                "check_order_status": "check_order_status",
+                "cancel_order": "cancel_order",
             },
         )
         graph.add_conditional_edges(
@@ -550,6 +733,10 @@ class BuyerGraph:
         graph.add_edge("give_up_after_cap", END)
         graph.add_edge("set_pending_question", END)
         graph.add_edge("confirm_cart", END)
+        graph.add_edge("show_menu", END)
+        graph.add_edge("show_cart", END)
+        graph.add_edge("check_order_status", END)
+        graph.add_edge("cancel_order", END)
 
         self._graph = graph.compile()
 
@@ -559,6 +746,10 @@ class BuyerGraph:
         policy_id: str,
         trace_id: str,
         on_search: Callable[[str], Awaitable[None]] | None = None,
+        on_menu_ready: Callable[[str | None], Awaitable[None]] | None = None,
+        on_cart_shown: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
+        on_order_status: Callable[[], Awaitable[None]] | None = None,
+        on_cancel_requested: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Runs the agent loop from an arbitrary starting transcript. Used
         directly for a resumed conversation turn; plan() is a thin wrapper
@@ -592,6 +783,10 @@ class BuyerGraph:
             "tool_calls_used": 0,
             "cart": [],
             "on_search": on_search,
+            "on_menu_ready": on_menu_ready,
+            "on_cart_shown": on_cart_shown,
+            "on_order_status": on_order_status,
+            "on_cancel_requested": on_cancel_requested,
         }
         result_state = await self._graph.ainvoke(initial_state)
 
@@ -610,12 +805,23 @@ class BuyerGraph:
         policy_id: str,
         trace_id: str,
         on_search: Callable[[str], Awaitable[None]] | None = None,
+        on_menu_ready: Callable[[str | None], Awaitable[None]] | None = None,
+        on_cart_shown: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
+        on_order_status: Callable[[], Awaitable[None]] | None = None,
+        on_cancel_requested: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         notifier = DiscordNotifier(self.config)
         await notifier.buyer_trace(trace_id, "plan_start", {"goal": goal, "policy_id": policy_id})
 
         result = await self.converse(
-            [{"role": "user", "content": goal}], policy_id, trace_id, on_search
+            [{"role": "user", "content": goal}],
+            policy_id,
+            trace_id,
+            on_search,
+            on_menu_ready,
+            on_cart_shown,
+            on_order_status,
+            on_cancel_requested,
         )
 
         if result.get("awaiting_reply"):
