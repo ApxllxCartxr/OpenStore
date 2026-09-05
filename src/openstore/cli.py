@@ -210,5 +210,201 @@ def federation_register_buyer(
     )
 
 
+# --------------------------------------------------------------------- campaign
+# DECISION-025: the Campaign Orchestrator (PRD Part 9) had no trigger anywhere in
+# src/ — draft_campaign() and create_campaign() had zero callers, so the pipeline
+# could never run. Drafting deliberately gets a CLI command rather than a route:
+# PRD §9.2 makes the merchant a reviewer, not an author.
+campaign_app = typer.Typer(help="Campaign / Offer Orchestrator (PRD Part 9)", no_args_is_help=True)
+app.add_typer(campaign_app, name="campaign")
+
+
+def _campaign_env(config_path: Path) -> Any:
+    from openstore.core.database import apply_migrations
+
+    config = load_config(config_path)
+    apply_migrations(config)
+    return config
+
+
+@campaign_app.command("draft")
+def campaign_draft(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+    calendar_event: str = typer.Option(
+        "", "--calendar-event", help="Upcoming occasion to reason about, e.g. 'Diwali'"
+    ),
+    days: int = typer.Option(7, "--days", help="Length of the offer window in days"),
+) -> None:
+    """Draft a campaign from the aggregated analytics view and park it for approval.
+
+    Ingest → LLM draft → deterministic validate → persist DRAFT → PENDING_APPROVAL.
+    The LLM never publishes: the draft lands in Campaign Studio for a passkey approval.
+    """
+    import secrets
+    from datetime import UTC, datetime, timedelta
+
+    from openstore.agents.campaign_agent import CampaignAgent
+    from openstore.config import merchant_id as _mid
+    from openstore.core.campaigns import create_campaign, submit_for_approval
+    from openstore.core.database import session_scope
+
+    config = _campaign_env(config_path)
+    mid = _mid(config)
+    trace_id = f"campaign-draft-{secrets.token_hex(4)}"
+
+    with session_scope(config) as session:
+        draft = CampaignAgent(config).draft_campaign(
+            session, mid, calendar_event or None, trace_id
+        )
+        starts_at = datetime.now(UTC).replace(tzinfo=None)
+        campaign = create_campaign(
+            session,
+            config,
+            merchant_id=mid,
+            title=draft["title"],
+            rationale=draft["rationale"],
+            discount_bps=draft["discount_bps"],
+            applies_to_skus=draft["applies_to_skus"],
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(days=days),
+            source_signals=draft["source_signals"],
+            trace_id=trace_id,
+        )
+        submit_for_approval(session, campaign.id, trace_id)
+        campaign_id, title, bps, skus = (
+            campaign.id,
+            campaign.title,
+            campaign.discount_bps,
+            list(campaign.applies_to_skus),
+        )
+
+    console.print(f"[green]✓[/green] Drafted {campaign_id}: {title}")
+    console.print(f"  discount: {bps / 100}%  skus: {', '.join(skus)}")
+    console.print("  state:    PENDING_APPROVAL")
+    console.print("[yellow]Approve it with your passkey at /campaign/studio.[/yellow]")
+
+
+@campaign_app.command("list")
+def campaign_list(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+    state: str = typer.Option("", "--state", help="Filter by campaign state"),
+) -> None:
+    """List campaigns and their states."""
+    from sqlmodel import select
+
+    from openstore.core.database import session_scope
+    from openstore.models import Campaign, CampaignState
+
+    config = _campaign_env(config_path)
+
+    if state and state not in CampaignState.__members__:
+        # R0.3: an unknown enum value is a hard error, never a silent empty result.
+        raise typer.BadParameter(
+            f"unknown campaign state {state!r}; expected one of "
+            f"{', '.join(CampaignState.__members__)}"
+        )
+
+    with session_scope(config) as session:
+        query = select(Campaign)
+        if state:
+            query = query.where(Campaign.state == CampaignState[state])
+        rows = [
+            (c.id, c.state.value, c.title, c.discount_bps, c.ends_at)
+            for c in session.exec(query).all()
+        ]
+
+    if not rows:
+        console.print("[yellow]No campaigns.[/yellow]")
+        return
+    for cid, cstate, title, bps, ends_at in rows:
+        console.print(f"{cid}  [bold]{cstate:<16}[/bold] {bps / 100:>5}%  {title}  (ends {ends_at})")
+
+
+@campaign_app.command("pause")
+def campaign_pause(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+    campaign_id: str = typer.Argument(..., help="Campaign to pause"),
+) -> None:
+    """Pause an ACTIVE campaign, dropping it out of the offer feed."""
+    from openstore.core.campaigns import CampaignValidationError, pause_campaign
+    from openstore.core.database import session_scope
+
+    config = _campaign_env(config_path)
+    try:
+        with session_scope(config) as session:
+            pause_campaign(session, campaign_id, f"campaign:{campaign_id}")
+    except CampaignValidationError as e:
+        console.print(f"[red]✗[/red] {e.reason_code}: {e.message}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]✓[/green] Paused {campaign_id}")
+
+
+@campaign_app.command("expire")
+def campaign_expire(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+) -> None:
+    """Run the PRD §9.4 expiry sweep once (the server runs it every 60s)."""
+    from openstore.core.campaigns import expire_campaigns_due
+    from openstore.core.database import session_scope
+
+    config = _campaign_env(config_path)
+    with session_scope(config) as session:
+        expired = [c.id for c in expire_campaigns_due(session)]
+
+    if not expired:
+        console.print("[yellow]Nothing due to expire.[/yellow]")
+        return
+    console.print(f"[green]✓[/green] Expired {len(expired)}: {', '.join(expired)}")
+
+
+# ----------------------------------------------------------------------- orders
+@app.command("orders")
+def orders(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+    limit: int = typer.Option(20, "--limit", "-n"),
+) -> None:
+    """List recent checkouts with their state and evidence availability."""
+    from sqlmodel import select
+
+    from openstore.core.database import session_scope
+    from openstore.models import Checkout
+
+    config = _campaign_env(config_path)
+    with session_scope(config) as session:
+        rows = [
+            (c.id, str(getattr(c.state, "value", c.state)), c.amount_minor, bool(c.poai_bundle))
+            for c in session.exec(
+                select(Checkout).order_by(Checkout.created_at.desc()).limit(limit)  # type: ignore[attr-defined]
+            ).all()
+        ]
+
+    if not rows:
+        console.print("[yellow]No orders.[/yellow]")
+        return
+    for cid, cstate, amount, has_evidence in rows:
+        mark = "evidence" if has_evidence else "—"
+        console.print(f"{cid}  [bold]{cstate:<12}[/bold] ₹{amount / 100:>10.2f}  {mark}")
+
+
+@app.command("catalog-validate")
+def catalog_validate(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+) -> None:
+    """Load the catalog, compute its digest, and build its attestation.
+
+    Catches a malformed or missing catalog before the feed serves it, rather than
+    at the first agent request.
+    """
+    from openstore.config import merchant_id as _mid
+    from openstore.surfaces.catalog import compute_catalog_digest, load_catalog
+
+    config = load_config(config_path)
+    items = load_catalog(config)
+    digest = compute_catalog_digest(config)
+    console.print(f"[green]✓[/green] {len(items)} item(s) for {_mid(config)}")
+    console.print(f"  catalog_path: {config.catalog_path}")
+    console.print(f"  digest:       {digest}")
+
+
 if __name__ == "__main__":
     app()
