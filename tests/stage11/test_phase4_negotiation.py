@@ -828,7 +828,10 @@ class TestConversationalShopping:
         _register_queued_provider(
             monkeypatch,
             "test_conv_cap",
-            [{"action": "ask", "message": f"still not sure, round {i}"} for i in range(10)],
+            [
+                {"action": "ask", "message": f"still not sure, round {i}"}
+                for i in range(MAX_CONVERSATION_TURNS)
+            ],
         )
         mcp = _SimpleMCPClient([])
         bot = BuyerBot(settings, BuyerAgent(settings, mcp))
@@ -952,3 +955,59 @@ class TestConversationalShopping:
             db.close()
         assert row.state == ShoppingSessionState.CANCELLED
         assert mcp.create_cart_calls == []
+
+
+class TestMenuAndCartSingleMerchant:
+    """!menu/!cart on the single-merchant BuyerBot (FederatedBuyerBot's base
+    class, used directly by an in-process single-merchant deployment)."""
+
+    async def test_menu_shows_this_merchants_catalog(self, settings, session):
+        catalog_items = [{"name": "Widget", "unit_minor": 10000, "tags": ["gadget"]}]
+        mcp = _SimpleMCPClient(catalog_items)
+        bot = BuyerBot(settings, BuyerAgent(settings, mcp))
+        message = _FakeMessage(author_id=900010, channel_id=800010)
+
+        await bot._handle_menu(message, None)
+
+        assert len(message.channel.embeds_sent) == 1
+        assert message.channel.embeds_sent[0].title == "Test Merchant menu"
+
+    async def test_menu_with_a_mismatched_store_name_says_so(self, settings, session):
+        mcp = _SimpleMCPClient([])
+        bot = BuyerBot(settings, BuyerAgent(settings, mcp))
+        message = _FakeMessage(author_id=900011, channel_id=800011)
+
+        await bot._handle_menu(message, "some other store")
+
+        assert message.channel.embeds_sent == []
+        assert any("Test Merchant" in s for s in message.channel.sent)
+
+    async def test_cart_reflects_the_parked_confirmation_cart(self, settings, session):
+        import json
+
+        from openstore.core.shopping_session import create_session
+
+        cart = [{"sku": "sku-a", "qty": 2, "name": "Widget", "unit_minor": 10000}]
+        cart_ready = {
+            "role": "user",
+            "content": json.dumps({"tool_result": "cart_ready", "cart": cart}),
+        }
+        create_session(
+            session,
+            chat_platform="discord",
+            chat_user_id="900012",
+            chat_channel_id="800012",
+            policy_id="pol_1",
+            trace_id="trace_cart_single",
+            goal="widgets",
+            messages=[cart_ready],
+        )
+        session.commit()
+
+        mcp = _SimpleMCPClient([])
+        bot = BuyerBot(settings, BuyerAgent(settings, mcp))
+        message = _FakeMessage(author_id=900012, channel_id=800012)
+
+        await bot._handle_cart(message, "900012", "800012")
+
+        assert len(message.channel.embeds_sent) == 1

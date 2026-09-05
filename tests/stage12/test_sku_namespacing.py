@@ -219,6 +219,77 @@ class _PrestampedMCPClient:
         }
 
 
+async def test_revision_turn_keeps_pending_cart_provenance(config, monkeypatch):
+    """Regression (live Discord failure): a pending cart holds biscuit_parle
+    from an earlier turn whose search message is no longer in the persisted
+    transcript. The buyer says "I also want samosa" — the model searches
+    samosa and answers with the COMPLETE revised set, as the prompt
+    instructs. The old line must validate against the cart_ready marker
+    instead of raising hallucinated_sku."""
+    import json as _json
+
+    _register_queued_provider(
+        monkeypatch,
+        "test_sku_ns_revision",
+        [
+            {"action": "search", "query": "samosa"},
+            {
+                "action": "answer",
+                "selections": [
+                    {"sku": "biscuit_parle", "merchant_id": "chai-house", "qty": 1},
+                    {"sku": "samosa_aloo", "merchant_id": "chai-house", "qty": 1},
+                ],
+            },
+        ],
+    )
+
+    class _SamosaOnlyMCPClient:
+        async def search_products(self, query, tags=None, limit=20):
+            return {
+                "success": True,
+                "data": {
+                    "items": [
+                        {
+                            "sku": "samosa_aloo",
+                            "name": "Aloo Samosa",
+                            "unit_minor": 15000,
+                            "tags": ["snack"],
+                            "merchant_id": "chai-house",
+                        }
+                    ]
+                },
+            }
+
+        async def list_campaigns(self):
+            return {"success": True, "data": {"campaigns": []}}
+
+    pending_cart = [
+        {
+            "sku": "biscuit_parle",
+            "merchant_id": "chai-house",
+            "qty": 1,
+            "unit_minor": 2000,
+            "tags": ["snack"],
+            "name": "Parle-G Biscuits",
+        }
+    ]
+    messages = [
+        {"role": "user", "content": "a biscuit please"},
+        {
+            "role": "user",
+            "content": _json.dumps({"tool_result": "cart_ready", "cart": pending_cart}),
+        },
+        {"role": "user", "content": "I also want samosa"},
+    ]
+    graph = BuyerGraph(config, _SamosaOnlyMCPClient())
+    result = await graph.converse(messages, "p_001", "trace_ns_revision")
+    assert result["awaiting_reply"] is True
+    skus = sorted(line["sku"] for line in result["cart"])
+    assert skus == ["biscuit_parle", "samosa_aloo"]
+    biscuit = next(line for line in result["cart"] if line["sku"] == "biscuit_parle")
+    assert biscuit["unit_minor"] == 2000  # server-stamped, not LLM-supplied
+
+
 async def test_search_does_not_need_a_single_merchant_config_when_items_are_stamped():
     """Regression: the buyer process runs on a BuyerSettings, which has
     `merchants` (plural) and NO `merchant`. Resolving the single-merchant

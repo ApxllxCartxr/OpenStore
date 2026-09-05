@@ -94,6 +94,18 @@ def test_registry_reason_codes_complete():
         "campaign.webauthn_verification_failed",
         "campaign.max_active_exceeded",
         "campaign.invalid_state_transition",
+        # DECISION-027: list_orders/cancel_order (S14) reuse checkout.not_found
+        # (already raised by get_order, itself never registered — same class
+        # of gap as campaign.* above, scoped narrowly to what this pair
+        # touches) and psp.invalid_state (cancel_checkout_by_id, likewise
+        # pre-existing and unregistered); checkout.not_owned is new.
+        "checkout.not_found",
+        "checkout.not_owned",
+        "psp.invalid_state",
+        # cancel_order's _require_scope("checkout:initiate") call raises this —
+        # already used by create_cart/update_cart/checkout_initiate/checkout_confirm,
+        # also unregistered until now.
+        "auth.insufficient_scope",
     }
 
     actual = set(registry["reason_codes"])
@@ -123,6 +135,8 @@ def test_registry_mcp_tools_complete():
         "get_campaign",
         "resolve_policy",
         "create_policy_handoff",
+        "list_orders",
+        "cancel_order",
     }
 
     actual = set(registry["mcp_tools"])

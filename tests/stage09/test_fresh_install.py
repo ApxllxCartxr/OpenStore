@@ -57,6 +57,7 @@ def fresh_settings(tmp_path: Path) -> Settings:
 @pytest.fixture()
 def fresh_client(fresh_settings: Settings) -> TestClient:
     import openstore.core.database as db_mod
+
     db_mod._engine = None
     init_database(fresh_settings)
     app = create_app(fresh_settings)
@@ -163,6 +164,15 @@ class TestInstallContract:
         assert r.status_code == 200
         assert "Campaign Studio" in r.text
 
+    def test_campaign_studio_page_accepts_operator_as_query_param(self, fresh_client: TestClient):
+        """S14: a plain browser navigation can't set a custom header, so the
+        header-only gate meant this page could never be opened by clicking a
+        link — only by a JS-driven fetch. operator_id carries no authority of
+        its own (_Operator's docstring); a query param is just as safe."""
+        r = fresh_client.get("/campaign/studio?operator=op_1")
+        assert r.status_code == 200
+        assert "Campaign Studio" in r.text
+
     def test_healthz(self, fresh_client: TestClient):
         r = fresh_client.get("/healthz")
         assert r.status_code == 200
@@ -176,6 +186,7 @@ class TestInstallContract:
         """Razorpay live-mode keys must not be usable (S5 / PRD §4)."""
         fresh_settings.razorpay.key_id = "rzp_live_XYZ"
         from openstore.psp.razorpay_driver import RazorpayError, assert_test_mode_key
+
         with pytest.raises(RazorpayError) as ei:
             assert_test_mode_key(fresh_settings.razorpay.key_id)
         assert "live_key_forbidden" in ei.value.error_code
@@ -186,18 +197,25 @@ class TestRazorpayTestModeConstants:
 
     def test_duplicate_reference_id_error_code_pinned(self):
         from openstore.psp.razorpay_driver import RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE
+
         # Source: captured against live Razorpay test-mode API
         # scripts/capture_constants.py run against api.razorpay.com
         assert RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE == "REFERENCE_ID_ALREADY_EXISTS"
 
     def test_cancel_already_paid_http_status_pinned(self):
         from openstore.psp.razorpay_driver import RAZORPAY_CANCEL_ALREADY_PAID_HTTP_STATUS
+
         assert RAZORPAY_CANCEL_ALREADY_PAID_HTTP_STATUS == 400
 
     def test_handled_webhook_events_closed_set(self):
         from openstore.psp.razorpay_driver import HANDLED_WEBHOOK_EVENTS
-        expected = {"payment_link.paid", "payment_link.cancelled",
-                    "payment_link.partially_paid", "payment.failed"}
+
+        expected = {
+            "payment_link.paid",
+            "payment_link.cancelled",
+            "payment_link.partially_paid",
+            "payment.failed",
+        }
         assert HANDLED_WEBHOOK_EVENTS == expected
 
 
@@ -263,6 +281,7 @@ class TestVerifyCLI:
             bundle_exit_code,
             run_all_checks,
         )
+
         ctx = VerifierContext(bundle=bundle)
         results = run_all_checks(ctx)
         exit_code = bundle_exit_code(results)
@@ -282,6 +301,7 @@ class TestVerifyCLI:
         bad.write_text("{not json}")
 
         from openstore.verify.cli import _load_bundle
+
         try:
             _load_bundle(bad)
         except (SystemExit, ClickExit) as e:

@@ -30,7 +30,7 @@ from openstore.core.ledger import create_reserve_entry
 from openstore.models import Checkout, IdempotencyKey, OrderState
 from openstore.psp import razorpay_driver as driver
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "GOLDEN" / "razorpay"
+GOLDEN_DIR = Path(__file__).resolve().parents[1] / "GOLDEN" / "razorpay"
 
 WEBHOOK_SECRET = "whsec_test_replay"
 
@@ -107,7 +107,9 @@ def _make_held_checkout(session, *, link_id: str, amount_minor: int = 21000) -> 
     return checkout
 
 
-def _seed_pending_intent(session, *, checkout_id: str, trace_id: str, client_id: str) -> IdempotencyKey:
+def _seed_pending_intent(
+    session, *, checkout_id: str, trace_id: str, client_id: str
+) -> IdempotencyKey:
     """Simulate the first INV-4 commit: IdempotencyKey(IN_FLIGHT, response_status=0).
 
     A crash after BEGIN/write/PspIntent(PENDING)/COMMIT leaves exactly this row
@@ -197,7 +199,9 @@ def test_recovery_rejects_when_reference_id_not_findable(psp_session):
     checkout = _make_held_checkout(psp_session, link_id="plink_CRASH_UNRECOVERABLE")
     trace_id = "trace_crash_unrec"
     client_id = "oc_test"
-    _seed_pending_intent(psp_session, checkout_id=checkout.id, trace_id=trace_id, client_id=client_id)
+    _seed_pending_intent(
+        psp_session, checkout_id=checkout.id, trace_id=trace_id, client_id=client_id
+    )
 
     mock_client = MagicMock()
     mock_client.payment_link.create.side_effect = _duplicate_error()
@@ -215,3 +219,54 @@ def test_recovery_rejects_when_reference_id_not_findable(psp_session):
             mock_razorpay=mock_client,
         )
     assert ei.value.error_code == "psp.duplicate_unrecoverable"
+
+
+def test_idempotent_replay_restores_short_url_and_cancel_token(psp_session):
+    """Bug (S14): a second create_payment_link call with the SAME
+    (trace_id, client_id, checkout_id) — a legitimate idempotent replay, not
+    a crash — used to restore only psp_order_id/psp_payment_link_id from
+    the cached response, silently dropping short_url and cancel_token. The
+    checkout came back HELD with "success" and no way to pay or cancel."""
+    checkout = _make_held_checkout(psp_session, link_id="plink_REPLAY")
+    trace_id = "trace_replay"
+    client_id = "oc_test"
+
+    mock_client = MagicMock()
+    mock_client.payment_link.create.return_value = {
+        "id": "plink_REPLAY_REAL",
+        "reference_id": checkout.id,
+        "status": "created",
+        "short_url": "https://rzp.io/i/replay_real",
+    }
+
+    first = driver.create_payment_link(
+        config=_config(),
+        session=psp_session,
+        trace_id=trace_id,
+        client_id=client_id,
+        checkout_id=checkout.id,
+        amount_minor=21000,
+        currency="INR",
+        mock_razorpay=mock_client,
+    )
+    psp_session.commit()
+    assert first.short_url == "https://rzp.io/i/replay_real"
+    assert first.cancel_token
+
+    # Same trace_id/client_id/checkout_id/amount/currency -> same idempotency
+    # key -> hits the response_status==200 replay branch, NOT a fresh create.
+    replayed = driver.create_payment_link(
+        config=_config(),
+        session=psp_session,
+        trace_id=trace_id,
+        client_id=client_id,
+        checkout_id=checkout.id,
+        amount_minor=21000,
+        currency="INR",
+        mock_razorpay=mock_client,
+    )
+    psp_session.commit()
+
+    mock_client.payment_link.create.assert_called_once()  # replay never re-hit Razorpay
+    assert replayed.short_url == "https://rzp.io/i/replay_real"
+    assert replayed.cancel_token == first.cancel_token

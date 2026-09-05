@@ -796,6 +796,282 @@ class TestBuyerGraph:
         assert len(mcp.create_cart_calls) == 1
 
 
+class TestShowMenuAndShowCartActions:
+    """S18: free-text "what's on the menu"/"what's in my cart" — the LLM
+    picks show_menu/show_cart, Python fetches/renders the real thing via a
+    callback (never the LLM narrating prices), then pauses for the next
+    reply. No bang command needed."""
+
+    async def test_show_menu_fires_the_callback_with_no_filter(self, config, monkeypatch):
+        from openstore.agents.buyer_graph import BuyerGraph
+
+        _register_queued_provider(monkeypatch, "test_show_menu", [{"action": "show_menu"}])
+        graph = BuyerGraph(config, _MultiItemMCPClient())
+
+        seen: list[str | None] = []
+
+        async def _on_menu_ready(merchant_filter: str | None) -> None:
+            seen.append(merchant_filter)
+
+        result = await graph.converse(
+            [{"role": "user", "content": "what's on the menu?"}],
+            "p_001",
+            "trace_menu",
+            on_menu_ready=_on_menu_ready,
+        )
+
+        assert seen == [None]
+        assert result["awaiting_reply"] is True
+        assert result["cart"] == []
+        assert "menu_shown" in result["messages"][-1]["content"]
+
+    async def test_show_menu_passes_through_a_named_store(self, config, monkeypatch):
+        from openstore.agents.buyer_graph import BuyerGraph
+
+        _register_queued_provider(
+            monkeypatch,
+            "test_show_menu_store",
+            [{"action": "show_menu", "merchant": "Chai House"}],
+        )
+        graph = BuyerGraph(config, _MultiItemMCPClient())
+
+        seen: list[str | None] = []
+
+        async def _on_menu_ready(merchant_filter: str | None) -> None:
+            seen.append(merchant_filter)
+
+        await graph.converse(
+            [{"role": "user", "content": "what does chai house have?"}],
+            "p_001",
+            "trace_menu2",
+            on_menu_ready=_on_menu_ready,
+        )
+
+        assert seen == ["Chai House"]
+
+    async def test_show_menu_with_a_non_string_merchant_fails_loud(self, config, monkeypatch):
+        from openstore.agents.buyer_graph import BuyerGraph, BuyerPlanError
+
+        _register_queued_provider(
+            monkeypatch, "test_show_menu_bad", [{"action": "show_menu", "merchant": 123}]
+        )
+        graph = BuyerGraph(config, _MultiItemMCPClient())
+
+        with pytest.raises(BuyerPlanError):
+            await graph.converse([{"role": "user", "content": "menu?"}], "p_001", "trace_menu3")
+
+    async def test_show_cart_with_nothing_pending_shows_an_empty_cart(self, config, monkeypatch):
+        from openstore.agents.buyer_graph import BuyerGraph
+
+        _register_queued_provider(monkeypatch, "test_show_cart_empty", [{"action": "show_cart"}])
+        graph = BuyerGraph(config, _MultiItemMCPClient())
+
+        seen: list[list] = []
+
+        async def _on_cart_shown(cart: list) -> None:
+            seen.append(cart)
+
+        result = await graph.converse(
+            [{"role": "user", "content": "what's in my cart?"}],
+            "p_001",
+            "trace_cart1",
+            on_cart_shown=_on_cart_shown,
+        )
+
+        assert seen == [[]]
+        assert result["awaiting_reply"] is True
+        assert "haven't picked anything" in result["question"]
+
+    async def test_show_cart_echoes_the_already_pending_cart(self, config, monkeypatch):
+        from openstore.agents.buyer_graph import BuyerGraph
+
+        cart = [
+            {
+                "sku": "gelato_pistachio",
+                "merchant_id": "test-merchant",
+                "qty": 2,
+                "unit_minor": 18000,
+                "tags": ["pistachio"],
+                "name": "gelato_pistachio",
+            }
+        ]
+        import json as _json
+
+        cart_ready_message = {
+            "role": "user",
+            "content": _json.dumps({"tool_result": "cart_ready", "cart": cart}),
+        }
+
+        _register_queued_provider(monkeypatch, "test_show_cart_pending", [{"action": "show_cart"}])
+        graph = BuyerGraph(config, _MultiItemMCPClient())
+
+        seen: list[list] = []
+
+        async def _on_cart_shown(shown_cart: list) -> None:
+            seen.append(shown_cart)
+
+        result = await graph.converse(
+            [cart_ready_message, {"role": "user", "content": "wait, what's in my cart again?"}],
+            "p_001",
+            "trace_cart2",
+            on_cart_shown=_on_cart_shown,
+        )
+
+        assert seen == [cart]
+        assert result["awaiting_reply"] is True
+        assert 'reply "yes"' in result["question"]
+
+    async def test_show_cart_never_trips_the_auto_submit_safety_net(self, config, monkeypatch):
+        """Regression guard: continue_shop's cart_signature safety net exists
+        to auto-submit a cart that came back UNCHANGED after an unrecognized
+        confirmation. show_cart legitimately returns the transcript
+        unchanged too — it must never be mistaken for that and silently
+        place the order."""
+        from openstore.agents.buyer_agent import BuyerAgent
+
+        cart = [
+            {
+                "sku": "gelato_pistachio",
+                "merchant_id": "test-merchant",
+                "qty": 2,
+                "unit_minor": 18000,
+                "tags": ["pistachio"],
+                "name": "gelato_pistachio",
+            }
+        ]
+        import json as _json
+
+        cart_ready_message = {
+            "role": "user",
+            "content": _json.dumps({"tool_result": "cart_ready", "cart": cart}),
+        }
+
+        class _SpyMCPClient(_MultiItemMCPClient):
+            def __init__(self):
+                self.create_cart_calls: list = []
+
+            async def call(self, tool_name, arguments):
+                if tool_name == "create_cart":
+                    self.create_cart_calls.append(arguments)
+                raise AssertionError("checkout must not be reached from show_cart")
+
+        _register_queued_provider(
+            monkeypatch, "test_show_cart_no_submit", [{"action": "show_cart"}]
+        )
+        mcp = _SpyMCPClient()
+        agent = BuyerAgent(config, mcp)
+
+        result = await agent.continue_shop(
+            [cart_ready_message], "what's in my cart?", "p_001", "trace_cart3"
+        )
+
+        assert result.get("awaiting_reply") is True
+        assert mcp.create_cart_calls == []
+
+
+class TestCheckOrderStatusAndCancelOrderActions:
+    """S14: free-text "did my order go through"/"cancel my order" — both
+    actions only validate the LLM's draft and fire a callback; the actual
+    list_orders/cancel_order MCP calls live in buyer_agent.py (needs chat
+    identity, which BuyerPlanState never carries)."""
+
+    async def test_check_order_status_fires_the_callback(self, config, monkeypatch):
+        from openstore.agents.buyer_graph import BuyerGraph
+
+        _register_queued_provider(
+            monkeypatch, "test_check_order_status", [{"action": "check_order_status"}]
+        )
+        graph = BuyerGraph(config, _MultiItemMCPClient())
+
+        calls = 0
+
+        async def _on_order_status() -> None:
+            nonlocal calls
+            calls += 1
+
+        result = await graph.converse(
+            [{"role": "user", "content": "did my order go through?"}],
+            "p_001",
+            "trace_status",
+            on_order_status=_on_order_status,
+        )
+
+        assert calls == 1
+        assert result["awaiting_reply"] is True
+        assert result["cart"] == []
+
+    async def test_cancel_order_fires_the_callback(self, config, monkeypatch):
+        from openstore.agents.buyer_graph import BuyerGraph
+
+        _register_queued_provider(
+            monkeypatch, "test_cancel_order_action", [{"action": "cancel_order"}]
+        )
+        graph = BuyerGraph(config, _MultiItemMCPClient())
+
+        calls = 0
+
+        async def _on_cancel_requested() -> None:
+            nonlocal calls
+            calls += 1
+
+        result = await graph.converse(
+            [{"role": "user", "content": "cancel my order"}],
+            "p_001",
+            "trace_cancel_action",
+            on_cancel_requested=_on_cancel_requested,
+        )
+
+        assert calls == 1
+        assert result["awaiting_reply"] is True
+        assert result["cart"] == []
+
+    async def test_cancel_order_never_touches_a_pending_cart(self, config, monkeypatch):
+        """Regression guard mirroring show_cart's: cancel_order must never
+        populate state["cart"], or continue_shop's cart_signature safety net
+        (which auto-submits a cart that came back unchanged after an
+        unrecognized confirmation) could misfire on "cancel my order"."""
+        from openstore.agents.buyer_agent import BuyerAgent
+
+        cart = [
+            {
+                "sku": "gelato_pistachio",
+                "merchant_id": "test-merchant",
+                "qty": 2,
+                "unit_minor": 18000,
+                "tags": ["pistachio"],
+                "name": "gelato_pistachio",
+            }
+        ]
+        import json as _json
+
+        cart_ready_message = {
+            "role": "user",
+            "content": _json.dumps({"tool_result": "cart_ready", "cart": cart}),
+        }
+
+        class _SpyMCPClient(_MultiItemMCPClient):
+            def __init__(self):
+                self.create_cart_calls: list = []
+
+            async def call(self, tool_name, arguments):
+                if tool_name == "create_cart":
+                    self.create_cart_calls.append(arguments)
+                raise AssertionError("checkout must not be reached from cancel_order")
+
+        _register_queued_provider(
+            monkeypatch, "test_cancel_no_submit", [{"action": "cancel_order"}]
+        )
+        mcp = _SpyMCPClient()
+        agent = BuyerAgent(config, mcp)
+
+        result = await agent.continue_shop(
+            [cart_ready_message], "cancel my order", "p_001", "trace_cancel_no_submit"
+        )
+
+        assert result.get("awaiting_reply") is True
+        assert mcp.create_cart_calls == []
+
+
 class TestBuyerAgent:
     async def test_start_shop_returns_awaiting_reply_without_touching_create_cart(
         self, config, monkeypatch

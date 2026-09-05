@@ -279,6 +279,14 @@ async def test_unenrolled_merchant_surfaces_signing_link_no_checkout(config: Set
     assert result["awaiting_reply"] is True
     assert "https://store-a.example/intent/studio?token=tok-store-a" in result["question"]
     assert [c[0] for c in client_a.calls] == ["resolve_policy", "create_policy_handoff"]
+    # Regression: this used to return "messages": [] here, silently discarding
+    # the buyer's already-confirmed cart. Once signing completed there was
+    # nothing left to resume from — the buyer's next reply reached the LLM
+    # with zero context. The cart must survive as the same tool_result marker
+    # _confirm_cart uses, so pending_cart_from_messages() finds it again.
+    from openstore.agents.buyer_graph import pending_cart_from_messages
+
+    assert pending_cart_from_messages(result["messages"]) == cart
 
 
 @pytest.mark.asyncio

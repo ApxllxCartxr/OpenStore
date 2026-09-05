@@ -26,15 +26,19 @@ class _FakeMCP:
     """One merchant, one SKU, one live campaign covering it."""
 
     def __init__(self, campaigns: list[dict[str, Any]] | None = None, success: bool = True):
-        self._campaigns = campaigns if campaigns is not None else [
-            {
-                "campaign_id": "camp_live",
-                "merchant_id": "gelateria-milano",
-                "title": "Pistachio push",
-                "discount_bps": 1500,
-                "applies_to_skus": ["gelato_pistachio"],
-            }
-        ]
+        self._campaigns = (
+            campaigns
+            if campaigns is not None
+            else [
+                {
+                    "campaign_id": "camp_live",
+                    "merchant_id": "gelateria-milano",
+                    "title": "Pistachio push",
+                    "discount_bps": 1500,
+                    "applies_to_skus": ["gelato_pistachio"],
+                }
+            ]
+        )
         self._success = success
         self.list_calls = 0
 
@@ -127,6 +131,33 @@ async def test_cart_line_carries_the_campaign_python_attached(config, monkeypatc
     assert cart["gelato_pistachio"]["discount_bps"] == 1500
     # A SKU the campaign does not cover carries no campaign at all.
     assert "campaign_id" not in cart["gelato_vanilla"]
+
+
+async def test_search_tool_result_carries_the_discount_before_any_selection(config, monkeypatch):
+    """Bug found live: the discount data was reaching this far correctly all
+    along (this test), but nothing in the system prompt ever told the LLM to
+    look at or mention discount_bps/campaign_title — asked directly "any
+    offers on gelato?" it said no, despite the search tool_result it had
+    just seen carrying discount_bps=1500 on that exact item. Pins the data
+    side so a future change can't silently break it too."""
+    _queue_provider(
+        monkeypatch,
+        "demand_loop_search_visible",
+        [
+            {"action": "search", "query": "gelato"},
+            {"action": "ask", "message": "placeholder — only the search step is checked"},
+        ],
+    )
+    mcp = _FakeMCP()
+    result = await BuyerGraph(config, mcp).converse(
+        [{"role": "user", "content": "any offers on gelato?"}], "p_1", "trace_demand_search"
+    )
+
+    search_tool_result = json.loads(result["messages"][-2]["content"])
+    items = search_tool_result["results"]["gelato"]
+    by_sku = {item["sku"]: item for item in items}
+    assert by_sku["gelato_pistachio"]["discount_bps"] == 1500
+    assert by_sku["gelato_pistachio"]["campaign_id"] == "camp_live"
 
 
 async def test_llm_cannot_invent_a_campaign(config, monkeypatch):
@@ -235,7 +266,9 @@ def test_compiler_discounts_a_cart_that_carries_a_live_campaign(session, config_
     assert result.allowed is True, result.reason_code
     # 2 x 18000 = 36000, less 15% = 30600
     assert result.effective_amount_minor == 30600
-    assert any(c["check"] == "campaign_validity" and c["result"] == "pass" for c in result.transcript)
+    assert any(
+        c["check"] == "campaign_validity" and c["result"] == "pass" for c in result.transcript
+    )
 
 
 @pytest.mark.parametrize("state", ["DRAFT", "PENDING_APPROVAL", "PAUSED", "EXPIRED"])
@@ -291,7 +324,9 @@ def test_active_but_out_of_window_is_not_listed(session, config_with_catalog):
     assert list_campaigns(config_with_catalog, session, "gelateria-milano").data["campaigns"] == []
 
 
-def test_catalog_feed_publishes_approved_offers(session, config_with_catalog, enrol_approver, approve_campaign):
+def test_catalog_feed_publishes_approved_offers(
+    session, config_with_catalog, enrol_approver, approve_campaign
+):
     """PRD §9.2 stage 5: publish 'to catalog item offers[]'. The field was
     normalized on load since S6.5 and never written by anything."""
     from openstore.surfaces.catalog import serve_catalog_feed
