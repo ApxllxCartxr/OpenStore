@@ -1,9 +1,9 @@
 # OpenStore
 
-**Give your store an AI-agent sales channel — with spending rules a human signs, money an AI can never touch, and a receipt no one can dispute.**
+**An AI sales channel any merchant can switch on in three commands — with spending rules a human signs, money the AI can never touch, and a receipt no one can dispute.**
 
 > Built for the **Razorpay Buildathon**, Track 01 — *AI Growth & Agentic Commerce*.
-> Joseph Fernando · CIT Chennai · one person, one AI pair-programmer, twelve stages.
+> Joseph Fernando · CIT Chennai · one person, one AI pair-programmer.
 
 ```bash
 uv sync
@@ -11,53 +11,102 @@ uv run openstore init --merchant "Gelateria Milano" --currency INR
 uv run openstore serve gelateria.yaml
 ```
 
-Three commands. Your store now speaks to AI agents: a discovery manifest, an agent-readable catalog, 18 MCP commerce tools, checkout, hold/cancel, and a cryptographic evidence trail for every rupee that moves.
+Three commands, **no API keys required** — migrations run on first boot and the store comes up serving a discovery manifest, a UCP capability manifest, an agent-readable catalog, 18 MCP commerce tools, checkout, hold/cancel, a signed campaign feed, and a cryptographic evidence trail for every rupee that moves. Add Razorpay test-mode keys when you want money to actually move.
 
-> **The pitch in one paragraph.** An AI agent shops your store on behalf of a human. The human's rules — spend caps, allowed items, approved merchants — were signed once with a passkey, and a deterministic compiler enforces them on every cart. The AI never holds payment credentials; it proposes, the compiler disposes. Sixty days later, the customer claims they never authorized the purchase. You export one file, run the verifier **on a laptop with wifi off**, and it proves — hash chain, WebAuthn signature, policy, cart, all byte-identical — exactly what was authorized and by whom. Flip one digit in the file and the verifier names the exact broken link.
-
-**Jump to:** [Why this exists](#why-this-exists) · [The demo](#the-demo) · [How it works](#how-it-works) · [The money path](#the-money-path) · [PoAI](#the-receipt-proof-of-authorized-intent-poai) · [Agents](#the-agent-layer) · [Getting started](#getting-started) · [What's real / what's next](#whats-real--whats-next)
+**Jump to:** [Why this exists](#why-this-exists) · [Meeting the bar](#meeting-the-bar) · [Growth](#growth-the-revenue-half) · [The demo](#the-demo) · [How it works](#how-it-works) · [The money path](#the-money-path) · [PoAI](#the-receipt-proof-of-authorized-intent-poai) · [Agents](#the-agent-layer) · [Getting started](#getting-started) · [What's real / what's next](#whats-real--whats-next)
 
 ---
 
 ## Why this exists
 
-2026 is the year of the agentic commerce protocol race: **ACP** (OpenAI/Stripe/Meta), **UCP** (Google/Shopify), **AP2** (Google), **x402** (Coinbase), **Visa TAP**, **Mastercard Agent Pay**, **NPCI UAP**. They all answer the same question: *how does an agent pay?*
+### The integration already exists — for two companies at a time
 
-None of them answer the harder one: ***what does the merchant hand an arbitrator 90 days later when the human disputes the charge?***
+AI-mediated commerce in India is not hypothetical and this project does not pretend to invent it. Razorpay's in-app agentic pilots are live. Large platforms are wiring conversational ordering into their apps today. It works.
 
-OpenStore is that missing layer — the **adjudication layer** — plus the growth layer on top of it:
+It works **bilaterally**. A pilot like that is a negotiated integration between one large platform and one large merchant: custom endpoints, a shared roadmap, an account manager, a legal review. The merchant is inside the integration or outside it, and the cost of being inside is a scale most merchants will never have.
 
-| They make a merchant... | OpenStore makes a transaction... |
+So the capability exists, and it is unavailable to precisely the merchants who most need a new demand channel — the gelateria with 40 SKUs, the chai house with a YAML file and no engineering team. **OpenStore is that same channel, decoupled**: a sidecar that any merchant runs beside the store they already have, with no counterparty to negotiate with, no platform to be admitted to, and no code to migrate.
+
+### What a bilateral integration still doesn't give you
+
+Even inside one, two things are missing, and they are the two this project is actually about.
+
+**Nothing to hand an arbitrator.** When the customer says *"I never authorized that"* ninety days later, the evidence is whatever the platform's logs say it is — a claim by an interested party, in a format only that party can produce, verifiable only by trusting them. Every protocol in the current race (ACP, UCP, AP2, x402, TAP, Agent Pay, NPCI UAP) answers *how does an agent pay?* None of them answers *what does the merchant hand an arbitrator?* OpenStore's answer is the **PoAI bundle**: hash-chained, merchant-signed, time-anchored, and checkable offline by anyone, including someone who thinks the merchant is lying.
+
+**Nothing that grows the merchant.** A payment integration makes a merchant *transactable*. It does not tell them which SKU has stalled, draft the campaign that fixes it, or put that offer where an AI buyer will find it. Agentic commerce that only handles checkout has automated the last five seconds of the funnel. OpenStore ships the other end too — [analytics, campaign orchestration, cross-sell, and an autonomous growth loop](#growth-the-revenue-half) — under the same rule that governs the money path: **the agent proposes, a human signs, a deterministic compiler disposes.**
+
+| The protocols make a merchant... | OpenStore makes a transaction... |
 |---|---|
-| transactable (ACP, UCP) | **defensible** (PoAI evidence bundles, offline-verifiable) |
+| transactable (ACP, UCP) | **defensible** (PoAI bundles, offline-verifiable) |
 | payable (AP2, TAP, Agent Pay) | **bounded** (human-signed compiler, not vibes) |
 | discoverable (manifests, feeds) | **governed** (AAL ladder: stronger proof → faster fulfillment) |
 
-Where it overlaps, it interoperates rather than competes. The sidecar serves
-MCP at `/agent/mcp` and a **UCP** capability manifest at `/.well-known/ucp`
-(`dev.ucp.shopping.checkout`, `dev.ucp.shopping.discount`) — declaring only what
-it actually implements. And the authorization model landed on the same shape
-**AP2** later specified: a signed `IntentPolicy` is structurally an Intent
-Mandate, a per-cart assertion a Cart Mandate. The difference is what enforces
-them — a deterministic compiler whose transcript is replayable, rather than a
-credential a merchant is trusted to honour.
+Where it overlaps, it interoperates rather than competes. The sidecar serves MCP at `/agent/mcp` and a **UCP** capability manifest at `/.well-known/ucp` (`dev.ucp.shopping.checkout`, `dev.ucp.shopping.discount`) — declaring only what it actually implements. The authorization model landed on the same shape **AP2** later specified: a signed `IntentPolicy` is structurally an Intent Mandate, a per-cart assertion a Cart Mandate. The difference is what enforces them — a deterministic compiler whose transcript is replayable, rather than a credential a merchant is trusted to honour.
 
-**x402 is deliberately not on the roadmap.** It solves stablecoin micropayments
-between machines; this is an INR/UPI stack for human-authorized purchases. There
-is no honest integration story, so there isn't one.
-
-And it's **Razorpay/UPI-native** — the stack the Western protocols don't cover — with an authorization model that maps cleanly onto RBI's e-mandate framework (AFA at registration, frictionless within limits).
+**x402 is deliberately not on the roadmap.** It solves stablecoin micropayments between machines; this is an INR/UPI stack for human-authorized purchases. There is no honest integration story, so there isn't one. For the same reason the manifest no longer advertises ACP: the entry pointed at a version ACP never published and an endpoint that returns `not implemented`, so an ACP-aware agent that trusted it would fail on contact (DECISION-026). **A manifest is a promise; only working capabilities belong in it.**
 
 ### Why a sidecar, and not a platform
 
-A merchant already has a store. Asking them to migrate it to be agent-ready is
-a non-starter, so OpenStore bolts on beside the existing one and is designed
-around a single seam: **every piece of catalog and order data flows through one
-access point.** Today that reads a YAML file, because that is what could be
-built and proven correct in the time available. Nothing above that line — the
-compiler, checkout, the agent layer — knows or cares. Point the same function
-at a Postgres query or a Shopify Admin API call and the merchant's real
-inventory shows up unchanged everywhere else in the system.
+A merchant already has a store. Asking them to migrate it to be agent-ready is a non-starter, so OpenStore bolts on beside the existing one and is designed around a single seam: **every piece of catalog and order data flows through one access point.** Today that reads a YAML file, because that is what could be built and proven correct in the time available. Nothing above that line — the compiler, checkout, the agent layer — knows or cares. Point the same function at a Postgres query or a Shopify Admin API call and the merchant's real inventory shows up unchanged everywhere else in the system.
+
+---
+
+## Meeting the bar
+
+Track 01 asks that every money action be explainable, bounded and gated, with an audit trail and one failure handled gracefully. Concretely:
+
+| The bar | How | Where |
+|---|---|---|
+| **Explainable** | Every decision emits an ordered, byte-stable transcript of 13 named checks and a closed-set reason code. No LLM in the decision path. | `core/compiler.py` |
+| **Bounded** | Spend caps per transaction, per envelope and cumulative; SKU allowlists, tag rules, merchant lock, expiry — all from a policy the human signed. | `core/compiler.py`, `core/policy_signing.py` |
+| **Gated** | WebAuthn user-verified signature required before any order exists. AAL0 (no verifiable authority) creates no order at all. | `core/webauthn_rp.py`, `core/aal.py` |
+| **Audit trail** | 9-section PoAI bundle, SHA-256 hash-chained, ES256-signed, Rekor-anchored, verified offline by 14 checks. Two bundles are [checked into this repo](docs/demo_assets) so you can run it now. | `core/poai.py`, `verify/` |
+| **A failure, gracefully** | Four of them, below. | — |
+
+The four failure paths, all tested:
+
+- **A denied cart** → `policy.tag_violation`, then the merchant agent negotiates in the same DM thread, and when no in-policy path exists it drafts a policy amendment the human approves with a second passkey tap. The cart recompiles against an unpersisted, relieved policy snapshot — the standing signed policy is never mutated. *(ACT 3)*
+- **A tampered receipt** → the verifier names the broken hash-chain link and exits 1. *(ACT 5)*
+- **A crash mid-payment** → idempotency fingerprinting detects the in-flight call on restart and **adopts the existing Razorpay object instead of creating a second one.** `core/idempotency.py`
+- **A hostile webhook** → HMAC on raw bytes, replay dedupe, out-of-order tolerance, dead-letter queue, and a sweeper that reconciles against Razorpay as the source of truth. `core/webhooks.py`
+
+---
+
+## Growth: the revenue half
+
+Making a merchant transactable is table stakes. These are the parts that make them *more money*, and each one is an agent proposing something a human or a compiler has final say over.
+
+### Aggregate analytics, not raw orders
+
+`core/campaigns.py::get_analytics_view` is the **only** input the campaign agent ever receives: per SKU, `units_sold_7d`, `units_sold_30d`, `gross_minor_30d`, `attach_rate`, `last_sold_at`. No buyer identities, no payment data, no raw order rows (INV-14). The privacy boundary is a function signature, not a prompt asking the model to behave.
+
+### Campaign orchestration, human-gated
+
+The campaign agent drafts from that view, the draft passes a deterministic validator, and it publishes **only** after a merchant passkey approval bound to that specific campaign. Then the crucial part: **the discount is never taken on the offer's word.** Compiler check 12 recomputes it server-side at checkout, so a campaign that has expired, been paused, or been tampered with in transit simply doesn't apply. Approved offers are signed into `/.well-known/agent-campaigns.json`, where buyer agents discover them and re-plan around them.
+
+Manage them from the CLI or Campaign Studio:
+
+```bash
+uv run openstore campaign draft configs/chai.yaml    # agent drafts from analytics
+uv run openstore campaign list configs/chai.yaml     # DRAFT / PENDING_APPROVAL / ACTIVE / PAUSED
+uv run openstore campaign pause configs/chai.yaml <campaign_id>
+```
+
+### The autonomous growth loop
+
+The half that runs without being asked (DECISION-034). A background task inside every `openstore serve` process watches for **stalled SKUs** — 30-day units below the configured floor — drafts a campaign unprompted, and after the campaign window closes compares before/after units sold so the next draft is informed by the last one's outcome. It proposes; it never activates. Every draft still lands in `PENDING_APPROVAL` waiting for a passkey.
+
+```bash
+uv run openstore campaign check-growth configs/chai.yaml   # run the detector on demand
+```
+
+### Cross-sell that can't hallucinate a product
+
+After a cart is built or an order completes, the buyer agent surfaces related items from `related_skus` in the merchant's catalog — a **deterministic lookup** (`surfaces/catalog.py::suggest_related_items`), rendered as a Discord embed. The LLM chooses the words around it; it cannot invent a SKU, a price, or a discount, because the suggestion is never fed back into the compiler's decision path. An upsell an agent hallucinates is a refund waiting to happen.
+
+### A merchant bot for the stats
+
+The merchant DMs `openstore merchant-bot` for campaign status, exposure against policy caps, recent orders, and new campaign suggestions. Its action set is a **frozenset of five** — `campaign_status`, `exposure`, `recent_orders`, `suggest_campaign`, `unknown`. It contains no mutating action **by construction, not by prompt instruction**, so no amount of prompt injection can make it approve, activate, pause or cancel anything.
 
 ---
 
@@ -75,6 +124,7 @@ ACT 1  Human signs an IntentPolicy with a passkey:
 
 ACT 2  Agent: "get me two vegan gelatos" → search → cart → 13 compiler checks pass
        → Razorpay payment link → paid → order HELD (15-min cancel window)
+       → cross-sell embed: "goes well with the hazelnut"
 
 ACT 3  Agent: "add the pistachio" → DENIED: policy.tag_violation
        → buyer agent and merchant agent negotiate in the same DM thread
@@ -85,16 +135,17 @@ ACT 3  Agent: "add the pistachio" → DENIED: policy.tag_violation
 ACT 4  Campaign agent notices a stalled SKU, reads aggregate sales analytics, drafts
        "Weekend vegan bundle −10%" → merchant approves in Campaign Studio with a passkey
        → signed offer hits the feed → buyer agents discover it and re-plan around it
+       → the discount is recomputed by compiler check 12, not trusted from the offer
 
 ACT 5  Dispute. openstore-verify bundle.json — offline — 14 checks — VERDICT: AAL2.
-       Tamper one digit in amount_minor → verifier names the broken hash-chain link.
+       Tamper one digit in amount_minor → chain_integrity and amount_consistency both fail.
 ```
 
 ---
 
 ## How it works
 
-The system is three layers with one hard rule: **reasoning and money never share a process boundary.**
+Three layers with one hard rule: **reasoning and money never share a process boundary.**
 
 ```mermaid
 flowchart TB
@@ -105,7 +156,7 @@ flowchart TB
     subgraph L2["Layer 2 — Merchant Reasoning Agents (keyless)"]
         Merchant["Merchant agent<br/>negotiation · recovery · bundling"]
         Campaign["Campaign agent<br/>analytics → draft campaigns"]
-        Narrator["Evidence narrator<br/>dispute cover notes"]
+        Bot["Merchant bot<br/>read-only reporting"]
     end
 
     subgraph L3["Layer 3 — Execution Server (deterministic, holds keys)"]
@@ -128,7 +179,7 @@ flowchart TB
     POAI --> Verify["openstore-verify<br/>14 offline checks"]
 ```
 
-**The one rule that makes agents safe here (R0.9/R0.10):** LLM output is a *proposal, never a command*. Every agent-produced artifact — a substitution, a price, a campaign, a policy amendment — passes through the same deterministic validators as input from a stranger. The agent modules physically cannot import payment or signing code (enforced by an import-firewall test). A hallucinating or prompt-injected agent can only ever produce a suggestion that gets rejected.
+**The one rule that makes agents safe here (R0.9/R0.10):** LLM output is a *proposal, never a command*. Every agent-produced artifact — a substitution, a price, a campaign, a policy amendment, a cross-sell suggestion — passes through the same deterministic validators as input from a stranger. The agent modules physically cannot import payment or signing code, enforced by an import-firewall test (`tests/sentinel/test_import_firewall.py`). A hallucinating or prompt-injected agent can only ever produce a suggestion that gets rejected.
 
 ---
 
@@ -148,7 +199,7 @@ flowchart LR
     G --> H["PoAI evidence bundle<br/>hash-chained · signed · time-anchored"]
 ```
 
-- **Deterministic compiler** (`core/compiler.py`) — check 0 + 12 checks, fixed order, stop-at-first-failure, byte-stable transcript. No LLM anywhere in the decision path.
+- **Deterministic compiler** (`core/compiler.py`) — `human_authority_present` plus 12 checks, fixed order, stop-at-first-failure, byte-stable transcript. No LLM anywhere in the decision path.
 - **Idempotency as a contract** (`core/idempotency.py`) — fingerprinted keys, in-flight detection, crash-mid-API-call recovery that adopts the existing Razorpay object instead of double-charging.
 - **Double-entry ledger** (`core/ledger.py`) — append-only; escrow accounts net to zero at terminal states; reversals, never edits.
 - **Webhooks that expect betrayal** (`core/webhooks.py`) — HMAC verification on raw bytes, dedupe, out-of-order tolerance, dead-letter + alerts, and a sweeper that reconciles against Razorpay as the source of truth.
@@ -161,29 +212,45 @@ Every completed transaction assembles a **9-section evidence bundle**: what was 
 
 The point: **verification doesn't require trusting the merchant.**
 
-```bash
-$ uv run openstore-verify bundle.json --merchant-jwks jwks/
-✓ schema            ✓ chain_integrity      ✓ merchant_signature
-✓ time_anchor       ✓ webauthn_assertion   ✓ challenge_binding
-✓ uv_flag           ✓ catalog_attestations ✓ compiler_digest
-✓ re_execution      ✓ amount_consistency   ✓ aal
-✓ delegation_chain  ✓ spend_chain
+Both bundles below are checked into [`docs/demo_assets/`](docs/demo_assets) — one clean, one with a single digit of `amount_minor` flipped from `21000` to `99999`. This is real output; run it yourself, offline, right after `uv sync`:
 
-VERDICT: AAL2 — Proposed liability position (not a network rule): the human
-authorized a standing policy with a fresh, user-verified signature, and this
-cart compiled clean against it...
-
-$ # flip one digit in amount_minor, re-run:
-✗ chain_integrity — section "goods", link 3: hash mismatch
-(exit 1)
+```console
+$ uv run openstore-verify docs/demo_assets/bundle.json --merchant-jwks docs/demo_assets/jwks
+bundle: poai_test_bundle_aal2 (PoAI 0.1)
+AAL level: 2
+liability: Proposed liability position (not a network rule): ...the human authorized a stan...
+  [PASS] schema
+  [PASS] chain_integrity
+  [PASS] merchant_signature
+  [PASS] time_anchor
+  [PASS] webauthn_assertion
+  [PASS] challenge_binding
+  [PASS] uv_flag
+  [PASS] catalog_attestations
+  [PASS] compiler_digest
+  [PASS] re_execution
+  [PASS] amount_consistency
+  [PASS] aal — level=2
+  [PASS] delegation_chain — no delegation (root policy)
+  [PASS] spend_chain — no delegation (root policy)
+$ echo $?
+0
 ```
 
-The verifier runs fully offline, and both demo bundles — one clean, one with a
-single tampered digit — are checked into [`docs/demo_assets/`](docs/demo_assets)
-so the two verdicts reproduce without running the stack. The Evidence Viewer
-(`/orders/{checkout_id}/evidence/view`) re-implements the same 14 checks in a
-single zero-dependency HTML page using browser WebCrypto — an arbitrator needs
-nothing but a browser.
+One digit changed, and two independent checks catch it — the hash chain and the arithmetic:
+
+```console
+$ uv run openstore-verify docs/demo_assets/bundle_tampered.json --merchant-jwks docs/demo_assets/jwks
+  [PASS] schema
+  [FAIL] chain_integrity — link[0] (transaction): hash mismatch (section=transaction, link_index=0)
+  ...
+  [FAIL] amount_consistency — amount_minor mismatch: transaction=99999, computed from items=21000
+  ...
+$ echo $?
+1
+```
+
+The Evidence Viewer (`/orders/{checkout_id}/evidence/view`) re-implements the same 14 checks in a single zero-dependency HTML page using browser WebCrypto — an arbitrator needs nothing but a browser.
 
 ---
 
@@ -202,13 +269,13 @@ Fulfillment keys off `RELEASED`, never order creation. The cancel link is a sing
 
 ## The agent layer
 
-Five agent surfaces ship in the package. All of them are keyless, all of them are proposal-only, and none of them can move money:
+Five agent surfaces ship in the package. All keyless, all proposal-only, none able to move money:
 
 - **Buyer agent** (`agents/buyer_graph.py`) — a LangGraph loop behind a Discord DM: goal → search → policy-aware cart → checkout → hold monitoring, with free-text handling for menu, cart, order status and cancellation. It searches **every merchant it is enrolled with** over HTTP MCP and builds one cart tagged per line with `merchant_id`.
 - **Merchant agent** (`agents/merchant_agent.py`) — negotiates with buyer agents over structured counter-offers; when no in-policy path exists, drafts a **signed policy amendment** that only activates with a human's passkey tap.
-- **Campaign agent** (`agents/campaign_agent.py`) — reads a privacy-bounded aggregate analytics view (never raw orders or PII), drafts campaigns, passes them through a deterministic validator, and publishes **only** after a merchant passkey approval bound to that specific campaign. The discount itself is applied by compiler check 12, never taken on the offer's word.
-- **Growth-trigger loop** (DECISION-034) — the autonomous half. A background task inside each `openstore serve` process watches for stalled SKUs (units sold over 30 days below the configured floor), drafts a campaign unprompted, and after the campaign runs compares before/after units sold so the next draft is informed by the last one's outcome. On demand: `uv run openstore campaign check-growth configs/chai.yaml`.
-- **Merchant bot** (`agents/merchant_bot.py`) — a read-only reporting bot the merchant DMs for campaign status, exposure against policy caps, and recent orders. Its action set contains no mutating action **by construction, not by prompt instruction.**
+- **Campaign agent** (`agents/campaign_agent.py`) — drafts from the aggregate analytics view. [See Growth](#growth-the-revenue-half).
+- **Growth-trigger loop** (DECISION-034) — the autonomous half: stall detection, unprompted drafting, outcome feedback into the next draft.
+- **Merchant bot** (`agents/merchant_bot.py`) — read-only reporting over a five-action frozenset.
 
 ---
 
@@ -242,17 +309,15 @@ catalog:
     name: "Madagascar Vanilla 500ml"
     unit_minor: 21000            # ₹210.00 — integer paise, always
     tags: ["vegan", "dairy-free"]
-    related_skus: ["GEL-HAZ-500"]
+    related_skus: ["GEL-HAZ-500"]   # deterministic cross-sell
     description: "Slow-churned, cashew-base vanilla."
 ```
-
-Add Razorpay **test-mode** keys (and an LLM key, if you want the agent layer) to `.env`, then:
 
 ```bash
 uv run openstore serve gelateria.yaml
 ```
 
-Your store now serves `/.well-known/agent-commerce.json`, `/.well-known/ucp`, `/agent/catalog`, `/agent/mcp`, the signed campaign feed, Policy Studio (`/intent/studio`), Campaign Studio (`/campaign/studio`) and the Evidence Viewer. Open Policy Studio, enrol a passkey, sign your first `IntentPolicy` — and you're transactable.
+This works with **no `.env` at all** — the server applies its migrations and comes up serving `/.well-known/agent-commerce.json`, `/.well-known/ucp`, `/agent/catalog`, `/agent/mcp`, the signed campaign feed, Policy Studio (`/intent/studio`), Campaign Studio (`/campaign/studio`), `/admin/orders` and the Evidence Viewer. Add Razorpay **test-mode** keys (and an LLM key for the agent layer) to `.env` when you want live checkout. Open Policy Studio, enrol a passkey, sign your first `IntentPolicy` — and you're transactable.
 
 Verify a completed order's evidence, offline:
 
@@ -261,16 +326,11 @@ curl http://localhost:8000/orders/<checkout_id>/evidence -o bundle.json
 uv run openstore-verify bundle.json --merchant-jwks <(curl -s http://localhost:8000/.well-known/poai-jwks.json)
 ```
 
-> Packaged as `openstore` with three entry points (`openstore`,
-> `openstore-verify`, `openstore-buyer`), but **not published to PyPI** — run it
-> from this repo with `uv`.
+> Packaged as `openstore` with three entry points (`openstore`, `openstore-verify`, `openstore-buyer`), but **not published to PyPI** — run it from this repo with `uv`.
 
 ### This repo's own demo instance
 
-Two merchants (Gelateria Milano on `:8000`, Chai House on `:8001`), a federated
-buyer process, and a merchant reporting bot. The full boot sequence — secrets,
-migrations, OAuth client registration, analytics seeding — is in
-[`docs/RUN.md`](docs/RUN.md).
+Two merchants (Gelateria Milano on `:8000`, Chai House on `:8001`), a federated buyer process, and a merchant reporting bot. The full boot sequence — secrets, migrations, OAuth client registration, analytics seeding — is in [`docs/RUN.md`](docs/RUN.md).
 
 ```bash
 uv run openstore serve configs/gelateria.yaml --port 8000
@@ -282,8 +342,8 @@ uv run openstore merchant-bot configs/gelateria.yaml configs/chai.yaml
 ### Running the checks
 
 ```bash
-uv run pytest -q                        # 626 tests
-uv run mypy src/
+uv run pytest -q                        # 627 tests
+uv run mypy src/                        # 51 source files, clean
 uv run ruff check src/ tests/
 uv run python scripts/registry_diff.py  # must print nothing, exit 0
 ```
@@ -304,14 +364,15 @@ src/openstore/
 ├── models.py       # SQLModel schemas
 ├── server.py       # FastAPI app factory + background tasks (hold expiry, growth loop)
 ├── config.py       # merchant config (closed key set; unknown keys hard-error)
-├── cli.py          # openstore init / serve / campaign / merchant-bot
+├── cli.py          # openstore init / serve / campaign / orders / merchant-bot
 └── buyer_cli.py    # openstore-buyer — the federated buyer process
 
 configs/            # this repo's demo instance: two merchants + the buyer
 data/               # SQLite DBs — gitignored, created by migrations on first boot
+docs/demo_assets/   # a clean PoAI bundle, a tampered one, and the merchant's public JWKS
 tests/              # stage tests · golden tests · red team · sentinels
 tests/GOLDEN/       # byte-pinned fixtures: compiler · ledger · PoAI · WebAuthn · canonical · Razorpay
-docs/SPECS/         # the eleven stage contracts this was built from
+docs/SPECS/         # the eleven written stage contracts this was built from
 REGISTRY.json       # every closed set, machine-enforced both directions
 ```
 
@@ -320,7 +381,7 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 | File | What it is |
 |---|---|
 | [`docs/OPENSTORE_PRD_v3.md`](docs/OPENSTORE_PRD_v3.md) | the requirements doc everything was built from |
-| [`docs/SPECS/`](docs/SPECS) | eleven stage contracts — each one a testable slice (Stage 12 shipped against DECISION-022 instead) |
+| [`docs/SPECS/`](docs/SPECS) | eleven stage contracts, each a testable slice (stages 12–15 shipped against numbered decisions instead) |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | numbered architectural decisions, and why the alternatives lost |
 | [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md) | what's still unresolved, honestly |
 | [`docs/RUN.md`](docs/RUN.md) | how to boot the two-merchant demo |
@@ -330,14 +391,14 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 
 ## What's real / what's next
 
-Built by one person with an AI agent over twelve stages. Here's the honest ledger:
+Built by one person with an AI agent across fifteen stages. The honest ledger:
 
 **Real and tested:**
 - ✅ The full money path — compiler, ledger, idempotency, hold/cancel, webhooks, reconciliation
 - ✅ WebAuthn ceremonies, OAuth with signature-pinned validation, per-merchant signing keys
-- ✅ PoAI bundles + offline verifier + tamper detection, with golden fixtures
+- ✅ PoAI bundles + offline verifier + tamper detection, with golden fixtures and two bundles in-repo
 - ✅ 18 MCP tools, discovery manifests, catalog attestations, campaign pipeline
-- ✅ Red-team and sentinel suites green — **626 tests**, `mypy` and `ruff` clean
+- ✅ Red-team and sentinel suites green — **627 tests**, `mypy` and `ruff` clean
 - ✅ **Chat-native purchase flow (Stage 11)** — a live `discord.Client` runs in the server's
   lifespan; a buyer DMs the bot, gets a `handoffs`-table signing link if no policy exists,
   auto-resumes the errand on signature, gets the Razorpay pay link and hold/cancel status
@@ -346,18 +407,15 @@ Built by one person with an AI agent over twelve stages. Here's the honest ledge
   drafts a one-time policy amendment the human approves with a second passkey tap
   (`{"mode":"amendment",...}` WebAuthn binding), which recompiles the cart against an
   unpersisted, relieved `IntentPolicy` snapshot — never mutating the standing signed policy.
-  `/orders/{checkout_id}/evidence` assembles the PoAI bundle with the chat request text as
-  `human_intent` and the DM receipt as `notification`.
 - ✅ **Federated multi-merchant shopping (Stage 12)** — one buyer process searches N merchant
   origins over HTTP MCP, builds one cart tagged per line with `merchant_id`, and creates
   separate per-merchant checkouts in two phases. Each merchant holds its own signed policy;
-  there is no signing hub, so there is no shared budget to double-spend (DECISION-022). A
-  buyer-hosted page aggregates the per-merchant signing links.
-- ✅ **Campaigns reach buyers, and draft themselves** — the growth loop detects a stalled SKU,
-  the campaign agent drafts from an aggregate analytics view, the merchant approves with a
-  passkey bound to that specific campaign, and the buyer agent discovers the live offer and
-  applies it — with the discount recomputed server-side by compiler check 12 and recorded in
-  the evidence bundle. Post-campaign deltas feed the next draft (DECISION-034).
+  there is no signing hub, so there is no shared budget to double-spend (DECISION-022).
+- ✅ **The growth half (Stages 13–15)** — conversational buyer seams, deterministic cross-sell,
+  order status and cancellation over federated merchants, the merchant reporting bot, and the
+  autonomous growth loop: stall detection → unprompted draft → passkey approval → signed offer
+  on the feed → buyer agents apply it → post-campaign delta feeds the next draft (DECISION-034).
+  The discount is recomputed server-side by compiler check 12 and recorded in the evidence bundle.
 
 **Not yet:**
 - ❌ **Payment stays outside the conversation** — the buyer gets a Razorpay hosted-page link
@@ -369,8 +427,8 @@ Built by one person with an AI agent over twelve stages. Here's the honest ledge
   passkey assertion, so a chat-only checkout grades at AAL1 rather than AAL2. The Policy
   Studio says so on the form. Scoped in Q-033; the WebAuthn binding mode already exists, but
   a new `HandoffKind` is a closed-set change.
-- ❌ **Frontend polish** — Policy Studio, Campaign Studio and the Evidence Viewer are served
-  and functional, but they're utilitarian, not designed.
+- ❌ **Frontend polish** — Policy Studio, Campaign Studio, `/admin/orders` and the Evidence
+  Viewer are served and functional, but they're utilitarian, not designed.
 - ❌ **Live Razorpay capture at scale** — the driver is tested against golden fixtures and
   exercised against real test-mode payment links; sustained live-mode traffic is untested.
 - ❌ **Deployment story** — runs locally on SQLite; Docker/cloud beyond the sidecar
@@ -387,8 +445,8 @@ The infrastructure is deliberately overbuilt relative to the agent layer — for
 
 Python 3.12 · FastAPI · SQLModel · SQLite (`BEGIN IMMEDIATE`) · Alembic · Razorpay test mode · WebAuthn (`py_webauthn`) · ES256 JWS · Sigstore Rekor · LangGraph · discord.py · uv
 
-Built by [Joseph Fernando](https://github.com/) with [OpenCode](https://github.com/sst/opencode), across twelve stages, from a PRD that treats identifiers as law. The PRD and stage specs are in this repo — `docs/OPENSTORE_PRD_v3.md` and `docs/SPECS/` are arguably the real product.
+Built by [Joseph Fernando](https://github.com/ApxllxCartxr) with [OpenCode](https://github.com/sst/opencode), from a PRD that treats identifiers as law. The PRD and stage specs are in this repo — `docs/OPENSTORE_PRD_v3.md` and `docs/SPECS/` are arguably the real product.
 
 ## License
 
-MIT. (No `LICENSE` file checked in yet — that's on the list.)
+[MIT](LICENSE).
