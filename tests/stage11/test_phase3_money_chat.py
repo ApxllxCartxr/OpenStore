@@ -264,11 +264,18 @@ class TestWebhookChatPush:
         psp_router_module._process_event_in_worker(event.psp_event_id, settings)
 
         # S11 Phase 4: a RELEASED chat checkout also gets an evidence bundle
-        # + a second DM with the receipt link (plan items #20-22).
-        assert dm_calls == [
-            ("d42", "Paid! ₹150.00 — order released."),
-            ("d42", "Evidence: http://localhost/orders/chk_webhook_paid/evidence/view"),
-        ]
+        # + a DM with the receipt link (plan items #20-22). The narration in
+        # between is PRD §5.4's evidence narrator, whose narrate() had no caller
+        # in src/ until DECISION-025's follow-up — prose ALONGSIDE the signed
+        # bundle, never inside it.
+        assert [user for user, _ in dm_calls] == ["d42", "d42", "d42"]
+        assert dm_calls[0][1] == "Paid! ₹150.00 — order released."
+        assert "checkout chk_webhook_paid" in dm_calls[1][1]
+        assert "Compiler verdict: ALLOW" in dm_calls[1][1]
+        assert dm_calls[2] == (
+            "d42",
+            "Evidence: http://localhost/orders/chk_webhook_paid/evidence/view",
+        )
         assert trace_calls == [(checkout.trace_id, "PAID", 15000, "INR")]
 
         session.refresh(checkout)

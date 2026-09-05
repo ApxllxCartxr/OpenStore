@@ -198,6 +198,20 @@ def _push_chat_notification(cfg: Settings, session: Any, event: WebhookEvent) ->
             checkout.trace_id, trace_action, checkout.amount_minor, checkout.currency
         )
     )
+    # #merchant-trace carried only negotiation and amendment events, so the
+    # channel described the agent rather than the store. An order landing is
+    # the single thing a merchant most wants to see there.
+    run_from_worker_thread(
+        DiscordNotifier(cfg).merchant_trace(
+            checkout.trace_id,
+            f"order_{trace_action.lower()}",
+            {
+                "checkout_id": checkout.id,
+                "amount_minor": checkout.amount_minor,
+                "currency": checkout.currency,
+            },
+        )
+    )
 
     # S11 Phase 4 (plan items #20-22): produce the PoAI evidence bundle once a
     # chat-originated checkout reaches RELEASED, using the DM's own body/time
@@ -346,13 +360,43 @@ def _build_and_store_evidence(
 
 def _push_evidence_link(cfg: Settings, checkout: Checkout) -> None:
     """DM the buyer a receipt link to the evidence viewer (plan item #22:
-    "mount evidence_viewer.html, DM the receipt link")."""
+    "mount evidence_viewer.html, DM the receipt link"), preceded by the
+    narrator's one-paragraph plain-language account of what was authorized.
+
+    PRD §5.4 specifies the evidence narrator; MerchantAgent.narrate() had been
+    implemented since S7 with no caller anywhere in src/. A receipt link with no
+    prose is exactly the dispute-time moment it was written for.
+    """
     from openstore.notifier import run_from_worker_thread, send_dm
 
     origin = (cfg.public_base_url or cfg.webauthn.origin or "").rstrip("/")
     link = f"{origin}/orders/{checkout.id}/evidence/view"
     assert checkout.chat_user_id is not None
+
+    narration = _narrate_bundle(cfg, checkout)
+    if narration:
+        run_from_worker_thread(send_dm(cfg, checkout.chat_user_id, narration))
     run_from_worker_thread(send_dm(cfg, checkout.chat_user_id, f"Evidence: {link}"))
+
+
+def _narrate_bundle(cfg: Settings, checkout: Checkout) -> str | None:
+    """Narrate the stored PoAI bundle, or None if it cannot be narrated.
+
+    The narration is prose ALONGSIDE the signed bundle, never inside it (PRD
+    §5.4) — it changes nothing that a verifier checks. A narrator failure must
+    therefore never cost the buyer their receipt link, which is why this is the
+    one place a broad catch is correct rather than a swallow: the evidence
+    itself is already signed and stored.
+    """
+    if not checkout.poai_bundle:
+        return None
+    try:
+        from openstore.agents.merchant_agent import MerchantAgent
+
+        return MerchantAgent(cfg).narrate(checkout.poai_bundle)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.warning("evidence narration failed for %s: %s", checkout.id, exc)
+        return None
 
 
 def _get_client(config: Settings) -> Any:
