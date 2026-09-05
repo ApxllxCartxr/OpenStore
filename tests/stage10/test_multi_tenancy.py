@@ -265,9 +265,20 @@ s.commit(); s.close()
 
 
 class TestChaiConfig:
-    def test_chai_yaml_loads(self):
+    def test_chai_yaml_loads(self, monkeypatch):
         """`openstore serve chai.yaml` must load the second merchant config."""
         from openstore.config import load_config
+
+        # configs/chai.yaml interpolates ${...} secrets that live in .env, which
+        # is gitignored — supply placeholders so this passes on a fresh clone
+        # without weakening _interpolate_env's fail-loud contract (R0.5).
+        for var in (
+            "RAZORPAY_KEY_ID",
+            "RAZORPAY_KEY_SECRET",
+            "RAZORPAY_WEBHOOK_SECRET",
+            "DISCORD_BOT_TOKEN",
+        ):
+            monkeypatch.setenv(var, f"test-{var.lower()}")
 
         assert CHAI_YAML.exists()
         cfg = load_config(CHAI_YAML)
