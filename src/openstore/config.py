@@ -54,6 +54,17 @@ class DiscordConfig(BaseModel):
     merchant_trace_channel_id: int
     money_trace_channel_id: int
     alerts_channel_id: int
+    # Optional: a single guild channel where the buyer bot treats any message
+    # as a shop request, no "!shop " prefix needed (S14). DMs already accept
+    # free text; this widens it to exactly one designated channel, not every
+    # channel, to keep LLM cost/false-trigger risk bounded.
+    shopping_channel_id: int | None = None
+    # S11->S12: the buyer agent is moving into its own process. Merchant
+    # configs sharing one bot_token (e.g. two merchants on the same Discord
+    # app) would otherwise start two BuyerBot logins on that token, each
+    # receiving and replying to the same DM. Default True preserves today's
+    # single-process demo behavior for every existing config/test.
+    buyer_bot_enabled: bool = True
 
 
 class WebAuthnConfig(BaseModel):
@@ -78,9 +89,13 @@ class CampaignSettings(BaseModel):
 
 
 class Settings(BaseSettings):
+    # No env_file here on purpose. from_yaml() already calls load_dotenv() and
+    # resolves ${VAR} itself, so a dotenv settings source is redundant — and
+    # with extra="forbid" it is actively harmful: pydantic-settings feeds EVERY
+    # .env key into validation, so any key that isn't a field path (the buyer
+    # process's own credentials, say) fails every Settings construction in the
+    # repo. extra="forbid" stays: it is what catches typo'd YAML keys (R0.3).
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         extra="forbid",
         env_nested_delimiter="__",
     )
@@ -128,6 +143,12 @@ def load_config(config_path: str | Path) -> Settings:
         ValidationError: If unknown keys are present (R0.3) or required fields missing.
     """
     settings = Settings.from_yaml(config_path)
-    # Set catalog_path from the config file's directory
-    settings.catalog_path = str(Path(config_path).parent / "catalog.yaml")
+    # An explicit catalog_path wins, resolved relative to the config file so a
+    # second merchant can live beside the first without its own directory.
+    # Without this, every config in a directory shares one catalog.yaml — two
+    # merchants in the same repo silently served identical catalogs.
+    if settings.catalog_path:
+        settings.catalog_path = str(Path(config_path).parent / settings.catalog_path)
+    else:
+        settings.catalog_path = str(Path(config_path).parent / "catalog.yaml")
     return settings

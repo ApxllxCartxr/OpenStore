@@ -5,6 +5,10 @@ merchant:
   name: "Chai House"
   currency: "INR"
 
+# Without this, load_config derives <config-dir>/catalog.yaml and chai would
+# silently serve the gelateria catalog.
+catalog_path: "chai_catalog.yaml"
+
 razorpay:
   key_id: "${RAZORPAY_KEY_ID}"
   key_secret: "${RAZORPAY_KEY_SECRET}"
@@ -16,6 +20,9 @@ discord:
   merchant_trace_channel_id: 223456789012345679
   money_trace_channel_id: 223456789012345680
   alerts_channel_id: 223456789012345681
+  # Buyer agent now runs as its own process; disable in-process BuyerBot to
+  # avoid a second Discord login on the shared bot_token (gelateria + chai).
+  buyer_bot_enabled: false
 
 webauthn:
   rp_id: "localhost"
