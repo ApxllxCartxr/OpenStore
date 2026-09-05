@@ -80,6 +80,20 @@ def test_registry_reason_codes_complete():
         "unsupported_compiler_digest",
         "request_in_progress",
         "auth.token_verification_failed",
+        # DECISION-023 (Q-028): campaign.* was raised by core/campaigns.py from
+        # Stage 8 onward while absent from the closed set — registry_diff.py only
+        # validated REGISTRY.json's shape and never read source, so nothing caught it.
+        "campaign.not_found",
+        "campaign.sku_not_found",
+        "campaign.discount_out_of_bounds",
+        "campaign.invalid_window",
+        "campaign.sku_on_blocked_list",
+        "campaign.empty_content",
+        "campaign.injection_content",
+        "campaign.no_webauthn_approval",
+        "campaign.webauthn_verification_failed",
+        "campaign.max_active_exceeded",
+        "campaign.invalid_state_transition",
     }
 
     actual = set(registry["reason_codes"])
@@ -145,6 +159,9 @@ def test_registry_error_namespaces():
         "hold.*",
         "authority.*",
         "orchestration.*",
+        # DECISION-023: orchestration.* stays reserved and unused; campaign.* is
+        # the namespace core/campaigns.py actually raises into.
+        "campaign.*",
     ]
 
 

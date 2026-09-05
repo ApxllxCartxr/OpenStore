@@ -653,3 +653,121 @@
 - Blocked since: 2026-09-04T00:00:00Z
 - RESOLUTION (2026-09-04): Option (c) — added `psp_payment_id` column to `Checkout` (migration 0006, nullable for legacy checkouts). Updated `refund_checkout` in `psp/razorpay_driver.py` to prefer `checkout.psp_payment_id` (primary path); if null, fetch the payment_link via `client.payment_link.fetch(link_id)` and read `payments[-1].id` (fallback path), then cache the payment_id on the checkout for future refunds. The webhook handler `_apply_payment_link_paid` does not yet populate `psp_payment_id` (the golden fixtures Q-007 don't include the payment_id in `payment_link.paid`; live capture needed per Q-007 recovery protocol). This resolves the code-level fix; live verification of the payment_id field remains gated by Q-007.
 
+
+## Q-028 | stage: 12 | date: 2026-09-05T00:00:00Z
+- What is ambiguous: `core/campaigns.py` raises nine `CampaignValidationError` reason codes
+  (`campaign.not_found`, `campaign.sku_not_found`, `campaign.discount_out_of_bounds`,
+  `campaign.invalid_window`, `campaign.sku_on_blocked_list`, `campaign.empty_content`,
+  `campaign.injection_content`, `campaign.no_webauthn_approval`, `campaign.max_active_exceeded`)
+  and every one of them is absent from `REGISTRY.json` — neither the codes themselves nor a
+  `campaign.*` entry in `error_namespaces`. This is a live R0.2 violation ("NEVER invent an
+  identifier"). It survived because `scripts/registry_diff.py` is a shape validator only: it
+  checks required keys, `enums_are_exhaustive`, and list duplicates, and never scans source for
+  raised identifiers, so it prints nothing and exits 0 with the violation in place. The
+  registered `orchestration.*` namespace has no user anywhere in the tree, which suggests it was
+  reserved for exactly these codes.
+- Options considered: (a) register a `campaign.*` namespace and add all nine codes to
+  `reason_codes` — smallest diff, no call-site churn, and `campaign.sku_not_found` reads
+  correctly at the point it is raised; (b) remap all nine onto the reserved `orchestration.*`
+  namespace so no new namespace is created — honours the apparent original intent but renames
+  nine identifiers across `core/campaigns.py`, `tests/stage08/`, and `tests/redteam/`, buying
+  nothing semantically since `orchestration.*` would then mean "campaign validation" and
+  nothing else; (c) leave both and simply document the drift — FORBIDDEN, R0.2 admits no
+  documented exception, and the whole point of the closed set is that it is executable.
+- Blocked since: 2026-09-05T00:00:00Z
+- RESOLUTION (2026-09-05): Option (a), operator-ratified. `campaign.*` added to
+  `error_namespaces`; the nine existing codes plus two required by the lifecycle repair
+  (`campaign.webauthn_verification_failed` for a real assertion rejection, and
+  `campaign.invalid_state_transition` for an out-of-order lifecycle move) added to
+  `reason_codes` — eleven in total. `orchestration.*` stays reserved and unused; it is NOT
+  removed, since removing a registered namespace is a wider change than this question asks.
+  `scripts/registry_diff.py` is extended in the same commit to scan `CampaignValidationError(`
+  construction sites and diff their first argument against `reason_codes`, so this class of
+  violation cannot recur silently — the differ's blindness is the root cause, not the codes.
+
+## Q-029 | stage: 12 | date: 2026-09-05T00:00:00Z
+- What is ambiguous: PRD §9.7 states the orchestrator "CANNOT publish without a WebAuthn
+  approval", and INV-13 requires every feed offer to be signed. `core/campaigns.py::activate_campaign`
+  enforces neither: it accepts any truthy `webauthn_assertion` dict and never calls the RP, so
+  `{"x": 1}` publishes a campaign into the signed feed. Repairing it needs an assertion binding
+  context, and the existing binding modes (`policy`, `cart`, `amendment`) all describe a
+  different ceremony. Binding modes are not a REGISTRY closed set, so R0.2 does not gate this,
+  but R0.3/R0.4 do gate inventing the value silently.
+- Options considered: (a) add a `campaign` binding mode carrying the `campaign_id`, so an
+  assertion approving campaign A cannot be replayed to approve campaign B — direct precedent in
+  DECISION-021, which added the `amendment` mode the same way; (b) reuse the `policy` mode —
+  rejected, it would make a policy-signing assertion silently sufficient to publish an offer,
+  which is a privilege escalation across two unrelated ceremonies; (c) sign the campaign with
+  the merchant's ES256 feed key instead of a WebAuthn assertion — rejected, that key is held by
+  the process, so it proves no human approved anything, which is the entire point of §9.7.
+- Blocked since: 2026-09-05T00:00:00Z
+- RESOLUTION (2026-09-05): Option (a), operator-ratified. New WebAuthn binding mode `campaign`,
+  shaped `{"mode": "campaign", "campaign_id": "<id>"}`, mirroring `amendment`. `activate_campaign`
+  now calls `complete_assertion` from `core/webauthn_rp.py` with that binding and raises
+  `campaign.webauthn_verification_failed` on rejection. Because the binding carries the
+  `campaign_id`, the challenge is bound to one specific campaign and an approval cannot be
+  replayed onto another.
+
+## Q-030 | stage: 12 | date: 2026-09-05T00:00:00Z
+- What is ambiguous: repairing the PRD §9.4 lifecycle (`DRAFT -> PENDING_APPROVAL -> ACTIVE ->
+  (PAUSED | EXPIRED)`) and giving the merchant a real surface needs route names that do not
+  exist in `REGISTRY.json`: a pause transition, and read surfaces for campaigns and orders. PRD
+  Part 6 pins `/campaign/<campaign_id>/approve` and `/reject` but no pause, even though `PAUSED`
+  is a registered `campaign_states` value with no way to reach it. Separately, the manifest at
+  `surfaces/wellknown.py` advertises a UCP-shaped capability set nowhere, while UCP's discovery
+  convention is a fixed well-known path.
+- Options considered: (a) add `/campaign/<campaign_id>/pause`, `/admin/campaigns`,
+  `/admin/orders`, and `/.well-known/ucp` to `routes` — note that `/admin/*` is already
+  registered as a wildcard, so the two concrete admin paths are a narrowing, not an expansion,
+  and follow the DECISION-018 precedent of listing concrete paths beside a retained wildcard;
+  (b) reach `PAUSED` by overloading `/campaign/<id>/reject` with a body flag — rejected, it
+  conflates a terminal rejection with a reversible pause and makes the audit trail lie;
+  (c) skip pause entirely and leave `PAUSED` permanently unreachable — rejected, R0.3 holds
+  enums exhaustive, and a registered state no code can enter is the same defect this whole
+  round is fixing.
+- Blocked since: 2026-09-05T00:00:00Z
+- RESOLUTION (2026-09-05): Option (a), operator-ratified. Four routes added to `REGISTRY.json`
+  `routes`: `/campaign/<campaign_id>/pause`, `/admin/campaigns`, `/admin/orders`,
+  `/.well-known/ucp`. The `/admin/*` wildcard is retained alongside the two concrete paths per
+  the DECISION-018 precedent. Campaign drafting deliberately gets NO route: PRD §9.2 makes the
+  merchant a reviewer, not an author, so drafting is triggered by the `openstore campaign draft`
+  CLI command and the Studio is a review surface only. This is why no `/campaign/draft` or
+  `POST /campaign` appears here.
+
+## Q-031 | stage: 12 | date: 2026-09-05T00:00:00Z
+- What is ambiguous: `surfaces/wellknown.py`'s `protocols[]` array advertises
+  `{"name": "acp", "version": "2024-11-01", "endpoint": "<origin>/agent/acp", "auth":
+  ["oauth2_bearer", "http_message_signature"], "authority_schemes": ["acp_delegated_token",
+  "native_webauthn"]}`. Three things are wrong with it. ACP has never published a
+  `2024-11-01` release — the real spec versions are 2025-09-29, 2025-12-12, 2026-01-16,
+  2026-01-30 and 2026-04-17, all post-dating that string, and the original PRD text carried
+  `[verify-at-build]` on the version precisely because it was never pinned (R0.7). The
+  endpoint it names, `server.py`'s `POST /agent/acp`, returns `{"error": "not implemented"}`.
+  And `acp_delegated_token` is advertised as an accepted authority scheme with no code path
+  that accepts one. An ACP-aware agent that trusts the manifest fails on contact — a manifest
+  is a promise, so advertising a protocol the sidecar does not speak is worse than
+  advertising none. Separately, UCP (Google/Shopify with Etsy, Wayfair, Target, Walmart;
+  announced 2026-01-11) publishes business capabilities at a fixed well-known path, and its
+  capability model maps nearly 1:1 onto surfaces this sidecar already serves — but nothing
+  in the tree exposes it.
+- Options considered: (a) implement `/agent/acp` against the 2026-04-17 spec — real work,
+  and ACP's Shared Payment Token collides with R0.10/INV-2 (the sidecar would have to accept
+  a delegated payment credential), so it is a stage of its own, not a manifest fix;
+  (b) drop the `acp` entry from `protocols[]`, keep the route registered and stubbed with an
+  honest `not_implemented` body, and add `/.well-known/ucp` declaring only capabilities that
+  genuinely work; (c) leave the entry and pin a real ACP version string — rejected, it would
+  make the lie more credible rather than less, since the endpoint still does nothing.
+- Blocked since: 2026-09-05T00:00:00Z
+- RESOLUTION (2026-09-05): Option (b), operator-ratified. The `acp` entry is removed from
+  `protocols[]` and replaced with a `ucp` entry pointing at the new `/.well-known/ucp`.
+  `POST /agent/acp` stays mounted (REGISTRY pins it) but returns `not_implemented` with a
+  pointer to `/agent/mcp` and the UCP manifest. The UCP manifest declares exactly two
+  capabilities — `dev.ucp.shopping.checkout` over the existing cart/checkout MCP tools and
+  `dev.ucp.shopping.discount` over the signed campaign feed — and deliberately omits
+  fulfilment and order management, which are not implemented. Its `payment_handlers` entry
+  states `flow: "hosted_payment_link"` rather than a delegated token, because the buyer
+  completes payment on the PSP's hosted page and no agent ever holds a credential (R0.10).
+  A sentinel test asserts every operation named in the UCP manifest is in
+  `REGISTRY.mcp_tools`, so the manifest cannot drift into promising a tool that does not
+  exist. `authority.scheme_capped_acp_delegated_token` stays in `authority_reason_codes`:
+  it is the cap applied IF such a scheme is ever presented, and removing it is out of scope.
