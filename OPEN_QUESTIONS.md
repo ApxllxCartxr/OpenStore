@@ -771,3 +771,62 @@
   `REGISTRY.mcp_tools`, so the manifest cannot drift into promising a tool that does not
   exist. `authority.scheme_capped_acp_delegated_token` stays in `authority_reason_codes`:
   it is the cap applied IF such a scheme is ever presented, and removing it is out of scope.
+
+## Q-032 | stage: 12 | date: 2026-09-05T00:00:00Z
+- What is ambiguous: the buyer leaves the conversation to pay. `checkout_initiate` creates a
+  Razorpay hosted payment link and `build_shop_result_embed` posts its `short_url` as a "Pay
+  here" field; nothing in chat tracks the payment after that. Completion arrives only if the
+  webhook fires (`psp/router.py::_push_chat_notification`), so a late or lost webhook leaves
+  the buyer with no signal at all until the hold-release DM tells them the order died. Every
+  competing protocol closes this seam differently — ACP's Shared Payment Token is designed so
+  the buyer never leaves the agent surface, UCP composes tokenized instruments — and R0.10 /
+  INV-2 forbid the AGENT holding a payment credential, though not the sidecar. Two candidate
+  repairs were scoped and neither is safe to land as a tail-end change.
+- Options considered: (a) edit the original Discord message in place as state changes ("Pay
+  here" -> "Payment received") — needs a new nullable `Checkout.discord_message_id` column and
+  an Alembic migration, plus the webhook worker editing a message in a channel it did not
+  post to, which is new cross-process plumbing on the money path; (b) poll `payment_link`
+  status from the existing `_hold_release_loop` so a lost webhook is still reconciled before
+  the hold is released — small in diff terms, but it puts a live PSP fetch inside the loop
+  that INV-4/INV-8/INV-11, the ledger golden vectors, and the mutmut money-path config all
+  guard, and it is exactly the surface that most deserves its own red-team pass rather than
+  a change made in passing; (c) add a UPI intent deep link (`upi://pay?pa=...`) beside the
+  hosted link so mobile buyers get one tap into their UPI app — REJECTED OUTRIGHT, not
+  deferred: the merchant's VPA is in no config field and appears nowhere in the tree, so
+  constructing the link means inventing a payee identifier. R0.7 forbids inventing a constant
+  and R0.3 forbids inventing a value; a guessed `pa=` either fails or, worse, points real
+  money at the wrong payee. It cannot be done honestly until a VPA is a declared config field
+  with a live test-mode capture behind it (the Q-007 protocol).
+- Blocked since: 2026-09-05T00:00:00Z
+- RESOLUTION: none yet. Recorded rather than implemented, deliberately: (a) and (b) both
+  touch the money path and each warrants its own stage with its own adversarial tests, and
+  (c) is not implementable without new configuration. The seam is real and is the single
+  place OpenStore's UX is behind ACP; it is not closed by this round of work.
+
+## Q-033 | stage: 12 | date: 2026-09-05T00:00:00Z
+- What is ambiguous: the AAL ladder the README sells is unreachable from chat. `BuyerAgent.confirm()`
+  and `BuyerAgent.hold_monitoring()` have no call sites in any bot path, so the
+  `checkout_confirm` / per-cart-assertion route never runs from Discord. The consequence is
+  visible in the Policy Studio: with `no_human_authority` left unchecked (its default), every
+  chat order is denied `assertion_required`, because there is no chat ceremony that can
+  produce a fresh per-cart WebAuthn assertion. The Studio copy states this plainly, so a
+  buyer is not misled — but it means the practical choice is "sign a standing policy that
+  needs no per-cart tap" (AAL1) or "cannot shop from chat at all". AAL2/AAL3, and the
+  liability ladder that rests on them, are only reachable through a direct API caller.
+- Options considered: (a) add a `cart` HandoffKind so a pending checkout can park a chat
+  conversation, render `/intent/studio?token=...` with a challenge bound to
+  {"mode": "cart", "cart_hash": ...} (the binding mode already exists in
+  `core/webauthn_rp._binding_matches`), and resume through the same
+  `_consume_and_resume` path policy signing uses — the machinery is all present, but
+  `HandoffKind` is a closed set fixed by DECISION-017, so this needs an enum value, an
+  Alembic migration, and its own red-team coverage that a cart assertion cannot be replayed
+  onto a different cart; (b) leave it and treat AAL1 as the chat ceiling, documenting that
+  AAL2/AAL3 are API-only — honest, but it quietly caps the product's central claim;
+  (c) auto-check `no_human_authority` for chat-originated policies — REJECTED, it would
+  silently weaken the authority model to make a UX problem disappear, which is the exact
+  inversion R0.9 exists to prevent.
+- Blocked since: 2026-09-05T00:00:00Z
+- RESOLUTION: none yet. Option (a) is the right shape and every piece it needs already
+  exists, but it is a closed-set change plus a migration plus adversarial tests — a stage,
+  not a tail-end addition. Recorded so the gap between the README's AAL ladder and what the
+  chat flow can actually reach is written down rather than assumed.

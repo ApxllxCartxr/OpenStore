@@ -16,7 +16,7 @@ Three commands. Your store now speaks to AI agents: a discovery manifest, an age
 
 ## Why this exists
 
-2026 is the year of the agentic commerce protocol race: **ACP** (OpenAI/Stripe), **AP2** (Google), **UCP** (Google), **x402** (Coinbase), **Visa TAP**, **Mastercard Agent Pay**, **NPCI UAP**. They all answer the same question: *how does an agent pay?*
+2026 is the year of the agentic commerce protocol race: **ACP** (OpenAI/Stripe/Meta), **UCP** (Google/Shopify), **AP2** (Google), **x402** (Coinbase), **Visa TAP**, **Mastercard Agent Pay**, **NPCI UAP**. They all answer the same question: *how does an agent pay?*
 
 None of them answer the harder one: ***what does the merchant hand an arbitrator 90 days later when the human disputes the charge?***
 
@@ -28,6 +28,19 @@ OpenStore is that missing layer — the **adjudication layer** — plus the grow
 | payable (AP2, TAP, Agent Pay) | **bounded** (human-signed compiler, not vibes) |
 | discoverable (manifests, feeds) | **governed** (AAL ladder: stronger proof → faster fulfillment) |
 
+Where it overlaps, it interoperates rather than competes. The sidecar serves
+MCP at `/agent/mcp` and a **UCP** capability manifest at `/.well-known/ucp`
+(`dev.ucp.shopping.checkout`, `dev.ucp.shopping.discount`) — declaring only what
+it actually implements. And the authorization model landed on the same shape
+**AP2** later specified: a signed `IntentPolicy` is structurally an Intent
+Mandate, a per-cart assertion a Cart Mandate. The difference is what enforces
+them — a deterministic compiler whose transcript is replayable, rather than a
+credential a merchant is trusted to honour.
+
+**x402 is deliberately not on the roadmap.** It solves stablecoin micropayments
+between machines; this is an INR/UPI stack for human-authorized purchases. There
+is no honest integration story, so there isn't one.
+
 And it's **Razorpay/UPI-native** — the stack the Western protocols don't cover — with an authorization model that maps cleanly onto RBI's e-mandate framework (AFA at registration, frictionless within limits).
 
 ---
@@ -37,7 +50,7 @@ And it's **Razorpay/UPI-native** — the stack the Western protocols don't cover
 ```
 ACT 0  pip install openstore[razorpay] && openstore init && openstore serve
        → a store that didn't exist 60 seconds ago is serving
-         /.well-known/agent-commerce.json, a catalog feed, and 14 MCP tools
+         /.well-known/agent-commerce.json, /.well-known/ucp, a catalog feed, and 16 MCP tools
 
 ACT 1  Human signs an IntentPolicy with a passkey:
        "₹2,000/month · ≤₹500 per order · Gelateria only · vegan items only"
@@ -170,7 +183,7 @@ Three agent modules ship in the package, all keyless, all proposal-only:
 
 - **Buyer agent** — Discord bot, MCP client, full planning loop: goal → search → policy-aware cart → checkout → hold monitoring.
 - **Merchant agent** — negotiates with buyer agents over structured counter-offers; when no in-policy path exists, drafts a **signed policy amendment** that only activates with a human's passkey tap.
-- **Campaign agent** — reads a privacy-bounded aggregate analytics view (never raw orders or PII), drafts campaigns, passes them through a deterministic validator, and publishes **only** after merchant signature.
+- **Campaign agent** — reads a privacy-bounded aggregate analytics view (never raw orders or PII), drafts campaigns, passes them through a deterministic validator, and publishes **only** after a merchant passkey approval bound to that specific campaign. Approved offers reach buyer agents through the signed feed and the catalog's `offers[]`; the discount itself is applied by the compiler, never taken on the offer's word.
 
 **Honest status:** the infrastructure for agents to safely transact is solid and heavily tested; the chat-native purchase flow (Discord DM → policy signing → checkout → hold → negotiation/amendment → evidence) is wired end-to-end and server-verified. See *What's real / what's next* below.
 
@@ -252,7 +265,7 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 
 ## What's real / what's next
 
-Built by one person with an AI agent over 11 spec'd stages. Here's the honest ledger:
+Built by one person with an AI agent over 12 spec'd stages. Here's the honest ledger:
 
 **Real and tested:**
 - ✅ The full money path — compiler, ledger, idempotency, hold/cancel, webhooks, reconciliation
@@ -270,8 +283,18 @@ Built by one person with an AI agent over 11 spec'd stages. Here's the honest le
   against an unpersisted, relieved `IntentPolicy` snapshot — never mutating the standing
   signed policy. `/orders/{checkout_id}/evidence` assembles the PoAI bundle with the chat
   request text as `human_intent` and the DM receipt as `notification`, reaching AAL2.
-  394/394 tests pass; 394-test suite plus a live server boot were used to verify this (real
-  Razorpay/Discord credentials still required to transact for real).
+  Verified with a live server boot (real Razorpay/Discord credentials still required to
+  transact for real).
+- ✅ **Federated multi-merchant shopping (Stage 12)** — one buyer process searches N merchant
+  origins over HTTP MCP, builds one cart tagged per line with `merchant_id`, and creates
+  separate per-merchant checkouts in two phases. Each merchant holds its own signed policy;
+  there is no signing hub, so there is no shared budget to double-spend (DECISION-022). A
+  buyer-hosted page aggregates the per-merchant signing links.
+- ✅ **Campaigns reach buyers** — the orchestrator drafts from an aggregate analytics view,
+  the merchant approves with a passkey bound to that specific campaign, and the buyer agent
+  discovers the live offer and applies it — with the discount recomputed server-side by
+  compiler check 12 and recorded in the evidence bundle.
+  563 tests pass.
 
 **Not yet:**
 - ❌ **Live third-party LLM planning loop** — the buyer/merchant agents' negotiation and
@@ -283,8 +306,17 @@ Built by one person with an AI agent over 11 spec'd stages. Here's the honest le
 - ❌ **Live Razorpay capture at scale** — driver is tested against golden fixtures and has
   been exercised against real test-mode payment links; sustained live-mode traffic is
   untested.
-- ❌ **Deployment story** — runs locally on SQLite; Docker/cloud and the sidecar integration
-  contract (health endpoints, origin rules) are specced, not built.
+- ❌ **Payment stays outside the conversation** — the buyer gets a Razorpay hosted-page link
+  and completion arrives by webhook. A late or lost webhook leaves them with no signal until
+  the hold expires. This is the one place the UX is clearly behind ACP, whose Shared Payment
+  Token exists so the buyer never leaves the agent surface. Scoped in Q-032; both candidate
+  repairs touch the money path and deserve their own stage.
+- ❌ **AAL2/AAL3 from chat** — there is no chat ceremony that produces a fresh per-cart
+  passkey assertion, so a Discord policy is signed with `no_human_authority` (AAL1) or the
+  order is denied. The Policy Studio says so on the form. Scoped in Q-033; the WebAuthn
+  binding mode already exists, but a new `HandoffKind` is a closed-set change.
+- ❌ **Deployment story** — runs locally on SQLite; Docker/cloud beyond the sidecar
+  integration contract (SID-1..7, implemented at the Stage 10 freeze).
 - ❌ **Third-party agent discovery** — the manifest surface exists; indexing by real
   platforms (ChatGPT/UCP/Merchant Center) is the market gap, not a code gap.
 
@@ -296,7 +328,7 @@ The infrastructure is deliberately overbuilt relative to the agent layer — for
 
 Python 3.12 · FastAPI · SQLModel · SQLite (`BEGIN IMMEDIATE`) · Razorpay test mode · WebAuthn (`py_webauthn`) · ES256 JWS · Sigstore Rekor · discord.py · uv
 
-Built by [Joseph Fernando](https://github.com/) with [OpenCode](https://github.com/sst/opencode), across 11 stages, from a PRD that treats identifiers as law. The PRD and stage specs are in this repo — `OPENSTORE_PRD_v3.md` and `SPECS/` are arguably the real product.
+Built by [Joseph Fernando](https://github.com/) with [OpenCode](https://github.com/sst/opencode), across 12 stages, from a PRD that treats identifiers as law. The PRD and stage specs are in this repo — `OPENSTORE_PRD_v3.md` and `SPECS/` are arguably the real product.
 
 ## License
 
