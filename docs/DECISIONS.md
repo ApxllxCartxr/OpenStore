@@ -187,3 +187,189 @@
   deterministic compiler enforcement AP2 does not specify. An AP2 adapter remains future
   work. x402 is explicitly NOT pursued: it is a stablecoin micropayment protocol for
   machine-to-machine API calls, and DECISION-015 fixes this sidecar to INR/UPI.
+
+## DECISION-027 | date: 2026-09-05T00:00:00Z | stage: 14
+- Two new MCP tools close a federated buyer's order status/cancel gap: `list_orders`
+  (read-only, no scope — matches `get_order`/`list_campaigns`) and `cancel_order` (gated
+  `checkout:initiate`, the scope every federated buyer OAuth client already has from
+  `federation-register-buyer` — no re-registration needed).
+- This is a mechanical fix, not a new policy question: single-merchant `BuyerBot._handle_cancel`
+  already worked (it shares the merchant's own DB session in-process), but `FederatedBuyerBot`
+  inherits that method verbatim and it silently no-ops — `self.config` there is `BuyerSettings`
+  (buyer.db, which never holds `Checkout` rows; those live in each merchant's own DB) and has
+  no `razorpay` config at all. It reported "no open orders" instead of failing loud (R0.5).
+- `cancel_order` is the first checkout-lookup tool in the codebase to check ownership.
+  `get_checkout`/`get_order` do not — any caller who knows a `checkout_id` can read any
+  checkout's state today. Left as-is (out of scope here); `cancel_order` adds the check
+  because it mutates, not because the gap was noticed and ignored elsewhere.
+- `checkout_id` is a required, caller-supplied argument, not "find my own latest" — deciding
+  *which* order, across however many merchants a federated buyer reaches, is
+  `buyer_agent.py`'s job (it can see every merchant the buyer is enrolled with); the tool only
+  ever sees one merchant's DB and has no basis to guess.
+- New `core/api.py:list_checkouts_for_buyer` — the first identity-scoped checkout query
+  anywhere in `core/`; `studio.py`'s admin order listing is unfiltered and operator-only.
+- Registered `checkout.not_found`, `psp.invalid_state`, and `auth.insufficient_scope` alongside
+  the new `checkout.not_owned`. The first three were already raised (by `get_order`,
+  `cancel_checkout_by_id`, and `_require_scope` respectively — the last also used by
+  create_cart/update_cart/checkout_initiate/checkout_confirm already) and absent from
+  REGISTRY.json — the same class of gap DECISION-023 fixed for `campaign.*`, except
+  `registry_diff.py`'s AST scan only ever checked `CampaignValidationError(...)` call sites, so
+  it never caught this one. A wider sweep found ~12 more unregistered `checkout.*`/`psp.*`
+  codes (`psp.cancel_failed`, `psp.refund_failed`, `psp.amount_invalid`, etc.) — flagged here,
+  not fixed: out of scope for this change, which only touches the three codes it actually raises.
+
+## DECISION-028 | date: 2026-09-05T00:00:00Z | stage: 14
+- MerchantBot (Q-034 RESOLUTION): a conversational, read-only reporting agent for the
+  merchant — `openstore merchant-bot <config...>`, its own Discord identity (env var
+  `MERCHANT_BOT_TOKEN`, distinct from any merchant's own `bot_token`, same pattern as the
+  buyer process's `BUYER_DISCORD_BOT_TOKEN`), DM-only, no bang commands.
+- Closed action set of exactly three read-only reports (`campaign_status`, `exposure`,
+  `recent_orders`), plus `unknown` for anything else — including any request to change,
+  approve, or mutate anything, which the system prompt tells the model to refuse rather than
+  pretend to do. It can never actually approve/reject/pause a campaign or touch money: not
+  because of the prompt wording, but because the action set contains no mutating action at
+  all, so there is nothing for the LLM to misuse even in the worst case (R0.10 by omission,
+  the same safety argument `cancel_order`'s server-side ownership check makes elsewhere).
+- One-shot LLM classification (a single `llm_chat` call → closed JSON action → deterministic
+  Python dispatch), not a multi-turn LangGraph loop like `BuyerGraph`. The buyer's loop earns
+  its complexity from genuine iterative search/negotiation; a merchant asking "how's my
+  campaign doing" needs exactly one lookup, so a second tool-calling graph would be
+  complexity with no matching need.
+- Runs as its own process reading directly from each merchant's own database, not through
+  MCP/OAuth — this is the merchant's own trusted tool, not an arm's-length buyer, so there is
+  no remote-caller trust boundary to cross. Takes any number of merchant config paths so one
+  bot instance can cover one store or several (both `gelateria.yaml` and `chai.yaml` for the
+  demo); a single Discord bot token can only safely log in from one process, which is why
+  this could not simply be a second `discord.Client` embedded in one merchant's own
+  `openstore serve`.
+- Deliberately does NOT use `core/database.get_engine`/`session_scope` — that module caches
+  ONE engine for the whole process (`_engine: Engine | None`, keyed by nothing), which is the
+  right shape for every other component here (one merchant per process, always). MerchantBot
+  is the one component that genuinely needs several merchants' databases open at once; going
+  through the shared singleton would have silently pointed every merchant but the first at
+  whichever database initialized it first. `MerchantBot` builds and keeps its own
+  `{name: Engine}` instead (mirroring `get_engine`'s SQLite/WAL setup, not its cache).
+- `agents/campaign_agent.py`'s private `_policy_headroom_minor` is promoted to
+  `core/campaigns.compute_merchant_headroom` — it now has a second real caller (the
+  `exposure` report), so it belongs with the other merchant-wide reporting functions rather
+  than staying private to the campaign-drafting flow.
+- No access control: responds to any DM. An allow-list of authorized Discord user IDs was a
+  real, considered option (Q-034) given the sensitivity of what this reports; the user
+  explicitly chose no restriction, matching `BuyerBot`'s existing lack of gating, over adding
+  one.
+
+## DECISION-029 | date: 2026-09-05T00:00:00Z | stage: 14
+- MerchantBot gains a fourth action, `suggest_campaign` (the user asked directly: "can I not
+  orchestrate or get suggested campaigns/offers from the merchant bot?"). Amends
+  DECISION-028's "exactly three read-only reports" — this one is not read-only, but it is not
+  a new mutating capability either: it runs the identical ingest → LLM draft → deterministic
+  validate → persist DRAFT → PENDING_APPROVAL pipeline `openstore campaign draft` already runs
+  from the CLI (`agents/campaign_agent.py` + `core/campaigns.create_campaign`/
+  `submit_for_approval`), just reachable from chat instead of a terminal.
+- Still cannot activate anything: PENDING_APPROVAL is the same non-authoritative artifact
+  either path produces, and only a real WebAuthn ceremony at `/campaign/studio` can move it to
+  ACTIVE — no chat surface can perform that (R0.10). `core/campaigns.py` still validates
+  before anything reaches the DB (R0.9) regardless of which caller triggered the draft.
+- Requires exactly one matched merchant — unlike the three report actions (which happily
+  aggregate across every matched store), drafting a campaign for "all of them at once" when
+  the merchant didn't say which store they meant would be guessing at something consequential
+  enough not to guess at; asks which store instead.
+
+## DECISION-030 | date: 2026-09-05T00:00:00Z | stage: 14
+- `/campaign/studio` (and every other `Depends(_operator)` route) now accepts the operator
+  identity as a `?operator=` query param in addition to the `X-Operator-Id` header — flagged
+  earlier this session as a real gap, hit in practice the moment a real campaign was drafted:
+  a plain browser navigation cannot set a custom header, so this page could never actually be
+  opened by clicking a link, only by a JS-driven `fetch()`. `_Operator`'s own docstring
+  already establishes this identity carries no authority of its own — it only selects which
+  WebAuthn credential set a session uses — so accepting it as a query param weakens nothing;
+  the real gate is the WebAuthn ceremony, unchanged.
+
+## DECISION-031 | date: 2026-09-05T00:00:00Z | stage: 14
+- Campaign Studio had no registration UI at all — only `policy_studio.html` (the buyer/policy
+  flow) ever called `navigator.credentials.create(...)`; Campaign Studio only ever called
+  `.get(...)` (an assertion), which requires a credential to already exist. A merchant operator
+  who had never signed a policy had no way to register a passkey for campaign approval at all —
+  found in practice the moment a real campaign needed approving.
+- Added a "Register your passkey" panel to `campaign_studio.html`, reusing the existing generic
+  `/internal/webauthn/register/begin`/`/complete` endpoints unchanged (they were already
+  operator-scoped, not policy-studio-specific — nothing server-side needed to change). One-time
+  per operator id, same as Policy Studio's enrolment panel.
+
+## DECISION-032 | date: 2026-09-05T00:00:00Z | stage: 14
+- Fixed a real money-path bug found live: `psp/razorpay_driver.py:create_payment_link`'s
+  idempotent-replay branch (`existing_idem.response_status == 200`) restored only
+  `psp_order_id`/`psp_payment_link_id` from the cached response, silently dropping
+  `short_url` and `cancel_token`. A checkout hitting this path came back `success` — state
+  HELD, correctly charged nothing — with no payment link and no way to cancel. Confirmed
+  live: a federated order for Gelateria (chocolate gelato + sprinkles, sprinkles dropped by
+  negotiation) landed exactly here — `build_federated_shop_result_embed` correctly rendered
+  "Order placed." with an empty line list because `short_url` genuinely was `None` in the DB,
+  not a rendering bug.
+- `_finalize_payment_link_create` always stores all four fields (`psp_order_id`,
+  `psp_payment_link_id`, `short_url`, `cancel_token`) in `response_body` on the real success
+  path — the replay branch just wasn't reading two of them back out. Fixed to restore all
+  four. Root trigger (what caused `create_payment_link` to be called twice with the same
+  trace_id/client_id/checkout_id in the live case) not isolated — the fix is correct
+  regardless of the trigger, since any legitimate idempotent replay must restore the full
+  cached response, not a subset.
+- The specific stuck checkout (`chk_mcp_b3655b9643df`) was repaired manually with a fresh
+  trace_id, generating a real payment link outside the buggy cached path.
+
+## DECISION-033 | date: 2026-09-05T00:00:00Z | stage: 14
+- Fixed "any offers on gelato?" returning "no special offers" despite 4 ACTIVE, in-window,
+  correctly-signed campaigns covering those exact SKUs. Root cause was NOT the data pipeline —
+  verified live end-to-end: `list_campaigns`, `FederatingMCPClient`'s merchant_id stamping,
+  and `_run_search`'s offer-matching in `buyer_graph.py` all worked correctly; the search
+  tool_result the LLM received genuinely carried `discount_bps`/`campaign_id` on the matching
+  items. The bug was that `_SYSTEM_PROMPT` never told the model those fields exist or that it
+  should look at or mention them — so even when explicitly asked about offers, with the data
+  sitting right there in its own context, it had no instruction to surface it.
+- Added explicit guidance to the `search` action's prompt text: a result item MAY carry
+  `discount_bps`/`campaign_title` (a real, already-verified discount, never invented), and the
+  model should name it when relevant or asked, and say plainly when an item has none.
+- New regression test pins the data side specifically (`test_search_tool_result_carries_the_
+  discount_before_any_selection`, tests/stage08/test_campaign_demand_loop.py) — the LLM
+  behavior itself isn't unit-testable, but the plumbing it depends on now has coverage beyond
+  "does the final cart line carry the discount" (which was already tested).
+
+## DECISION-034 | date: 2026-09-05T00:00:00Z | stage: 15
+- Closed a real gap identified by review: campaign orchestration was purely reactive (a human
+  or a chat message had to explicitly ask for a draft) and had no feedback loop from past
+  campaign outcomes back into future drafts — so it could draft compliant discounts on
+  request, but could not itself claim to grow revenue. Added both halves, deterministic
+  Python on both sides (R0.5/R0.9 — the LLM decides neither when to trigger nor what
+  counts as success).
+- **Trigger**: `core/campaigns.py:detect_stalled_skus` flags a SKU with real 30-day demand
+  (>= `campaign.stall_min_units_30d`, default 3 — filters out one-off sales) but zero units in
+  the last 7. `should_auto_trigger` additionally excludes SKUs already covered by a live
+  (ACTIVE/PENDING_APPROVAL) campaign, and enforces a per-merchant cooldown
+  (`campaign.auto_trigger_cooldown_hours`, default 24h) independent of how many SKUs stall at
+  once — bounds draft frequency regardless of signal volume. `auto_draft_campaign_if_stalled`
+  runs the exact same draft -> validate_campaign -> DRAFT -> PENDING_APPROVAL pipeline
+  `openstore campaign draft` and MerchantBot's `suggest_campaign` already use — this only
+  decides WHEN to call it. A new background loop, `server.py:_campaign_growth_loop`
+  (`campaign.growth_check_interval_seconds`, default 3600s), same shape as the existing
+  hold-release and campaign-expiry loops (tick on a timer, log-and-continue on failure, never
+  raise past its own tick). It can NEVER activate a campaign — PENDING_APPROVAL still requires
+  the real WebAuthn ceremony at /campaign/studio (R0.10: no chat surface or background loop
+  holds signing authority). Auto-triggered campaigns are tagged in `source_signals` (`trigger:
+  "auto_stall_detected"`, `stalled_skus: [...]`) so the audit trail can tell an autonomous
+  draft apart from a manually requested one.
+- **Feedback**: `compute_campaign_outcome` compares units sold across a campaign's SKUs in its
+  own live window so far against an equal-length window immediately before it started — no
+  new schema, derived entirely from existing `Checkout` rows. `delta_pct` is `None` (not 0)
+  when nothing sold before, since a SKU with zero prior sales has an undefined, not a 0%,
+  lift. `recent_campaign_outcomes` feeds a merchant's last 3 campaigns that actually ran
+  (ACTIVE/PAUSED/EXPIRED — never DRAFT/PENDING_APPROVAL/REJECTED) into `CampaignAgent.
+  draft_campaign`'s prompt as `past_campaign_outcomes`, with explicit instruction to weigh a
+  flat/negative repeat outcome rather than blindly re-suggesting the same play. `MerchantBot`'s
+  `campaign_status` report now appends the same before/after numbers for any ACTIVE/PAUSED/
+  EXPIRED campaign, so a merchant asking "how's it doing" gets a real answer instead of just
+  the discount terms.
+- No new REGISTRY.json entries: no new reason codes (existing `campaign.*` codes cover every
+  new failure path), no new MCP tools, no DB migration (outcome is computed, not stored).
+  14 new tests in tests/stage15/test_growth_loop.py cover the trigger's on/off conditions
+  (no stall, live coverage exclusion, cooldown block + expiry), the outcome math (including the
+  None-vs-zero distinction), that the autonomous path never reaches ACTIVE, and that the
+  draft prompt actually carries past outcomes.

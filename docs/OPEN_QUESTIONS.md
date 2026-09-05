@@ -830,3 +830,20 @@
   exists, but it is a closed-set change plus a migration plus adversarial tests — a stage,
   not a tail-end addition. Recorded so the gap between the README's AAL ladder and what the
   chat flow can actually reach is written down rather than assumed.
+
+## Q-034 | stage: 14 | date: 2026-09-05T00:00:00Z
+- What is ambiguous: the merchant has no conversational surface at all — only CLI, Studio
+  pages gated by an `X-Operator-Id` header a plain browser click cannot set, and one-way
+  `#merchant-trace` pushes the merchant can read but never reply into. The PRD never
+  specifies whether the merchant should get a chat agent, what it should be allowed to see,
+  or how access to it should be controlled — genuinely silent, not a mechanical gap like
+  Q-028's `campaign.*` reason codes.
+- Options considered: (a) no merchant bot at all — leave CLI/Studio as the only surfaces;
+  (b) a read-only reporting bot with no access control, responding to any DM; (c) the same,
+  but gated behind an allow-list of authorized Discord user IDs.
+- Blocked since: 2026-09-05T00:00:00Z
+- RESOLUTION: (b), per DECISION-028. Read-only reporting only — the action set contains no
+  mutating action, so unrestricted access exposes revenue/exposure/campaign data but can
+  never let anyone approve, reject, pause, or otherwise change anything. Access control was
+  a live option; the user explicitly chose no restriction, matching BuyerBot's existing lack
+  of gating, over building an allow-list.

@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "alg": "ES256",
+      "crv": "P-256",
+      "kid": "gelateria-roma-key-1",
+      "kty": "EC",
+      "x": "BSpG-SnJwNwo01ZSfBuyY0clsoGjR50xZJrelvUX5bc",
+      "y": "rcioc6gxa-uNZ3jHSI14OCB9qtSZ-D-8fRmZdMQ_WOA"
+    }
+  ]
+}
