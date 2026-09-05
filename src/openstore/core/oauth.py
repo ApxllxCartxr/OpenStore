@@ -101,7 +101,14 @@ def validate_client(
     if not client.is_active:
         raise OAuthError("invalid_client", "Client is inactive", 401)
 
-    if client_secret and client.client_secret_hash:
+    # A registered secret makes this a confidential client, so the secret is
+    # REQUIRED — not merely checked when supplied. Gating the comparison on
+    # `client_secret` being truthy let a caller authenticate as any known
+    # client_id simply by omitting the secret. Harmless while the only caller
+    # was in-process; an auth bypass the moment /oauth/token is reachable.
+    if client.client_secret_hash:
+        if not client_secret:
+            raise OAuthError("invalid_client", "Client secret required", 401)
         if not verify_client_secret(client_secret, client.client_secret_hash):
             raise OAuthError("invalid_client", "Invalid client secret", 401)
 
