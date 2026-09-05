@@ -5,9 +5,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
+import httpx
+
+from openstore.buyer_config import MerchantOrigin
 from openstore.config import Settings
 
 logger = logging.getLogger("openstore.mcp_client")
@@ -95,8 +99,155 @@ class InProcessMCPClient:
                 client_id=client_id,
             )
 
-    async def search_products(self, query: str, limit: int = 10) -> dict[str, Any]:
-        return await self.call("search_products", {"query": query, "limit": limit})
+    async def search_products(
+        self, query: str, tags: list[str] | None = None, limit: int = 10
+    ) -> dict[str, Any]:
+        return await self.call("search_products", {"query": query, "tags": tags, "limit": limit})
 
     async def get_order(self, checkout_id: str) -> dict[str, Any]:
         return await self.call("get_order", {"checkout_id": checkout_id})
+
+
+class HttpMCPClient:
+    """An MCP client for ONE merchant reachable over HTTP (S12).
+
+    Same call/return shape as InProcessMCPClient so the two are interchangeable
+    at the buyer agent boundary. require_auth is explicit at each call site
+    (never inferred from the tool name) so search — which needs no scope,
+    surfaces/mcp_server.py:32 — never touches /oauth/token or sends a header.
+    R0.10: this client only ever holds an OAuth bearer token, never PSP/signing
+    material.
+    """
+
+    def __init__(self, merchant: MerchantOrigin, *, timeout_seconds: float = 8.0) -> None:
+        self.merchant = merchant
+        self._timeout_seconds = timeout_seconds
+        self._access_token: str | None = None
+
+    async def _ensure_token(self) -> None:
+        """Obtain (once) an OAuth bearer token via client_credentials and cache it.
+
+        Never logs the client_secret or the resulting access_token.
+        """
+        if self._access_token is not None:
+            return
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            resp = await client.post(
+                f"{self.merchant.base_url}/oauth/token",
+                json={
+                    "grant_type": "client_credentials",
+                    "client_id": self.merchant.client_id,
+                    "client_secret": self.merchant.client_secret,
+                },
+            )
+        resp.raise_for_status()
+        token = resp.json().get("access_token")
+        if not token:
+            # Fail loud (R0.5): a 200 with no token means a broken origin, not
+            # a silently-anonymous call.
+            raise RuntimeError(
+                f"oauth/token for merchant {self.merchant.merchant_id!r} returned no access_token"
+            )
+        self._access_token = token
+
+    async def call(
+        self, tool_name: str, arguments: dict[str, Any], *, require_auth: bool
+    ) -> dict[str, Any]:
+        """Dispatch one MCP tool call over HTTP to this merchant's /agent/mcp."""
+        headers: dict[str, str] = {}
+        if require_auth:
+            await self._ensure_token()
+            headers["Authorization"] = f"Bearer {self._access_token}"
+
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            resp = await client.post(
+                f"{self.merchant.base_url}/agent/mcp",
+                json={"tool": tool_name, "arguments": arguments},
+                headers=headers,
+            )
+        resp.raise_for_status()
+        result: dict[str, Any] = resp.json()
+        return result
+
+    async def search_products(
+        self, query: str, tags: list[str] | None = None, limit: int = 10
+    ) -> dict[str, Any]:
+        return await self.call(
+            "search_products",
+            {"query": query, "tags": tags, "limit": limit},
+            require_auth=False,
+        )
+
+    async def get_order(self, checkout_id: str) -> dict[str, Any]:
+        return await self.call("get_order", {"checkout_id": checkout_id}, require_auth=True)
+
+
+class FederatingMCPClient:
+    """Fans search out across many merchant origins; routes cart/checkout to one.
+
+    create_cart/checkout_* are deliberately NOT fanned out here — the caller
+    already knows which merchant a cart line belongs to (stamped onto each
+    search result item) and reaches that merchant directly via client_for.
+    """
+
+    def __init__(
+        self, merchants: list[MerchantOrigin], *, search_timeout_seconds: float = 5.0
+    ) -> None:
+        self._clients: dict[str, HttpMCPClient] = {
+            m.merchant_id: HttpMCPClient(m, timeout_seconds=search_timeout_seconds)
+            for m in merchants
+        }
+
+    def client_for(self, merchant_id: str) -> HttpMCPClient:
+        try:
+            return self._clients[merchant_id]
+        except KeyError:
+            raise ValueError(
+                f"Unknown merchant_id {merchant_id!r}; known merchants: {sorted(self._clients)}"
+            ) from None
+
+    async def search_products(
+        self, query: str, tags: list[str] | None = None, limit: int = 10
+    ) -> dict[str, Any]:
+        """Search every merchant in parallel and merge results into one list.
+
+        A merchant that errors or times out contributes [] and is logged —
+        one bad origin must never fail the whole search (R0.5: loud, not
+        crashing the buyer's turn).
+        """
+
+        async def _search_one(merchant_id: str, client: HttpMCPClient) -> list[dict[str, Any]]:
+            result = await client.search_products(query, tags=tags, limit=limit)
+            if not result.get("success"):
+                logger.warning(
+                    "federated search: merchant %s returned an error: %s",
+                    merchant_id,
+                    result.get("error"),
+                )
+                return []
+            items = result.get("data", {}).get("items", [])
+            # Stamp merchant_id from the client that made the call, never from
+            # the remote payload — a merchant must not be able to claim to be
+            # another merchant.
+            stamped = []
+            for item in items:
+                item = dict(item)
+                item["merchant_id"] = merchant_id
+                stamped.append(item)
+            return stamped
+
+        results = await asyncio.gather(
+            *(_search_one(merchant_id, client) for merchant_id, client in self._clients.items()),
+            return_exceptions=True,
+        )
+
+        merged: list[dict[str, Any]] = []
+        for merchant_id, outcome in zip(self._clients.keys(), results, strict=True):
+            if isinstance(outcome, BaseException):
+                logger.warning(
+                    "federated search: merchant %s unreachable: %s", merchant_id, outcome
+                )
+                continue
+            merged.extend(outcome)
+
+        return {"success": True, "data": {"items": merged, "count": len(merged)}}

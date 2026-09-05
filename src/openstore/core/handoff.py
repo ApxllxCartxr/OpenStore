@@ -65,13 +65,19 @@ def create_handoff(
     request_text: str,
     ttl_seconds: int = HANDOFF_TTL_SECONDS,
     amendment_draft: dict[str, Any] | None = None,
+    resume_url: str | None = None,
 ) -> Handoff:
     """Create a new single-use handoff. Never reuses a token (secrets.token_urlsafe
     mirrors the existing cancel_token capability pattern).
 
     amendment_draft (S11 Phase 4, Q-020) is set only for kind=AMENDMENT: the
     drafted amendment (MerchantAgent.draft_amendment output) plus the cart it
-    was drafted against, carried between drafting and approval."""
+    was drafted against, carried between drafting and approval.
+
+    resume_url (S12 step 8) is set only by a federated buyer process that
+    wants a best-effort ping when this handoff is consumed — see
+    surfaces/buyer_internal.py. It carries no authority; the merchant never
+    reads anything back from it."""
     now = _now()
     handoff = Handoff(
         token=secrets.token_urlsafe(32),
@@ -84,6 +90,7 @@ def create_handoff(
         created_at=now,
         expires_at=now + timedelta(seconds=ttl_seconds),
         amendment_draft=amendment_draft,
+        resume_url=resume_url,
     )
     session.add(handoff)
     session.flush()

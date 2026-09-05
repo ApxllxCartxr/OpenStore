@@ -58,10 +58,15 @@ def rp_settings() -> Settings:
         merchant=MerchantConfig(name="Test"),
         razorpay=RazorpayConfig(key_id="k", key_secret="s"),
         discord=DiscordConfig(
-            bot_token="t", buyer_trace_channel_id=1, merchant_trace_channel_id=2,
-            money_trace_channel_id=3, alerts_channel_id=4,
+            bot_token="t",
+            buyer_trace_channel_id=1,
+            merchant_trace_channel_id=2,
+            money_trace_channel_id=3,
+            alerts_channel_id=4,
         ),
-        webauthn=WebAuthnConfig(rp_id="openstore.test", rp_name="x", origin="https://openstore.test"),
+        webauthn=WebAuthnConfig(
+            rp_id="openstore.test", rp_name="x", origin="https://openstore.test"
+        ),
         database=DatabaseConfig(url="sqlite://"),
         llm=LLMSettings(),
         campaign=CampaignSettings(),
@@ -94,7 +99,9 @@ def client(rp_settings: Settings, session_factory, store: ChallengeStore) -> Tes
     from openstore.surfaces.studio import policy_studio_router
 
     app = FastAPI()
-    app.include_router(policy_studio_router(rp_settings, session_factory=session_factory, challenge_store=store))
+    app.include_router(
+        policy_studio_router(rp_settings, session_factory=session_factory, challenge_store=store)
+    )
     with TestClient(app) as c:
         yield c
 
@@ -121,7 +128,9 @@ def _enrol_buyer_credential(session_factory) -> None:
         session.close()
 
 
-def _make_base_policy(session_factory, *, policy_hash: str, blocked_skus, max_spend_per_tx_minor: int) -> IntentPolicy:
+def _make_base_policy(
+    session_factory, *, policy_hash: str, blocked_skus, max_spend_per_tx_minor: int
+) -> IntentPolicy:
     now = int(datetime.now(UTC).timestamp())
     session = session_factory()
     try:
@@ -149,7 +158,9 @@ def _make_base_policy(session_factory, *, policy_hash: str, blocked_skus, max_sp
         session.close()
 
 
-def _make_amendment_handoff(session_factory, *, policy_hash: str, cart: list[dict], reason_code: str):
+def _make_amendment_handoff(
+    session_factory, *, policy_hash: str, cart: list[dict], reason_code: str
+):
     draft = MerchantAgent.__new__(MerchantAgent)  # config unused by draft_amendment
     draft.config = None
     drafted = draft.draft_amendment(policy_hash, reason_code, cart, "trace_amend_test")
@@ -187,7 +198,9 @@ def _extract_amendment_id(html: str) -> str:
 
 def _build_assertion(challenge_b64: str, sign_count: int = 4) -> dict:
     ec, _, _ = wf.keys()
-    cd, auth, sig = wf.build_assertion(_CRED_ID, _b64d(challenge_b64), sign_count, ec, wf.sign_es256)
+    cd, auth, sig = wf.build_assertion(
+        _CRED_ID, _b64d(challenge_b64), sign_count, ec, wf.sign_es256
+    )
     return {
         "credential_id": _b64u(_CRED_ID),
         "client_data_json": _b64u(cd),
@@ -213,7 +226,12 @@ class TestAmendmentApproval:
 
     def test_studio_page_renders_amendment_delta(self, client: TestClient, session_factory):
         _enrol_buyer_credential(session_factory)
-        _make_base_policy(session_factory, policy_hash="p" * 64, blocked_skus=["banana"], max_spend_per_tx_minor=100)
+        _make_base_policy(
+            session_factory,
+            policy_hash="p" * 64,
+            blocked_skus=["banana"],
+            max_spend_per_tx_minor=100,
+        )
         cart = [{"sku": "banana", "qty": 1, "unit_minor": 500, "tags": []}]
         token, drafted = _make_amendment_handoff(
             session_factory, policy_hash="p" * 64, cart=cart, reason_code="policy.sku_blocked"
@@ -229,7 +247,12 @@ class TestAmendmentApproval:
         self, client: TestClient, session_factory, monkeypatch
     ):
         _enrol_buyer_credential(session_factory)
-        _make_base_policy(session_factory, policy_hash="q" * 64, blocked_skus=["banana"], max_spend_per_tx_minor=100)
+        _make_base_policy(
+            session_factory,
+            policy_hash="q" * 64,
+            blocked_skus=["banana"],
+            max_spend_per_tx_minor=100,
+        )
         cart = [{"sku": "banana", "qty": 1, "unit_minor": 500, "tags": []}]
         token, drafted = _make_amendment_handoff(
             session_factory, policy_hash="q" * 64, cart=cart, reason_code="policy.sku_blocked"
@@ -244,7 +267,9 @@ class TestAmendmentApproval:
 
         def _fake_create_payment_link(**kwargs):
             session = kwargs["session"]
-            checkout = session.exec(select(Checkout).where(Checkout.id == kwargs["checkout_id"])).first()
+            checkout = session.exec(
+                select(Checkout).where(Checkout.id == kwargs["checkout_id"])
+            ).first()
             checkout.short_url = "https://pay.example/amend"
             checkout.cancel_token = "tok_amend"
             session.add(checkout)
@@ -256,7 +281,7 @@ class TestAmendmentApproval:
 
         dm_calls: list[tuple[str, str]] = []
 
-        async def _fake_send_dm(config, user_id, message):
+        async def _fake_send_dm(config, user_id, message, embed=None):
             dm_calls.append((user_id, message))
 
         monkeypatch.setattr(studio_module, "send_dm", _fake_send_dm)
@@ -290,13 +315,17 @@ class TestAmendmentApproval:
         cap — it does not touch every possible violation (Q-021). A cart still
         denied after relief is reported honestly, not silently retried."""
         _enrol_buyer_credential(session_factory)
-        _make_base_policy(session_factory, policy_hash="r" * 64, blocked_skus=[], max_spend_per_tx_minor=100)
+        _make_base_policy(
+            session_factory, policy_hash="r" * 64, blocked_skus=[], max_spend_per_tx_minor=100
+        )
         # tag_violation is untouched by the amendment's delta fields.
         cart = [{"sku": "dairy-thing", "qty": 1, "unit_minor": 50, "tags": ["dairy"]}]
 
         session = session_factory()
         try:
-            pol = session.exec(select(IntentPolicy).where(IntentPolicy.policy_hash == "r" * 64)).first()
+            pol = session.exec(
+                select(IntentPolicy).where(IntentPolicy.policy_hash == "r" * 64)
+            ).first()
             pol.allowed_tags = ["vegan"]
             pol.tag_mode = "all"
             session.add(pol)
@@ -315,7 +344,7 @@ class TestAmendmentApproval:
 
         dm_calls: list[tuple[str, str]] = []
 
-        async def _fake_send_dm(config, user_id, message):
+        async def _fake_send_dm(config, user_id, message, embed=None):
             dm_calls.append((user_id, message))
 
         monkeypatch.setattr(studio_module, "send_dm", _fake_send_dm)
@@ -337,9 +366,16 @@ class TestAmendmentApproval:
         )
         assert res2.status_code == 409
 
-    def test_reject_consumes_without_applying(self, client: TestClient, session_factory, monkeypatch):
+    def test_reject_consumes_without_applying(
+        self, client: TestClient, session_factory, monkeypatch
+    ):
         _enrol_buyer_credential(session_factory)
-        _make_base_policy(session_factory, policy_hash="s" * 64, blocked_skus=["banana"], max_spend_per_tx_minor=100)
+        _make_base_policy(
+            session_factory,
+            policy_hash="s" * 64,
+            blocked_skus=["banana"],
+            max_spend_per_tx_minor=100,
+        )
         cart = [{"sku": "banana", "qty": 1, "unit_minor": 500, "tags": []}]
         token, drafted = _make_amendment_handoff(
             session_factory, policy_hash="s" * 64, cart=cart, reason_code="policy.sku_blocked"
@@ -348,7 +384,7 @@ class TestAmendmentApproval:
 
         dm_calls: list[tuple[str, str]] = []
 
-        async def _fake_send_dm(config, user_id, message):
+        async def _fake_send_dm(config, user_id, message, embed=None):
             dm_calls.append((user_id, message))
 
         monkeypatch.setattr(studio_module, "send_dm", _fake_send_dm)
@@ -369,9 +405,16 @@ class TestAmendmentApproval:
         assert res2.status_code == 409
         assert res2.json()["detail"]["reason_code"] == "authority.handoff_consumed"
 
-    def test_approve_without_assertion_fields_is_rejected(self, client: TestClient, session_factory):
+    def test_approve_without_assertion_fields_is_rejected(
+        self, client: TestClient, session_factory
+    ):
         _enrol_buyer_credential(session_factory)
-        _make_base_policy(session_factory, policy_hash="u" * 64, blocked_skus=["banana"], max_spend_per_tx_minor=100)
+        _make_base_policy(
+            session_factory,
+            policy_hash="u" * 64,
+            blocked_skus=["banana"],
+            max_spend_per_tx_minor=100,
+        )
         cart = [{"sku": "banana", "qty": 1, "unit_minor": 500, "tags": []}]
         token, drafted = _make_amendment_handoff(
             session_factory, policy_hash="u" * 64, cart=cart, reason_code="policy.sku_blocked"

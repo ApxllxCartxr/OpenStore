@@ -1,4 +1,4 @@
-# OpenStore surfaces — MCP server (14 tools, closed set per PRD §6 / REGISTRY.json)
+# OpenStore surfaces — MCP server (16 tools, closed set per PRD §6 / REGISTRY.json)
 # Per PRD S6.3 — thin adapters over core/api.py + WebAuthn RP.
 
 from __future__ import annotations
@@ -647,6 +647,101 @@ def get_campaign(
         )
 
 
+def resolve_policy(
+    config: Settings,
+    session: Any,
+    user_id: str,
+    token_scopes: list[str],
+) -> MCPToolResult:
+    """MCP tool: resolve_policy. Thin adapter over core.handoff.require_active_policy
+    (S11: a remote buyer process resolving its per-merchant intent policy over
+    MCP instead of importing core/handoff.py directly). Returns exactly the 5
+    fields buyer_agent._load_policy_fields reads, plus policy_id. No active
+    signed policy → authority.policy_unsigned (R0.5), the same closed-set
+    reason_code require_active_policy already raises."""
+    _require_scope(token_scopes, "catalog:read")
+    try:
+        from openstore.core.handoff import HandoffError, require_active_policy
+
+        policy = require_active_policy(session, user_id)
+        return MCPToolResult(
+            success=True,
+            data={
+                "policy_id": policy.id,
+                "allowed_tags": policy.allowed_tags,
+                "tag_mode": policy.tag_mode,
+                "blocked_skus": policy.blocked_skus,
+                "max_spend_per_tx_minor": policy.max_spend_per_tx_minor,
+                "policy_hash": policy.policy_hash,
+            },
+        )
+    except HandoffError as e:
+        # HandoffError doesn't subclass CommerceError (same reason the
+        # RazorpayError branch exists in checkout_initiate above) — it needs
+        # its own except clause or its authority.* reason_code flattens to
+        # "internal_error" in the generic branch below.
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
+def create_policy_handoff(
+    config: Settings,
+    session: Any,
+    merchant_id: str,
+    chat_platform: str,
+    chat_user_id: str,
+    chat_channel_id: str,
+    request_text: str,
+    token_scopes: list[str],
+    resume_url: str | None = None,
+) -> MCPToolResult:
+    """MCP tool: create_policy_handoff. Thin adapter over core.handoff.create_handoff
+    (kind=POLICY) — bootstraps a signing link for a buyer with no active
+    policy, mirroring what buyer_agent._handle_shop does directly today when
+    buyer and merchant share a process. Caller commits (create_handoff only
+    flushes).
+
+    resume_url (S12 step 8, optional): a federated buyer's own
+    /internal/signing-complete endpoint. Stored verbatim, never validated as
+    a proof of anything — it just tells studio.py where to POST a best-effort
+    ping once this handoff is consumed (surfaces/buyer_internal.py does the
+    actual re-verification on receipt). Absent = today's behavior exactly."""
+    _require_scope(token_scopes, "catalog:read")
+    try:
+        from openstore.core.handoff import create_handoff
+        from openstore.models import HandoffKind
+
+        handoff = create_handoff(
+            session,
+            kind=HandoffKind.POLICY,
+            merchant_id=merchant_id,
+            chat_platform=chat_platform,
+            chat_user_id=chat_user_id,
+            chat_channel_id=chat_channel_id,
+            request_text=request_text,
+            resume_url=resume_url,
+        )
+        session.commit()
+        return MCPToolResult(success=True, data={"token": handoff.token})
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
 TOOL_NAMES = frozenset(
     {
         "search_products",
@@ -663,6 +758,8 @@ TOOL_NAMES = frozenset(
         "webauthn_complete_assertion",
         "list_campaigns",
         "get_campaign",
+        "resolve_policy",
+        "create_policy_handoff",
     }
 )
 
@@ -814,6 +911,25 @@ def handle_mcp_request(
             config=config,
             session=session,
             campaign_id=arguments.get("campaign_id", ""),
+        )
+    elif tool_name == "resolve_policy":
+        result = resolve_policy(
+            config=config,
+            session=session,
+            user_id=arguments.get("user_id", ""),
+            token_scopes=token_scopes,
+        )
+    elif tool_name == "create_policy_handoff":
+        result = create_policy_handoff(
+            config=config,
+            session=session,
+            merchant_id=arguments.get("merchant_id", ""),
+            chat_platform=arguments.get("chat_platform", ""),
+            chat_user_id=arguments.get("chat_user_id", ""),
+            chat_channel_id=arguments.get("chat_channel_id", ""),
+            request_text=arguments.get("request_text", ""),
+            token_scopes=token_scopes,
+            resume_url=arguments.get("resume_url"),
         )
     else:
         return {

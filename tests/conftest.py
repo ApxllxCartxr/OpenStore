@@ -27,6 +27,19 @@ def pytest_configure(config: pytest.Config) -> None:
     _database_module._engine = None
 
 
+@pytest.fixture(autouse=True)
+def _isolate_llm_env(monkeypatch):
+    """The test suite must never depend on (or accidentally hit) a
+    developer's real LLM keys/chain from .env.llm. agents/llm.py loads
+    .env.llm at import time, so LLM_PROVIDER_CHAIN can be sitting in
+    os.environ for the whole pytest session regardless of what an individual
+    test's LLM_PROVIDER monkeypatch says — create_llm() checks the chain
+    first. Clearing it here (autouse, every test) restores the "dummy by
+    default" isolation; a test that wants to exercise the chain sets
+    LLM_PROVIDER_CHAIN itself via monkeypatch."""
+    monkeypatch.delenv("LLM_PROVIDER_CHAIN", raising=False)
+
+
 @pytest.fixture()
 def settings() -> Settings:
     return Settings(

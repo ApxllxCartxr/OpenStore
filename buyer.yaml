@@ -1,0 +1,34 @@
+# OpenStore buyer configuration (S12 step 7) — the federated buyer agent's
+# own process config. Unknown keys cause hard failure (R0.3).
+#
+# client_id/client_secret for each merchant come from that merchant's
+# `openstore federation-register-buyer <merchant>.yaml` — run once per
+# merchant, paste the printed credentials into your .env (never here; this
+# file is checked in and must never carry real secrets).
+
+discord:
+  bot_token: "${BUYER_DISCORD_BOT_TOKEN}"
+  # Shares gelateria's trace channels for the demo. Safe to share the bot
+  # token too: both merchants now run buyer_bot_enabled=false, so this is the
+  # only process registering a BuyerBot.
+  buyer_trace_channel_id: 1542108166043471945
+  merchant_trace_channel_id: 1542108116894748712
+  money_trace_channel_id: 1542108062255419503
+  alerts_channel_id: 1542114553305899069
+
+database:
+  url: "sqlite:///buyer.db"
+
+llm:
+  model: "gpt-4o-mini"
+  temperature: 0.2
+
+merchants:
+  - name: "Gelateria Milano"
+    base_url: "http://localhost:8000"
+    client_id: "${GELATERIA_BUYER_CLIENT_ID}"
+    client_secret: "${GELATERIA_BUYER_CLIENT_SECRET}"
+  - name: "Chai House"
+    base_url: "http://localhost:8001"
+    client_id: "${CHAI_BUYER_CLIENT_ID}"
+    client_secret: "${CHAI_BUYER_CLIENT_SECRET}"

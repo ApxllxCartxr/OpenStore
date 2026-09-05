@@ -227,11 +227,16 @@ def _build_and_store_evidence(
     gap), so predicate e2 (and everything gated behind it) is honestly False
     for a bundle built this way; this is unrelated to Checkout.aal_level
     (item 22's already-flagged known divergence between the amount-based
-    holdcancel AAL and the bundle's own recomputed AAL)."""
+    holdcancel AAL and the bundle's own recomputed AAL).
+
+    If merchant signing fails (PoAISigningError), the bundle is persisted
+    without a signature and the failure is recorded in the audit trail.
+    This is the caller's policy choice per Q-025 Option (a)."""
     import hashlib
     from datetime import UTC, datetime
 
-    from openstore.core.poai import create_poai_bundle
+    from openstore.core.audit import audit_log
+    from openstore.core.poai import PoAISigningError, create_poai_bundle
     from openstore.models import IntentPolicy
     from openstore.surfaces.wellknown import get_catalog_signing_key
 
@@ -258,37 +263,82 @@ def _build_and_store_evidence(
 
     cart_snapshot = checkout.cart_snapshot or {}
 
-    bundle = create_poai_bundle(
-        transaction={
-            "checkout_id": checkout.id,
-            "amount_minor": checkout.amount_minor,
-            "merchant_id": checkout.merchant_id,
-            "currency": checkout.currency,
-        },
-        human_intent=human_intent,
-        authority={
-            "scheme": "native_webauthn",
-            "policy": {
-                "policy_id": policy.id,
-                "policy_version": policy.policy_version,
-                "policy_hash": policy.policy_hash,
-            }
-            if policy
-            else None,
-            "webauthn": {"credential_id": policy.webauthn_credential_id} if policy else None,
-        },
-        goods={"items": cart_snapshot.get("items", []), "cart_hash": checkout.cart_hash},
-        agent={
-            "client_id": checkout.client_id,
-            "scopes": ["checkout:confirm"],
-            "token_jti": checkout.trace_id,
-        },
-        adjudication={"verdict": "ALLOW", "transcript": [], "evaluated_at": now_iso},
-        notification={"sent_at": now_iso, "receipt_digest": f"sha256:{receipt_digest}"},
-        aal={"level": checkout.aal_level},
-        merchant_private_key_pem=get_catalog_signing_key(checkout.merchant_id),
-        merchant_id=checkout.merchant_id,
-    )
+    try:
+        bundle = create_poai_bundle(
+            transaction={
+                "checkout_id": checkout.id,
+                "amount_minor": checkout.amount_minor,
+                "merchant_id": checkout.merchant_id,
+                "currency": checkout.currency,
+            },
+            human_intent=human_intent,
+            authority={
+                "scheme": "native_webauthn",
+                "policy": {
+                    "policy_id": policy.id,
+                    "policy_version": policy.policy_version,
+                    "policy_hash": policy.policy_hash,
+                }
+                if policy
+                else None,
+                "webauthn": {"credential_id": policy.webauthn_credential_id} if policy else None,
+            },
+            goods={"items": cart_snapshot.get("items", []), "cart_hash": checkout.cart_hash},
+            agent={
+                "client_id": checkout.client_id,
+                "scopes": ["checkout:confirm"],
+                "token_jti": checkout.trace_id,
+            },
+            adjudication={"verdict": "ALLOW", "transcript": [], "evaluated_at": now_iso},
+            notification={"sent_at": now_iso, "receipt_digest": f"sha256:{receipt_digest}"},
+            aal={"level": checkout.aal_level},
+            merchant_private_key_pem=get_catalog_signing_key(checkout.merchant_id),
+            merchant_id=checkout.merchant_id,
+        )
+    except PoAISigningError as e:
+        # Persist unsigned bundle; record signing failure in audit trail.
+        audit_log(
+            session,
+            checkout.trace_id,
+            checkout.client_id,
+            "poai_bundle_created",
+            "checkout",
+            resource_id=checkout.id,
+            response_status=200,
+            metadata={"signing_error": str(e), "unsigned": True},
+        )
+        bundle = create_poai_bundle(
+            transaction={
+                "checkout_id": checkout.id,
+                "amount_minor": checkout.amount_minor,
+                "merchant_id": checkout.merchant_id,
+                "currency": checkout.currency,
+            },
+            human_intent=human_intent,
+            authority={
+                "scheme": "native_webauthn",
+                "policy": {
+                    "policy_id": policy.id,
+                    "policy_version": policy.policy_version,
+                    "policy_hash": policy.policy_hash,
+                }
+                if policy
+                else None,
+                "webauthn": {"credential_id": policy.webauthn_credential_id} if policy else None,
+            },
+            goods={"items": cart_snapshot.get("items", []), "cart_hash": checkout.cart_hash},
+            agent={
+                "client_id": checkout.client_id,
+                "scopes": ["checkout:confirm"],
+                "token_jti": checkout.trace_id,
+            },
+            adjudication={"verdict": "ALLOW", "transcript": [], "evaluated_at": now_iso},
+            notification={"sent_at": now_iso, "receipt_digest": f"sha256:{receipt_digest}"},
+            aal={"level": checkout.aal_level},
+            merchant_private_key_pem=None,  # No signature
+            merchant_id=checkout.merchant_id,
+        )
+
     checkout.poai_bundle = bundle
     session.add(checkout)
     session.flush()

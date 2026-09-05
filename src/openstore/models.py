@@ -110,6 +110,7 @@ class Checkout(SQLModel, table=True):
     psp_provider: str | None = Field(default=None, max_length=32)
     psp_order_id: str | None = Field(default=None, max_length=64)
     psp_payment_link_id: str | None = Field(default=None, max_length=64)
+    psp_payment_id: str | None = Field(default=None, max_length=64)
     short_url: str | None = Field(default=None, max_length=512)
     cancel_token: str | None = Field(default=None, max_length=64, unique=True)
     created_at: datetime = Field(
@@ -398,4 +399,59 @@ class Handoff(SQLModel, table=True):
         default=None, sa_column=Column(JSON, nullable=True)
     )
 
+    # S12 step 8: where to POST a best-effort "some buyer may have finished
+    # signing" ping once this handoff is consumed. Nullable — absent means
+    # either the legacy single-process path (studio.py resumes in-process
+    # via resume_after_signing) or a federated buyer that hasn't opted in.
+    # Carries no authority: see surfaces/buyer_internal.py for why a forged
+    # or replayed POST to this URL gains an attacker nothing.
+    resume_url: str | None = Field(default=None, max_length=1024)
+
     __table_args__ = (Index("ix_handoff_chat_user", "chat_platform", "chat_user_id"),)
+
+
+class ShoppingSessionState(str, enum.Enum):
+    """Closed set: a conversational-shopping session's lifecycle. Unlike
+    Handoff (resumed by a web link click), a ShoppingSession is resumed by
+    the buyer's next chat message — see core/shopping_session.py."""
+
+    AWAITING_REPLY = "AWAITING_REPLY"
+    COMPLETED = "COMPLETED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"
+
+
+class ShoppingSession(SQLModel, table=True):
+    """S13: parks a buyer/LLM shopping conversation between Discord messages
+    when BuyerGraph's agent_step asks the buyer something instead of
+    answering (e.g. "no vanilla, but we have chocolate — want that?"). The
+    buyer's next message (no command prefix needed) resumes it via
+    BuyerGraph.converse() with the accumulated `messages` transcript. Short
+    TTL (see expires_at) — this is an active chat exchange, not an async
+    out-of-band ceremony like Handoff."""
+
+    __tablename__ = "shopping_sessions"
+
+    id: str = Field(primary_key=True, max_length=64)  # "sess_" + secrets.token_hex
+    chat_platform: str = Field(max_length=32)
+    chat_user_id: str = Field(max_length=64, index=True)
+    chat_channel_id: str = Field(max_length=64)
+    policy_id: str = Field(max_length=64)
+    trace_id: str = Field(max_length=64)
+    goal: str = Field(max_length=4096)  # original request, for reference
+    messages: list[dict[str, Any]] = Field(sa_column=Column(JSON, nullable=False))
+    turns_used: int = Field(default=0)
+    state: ShoppingSessionState = Field(
+        sa_column=Column(SQLEnum(ShoppingSessionState), nullable=False)
+    )
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+    updated_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+    expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False))
+
+    __table_args__ = (
+        Index("ix_shopping_session_chat_user", "chat_platform", "chat_user_id", "chat_channel_id"),
+    )

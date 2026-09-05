@@ -211,7 +211,7 @@ class TestBuyerBotCancelCommand:
         message = _Message()
         await bot._handle_cancel(message, checkout.id)
 
-        assert message.channel.sent == ["Not your checkout."]
+        assert message.channel.sent == ["That checkout doesn't belong to you."]
         session.refresh(checkout)
         assert checkout.state == OrderState.HELD  # untouched
 
@@ -248,7 +248,7 @@ class TestWebhookChatPush:
 
         dm_calls: list[tuple[str, str]] = []
 
-        async def _fake_send_dm(config, user_id, message):
+        async def _fake_send_dm(config, user_id, message, embed=None):
             dm_calls.append((user_id, message))
 
         trace_calls: list[tuple] = []
@@ -298,7 +298,7 @@ class TestWebhookChatPush:
 
         dm_calls: list[tuple[str, str]] = []
 
-        async def _fake_send_dm(config, user_id, message):
+        async def _fake_send_dm(config, user_id, message, embed=None):
             dm_calls.append((user_id, message))
 
         async def _fake_money_trace(self, trace_id, action, amount_minor, currency="INR"):
@@ -338,7 +338,7 @@ class TestWebhookChatPush:
 
         dm_calls: list[tuple[str, str]] = []
 
-        async def _fake_send_dm(config, user_id, message):
+        async def _fake_send_dm(config, user_id, message, embed=None):
             dm_calls.append((user_id, message))
 
         import openstore.notifier as notifier_module

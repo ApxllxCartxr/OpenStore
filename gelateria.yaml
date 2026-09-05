@@ -12,10 +12,13 @@ razorpay:
 
 discord:
   bot_token: "${DISCORD_BOT_TOKEN}"
-  buyer_trace_channel_id: 123456789012345678
-  merchant_trace_channel_id: 123456789012345679
-  money_trace_channel_id: 123456789012345680
-  alerts_channel_id: 123456789012345681
+  buyer_trace_channel_id: 1542108166043471945   # buyer-agent-webhooks
+  merchant_trace_channel_id: 1542108116894748712 # merchant-bot-hooks
+  money_trace_channel_id: 1542108062255419503    # merchant-server-hooks
+  alerts_channel_id: 1542114553305899069         # audit-logs
+  # Buyer agent now runs as its own process; disable in-process BuyerBot to
+  # avoid a second Discord login on the shared bot_token (gelateria + chai).
+  buyer_bot_enabled: false
 
 webauthn:
   rp_id: "localhost"

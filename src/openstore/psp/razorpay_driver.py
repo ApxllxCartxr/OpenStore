@@ -539,7 +539,13 @@ def refund_checkout(
     reason: str = "Refund",
     mock_razorpay: Any | None = None,
 ) -> dict[str, Any]:
-    """Issue an idempotent refund against the PSP (refunds are idempotent requests)."""
+    """Issue an idempotent refund against the PSP (refunds are idempotent requests).
+
+    Q-027: Razorpay's refund API requires a payment_id (pay_...), not a
+    payment_link_id (plink_...). Prefer checkout.psp_payment_id (stored at
+    webhook time); fall back to fetching the payment_link and reading its
+    payments array.
+    """
     assert_test_mode_key(config.razorpay.key_id)
 
     checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
@@ -547,9 +553,30 @@ def refund_checkout(
     if not checkout:
         raise RazorpayError("psp.checkout_not_found", f"Checkout {checkout_id} not found", 404)
 
-    payment_id = checkout.psp_payment_link_id
+    # Get payment_id: prefer stored value, else fetch from payment_link
+    payment_id = checkout.psp_payment_id
     if not payment_id:
-        raise RazorpayError("psp.no_payment_link", "Checkout has no payment_link_id", 400)
+        link_id = checkout.psp_payment_link_id
+        if not link_id:
+            raise RazorpayError("psp.no_payment_link", "Checkout has no payment_link_id", 400)
+        # Fetch payment_link to get the payment_id (Q-027 fallback)
+        if mock_razorpay is not None:
+            payment_link = mock_razorpay.payment_link.fetch(link_id)
+        else:
+            from razorpay import Client
+
+            client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
+            payment_link = client.payment_link.fetch(link_id)
+        payments = payment_link.get("payments", [])
+        if not payments:
+            raise RazorpayError("psp.no_payment", "No payment found for payment_link", 400)
+        payment_id = payments[-1].get("id")
+        if not payment_id:
+            raise RazorpayError("psp.no_payment_id", "Payment link has no payment ID", 400)
+        # Cache for future refunds
+        checkout.psp_payment_id = payment_id
+        session.add(checkout)
+        session.flush()
 
     refund_amount = amount_minor or checkout.amount_minor
 

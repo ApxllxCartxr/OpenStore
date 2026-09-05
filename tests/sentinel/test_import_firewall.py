@@ -20,6 +20,7 @@ FORBIDDEN_IMPORTS = {
     # Internal agents (R0.9, R0.10)
     "openstore.agents",
     "openstore.agents.buyer_agent",
+    "openstore.agents.buyer_graph",
     "openstore.agents.merchant_agent",
     "openstore.agents.campaign_agent",
     "openstore.agents.llm",
@@ -28,6 +29,7 @@ FORBIDDEN_IMPORTS = {
 FORBIDDEN_FROM_IMPORTS = {
     "openstore.agents",
     "openstore.agents.buyer_agent",
+    "openstore.agents.buyer_graph",
     "openstore.agents.merchant_agent",
     "openstore.agents.campaign_agent",
     "openstore.agents.llm",
@@ -53,9 +55,7 @@ def check_file(filepath: Path) -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name in FORBIDDEN_IMPORTS:
-                    errors.append(
-                        f"{filepath}:{node.lineno}: Forbidden import '{alias.name}'"
-                    )
+                    errors.append(f"{filepath}:{node.lineno}: Forbidden import '{alias.name}'")
                 # Check prefix matches
                 for forbidden in FORBIDDEN_IMPORTS:
                     if alias.name.startswith(forbidden + "."):

@@ -83,7 +83,9 @@ def test_registry_reason_codes_complete():
     }
 
     actual = set(registry["reason_codes"])
-    assert actual == expected, f"reason_codes mismatch: missing={expected - actual}, extra={actual - expected}"
+    assert actual == expected, (
+        f"reason_codes mismatch: missing={expected - actual}, extra={actual - expected}"
+    )
 
 
 def test_registry_mcp_tools_complete():
@@ -105,10 +107,14 @@ def test_registry_mcp_tools_complete():
         "webauthn_complete_assertion",
         "list_campaigns",
         "get_campaign",
+        "resolve_policy",
+        "create_policy_handoff",
     }
 
     actual = set(registry["mcp_tools"])
-    assert actual == expected, f"mcp_tools mismatch: missing={expected - actual}, extra={actual - expected}"
+    assert actual == expected, (
+        f"mcp_tools mismatch: missing={expected - actual}, extra={actual - expected}"
+    )
 
 
 def test_registry_aal_levels():
@@ -130,8 +136,15 @@ def test_registry_error_namespaces():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
     assert registry["error_namespaces"] == [
-        "auth.*", "policy.*", "checkout.*", "psp.*", "ratelimit.*",
-        "agent.*", "hold.*", "authority.*", "orchestration.*",
+        "auth.*",
+        "policy.*",
+        "checkout.*",
+        "psp.*",
+        "ratelimit.*",
+        "agent.*",
+        "hold.*",
+        "authority.*",
+        "orchestration.*",
     ]
 
 
@@ -139,11 +152,16 @@ def test_registry_authority_reason_codes():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
     assert registry["authority_reason_codes"] == [
-        "authority.unknown_scheme", "authority.scheme_capped_native_webauthn",
-        "authority.scheme_capped_ap2_intent_mandate", "authority.scheme_capped_ap2_cart_mandate",
-        "authority.scheme_capped_acp_delegated_token", "authority.scheme_capped_none",
-        "authority.handoff_not_found", "authority.handoff_expired",
-        "authority.handoff_consumed", "authority.policy_unsigned",
+        "authority.unknown_scheme",
+        "authority.scheme_capped_native_webauthn",
+        "authority.scheme_capped_ap2_intent_mandate",
+        "authority.scheme_capped_ap2_cart_mandate",
+        "authority.scheme_capped_acp_delegated_token",
+        "authority.scheme_capped_none",
+        "authority.handoff_not_found",
+        "authority.handoff_expired",
+        "authority.handoff_consumed",
+        "authority.policy_unsigned",
     ]
 
 
@@ -151,14 +169,22 @@ def test_registry_oauth_scopes():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
     assert registry["oauth_scopes"] == [
-        "catalog:read", "cart:write", "checkout:initiate", "checkout:confirm",
+        "catalog:read",
+        "cart:write",
+        "checkout:initiate",
+        "checkout:confirm",
     ]
 
 
 def test_registry_checkout_states():
     with open("REGISTRY.json") as f:
         registry = json.load(f)
-    assert registry["checkout_states"] == ["PENDING", "POLICY_VERIFIED", "ORDER_CREATED", "REJECTED"]
+    assert registry["checkout_states"] == [
+        "PENDING",
+        "POLICY_VERIFIED",
+        "ORDER_CREATED",
+        "REJECTED",
+    ]
 
 
 def test_registry_ledger_accounts():

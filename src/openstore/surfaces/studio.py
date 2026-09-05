@@ -32,17 +32,24 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from openstore.agents.buyer_agent import compute_cart_hash, render_shop_result, resume_after_signing
+from openstore.agents.buyer_agent import (
+    build_shop_result_embed,
+    compute_cart_hash,
+    render_shop_result,
+    resume_after_signing,
+)
 from openstore.agents.mcp_client import InProcessMCPClient
 from openstore.config import Settings, merchant_id
 from openstore.core.api import create_checkout_from_policy
@@ -141,6 +148,12 @@ _HANDOFF_STATUS = {
     "authority.handoff_consumed": 409,
 }
 
+logger = logging.getLogger("openstore.studio")
+
+# S12 step 8: short timeout for the best-effort resume_url ping — this must
+# never make the human wait meaningfully longer for their signing response.
+_RESUME_NOTIFY_TIMEOUT_SECONDS = 3.0
+
 
 def _resolve_handoff_token(session_factory: Callable[[], Session], token: str) -> str:
     """S11 Phase 2 (Q-014 / Q-016): resolve a chat-issued handoff `token` to the
@@ -165,6 +178,35 @@ def _resolve_handoff(session_factory: Callable[[], Session], token: str) -> Hand
         session.close()
 
 
+async def _notify_resume_url(config: Settings, resume_url: str, handoff_token: str) -> None:
+    """S12 step 8: best-effort ping to a federated buyer process (its own
+    /internal/signing-complete endpoint) that some buyer may have finished
+    signing at this merchant.
+
+    SECURITY: this POST carries NO AUTHORITY. The body is exactly
+    {handoff_token, merchant_id} — no policy_id, no cap, nothing the
+    receiver could mistake for proof a policy exists. The receiving side
+    (surfaces/buyer_internal.py, in the buyer's own process) MUST
+    independently re-verify over its own authenticated MCP channel
+    (resolve_policy) before acting on this — a forged or replayed call here
+    must gain an attacker nothing beyond making the buyer re-check and find
+    nothing. This is what keeps DECISION-022's "no signing hub, no new trust
+    root" line intact: this process is a doorbell, never a source of truth
+    for the buyer.
+
+    Must never fail or block the signing response the human is looking at —
+    any timeout, connection error, or non-2xx is logged and swallowed."""
+    try:
+        async with httpx.AsyncClient(timeout=_RESUME_NOTIFY_TIMEOUT_SECONDS) as client:
+            resp = await client.post(
+                resume_url,
+                json={"handoff_token": handoff_token, "merchant_id": merchant_id(config)},
+            )
+        resp.raise_for_status()
+    except Exception as e:
+        logger.warning("resume_url notify to %s failed: %s", resume_url, e)
+
+
 async def _consume_and_resume(
     config: Settings,
     session_factory: Callable[[], Session],
@@ -177,7 +219,15 @@ async def _consume_and_resume(
     never retype their errand. A handoff that fails to resolve (e.g. already
     consumed by a second tab) does not undo the policy that was just signed —
     it is surfaced in the response, not raised, since the signing itself
-    already succeeded and committed."""
+    already succeeded and committed.
+
+    S12 step 8: resume_after_signing only works when the buyer and this
+    merchant share a process — gated on config.discord.buyer_bot_enabled,
+    the existing "this process hosts a live buyer conversation" signal. A
+    federated buyer (buyer_cli.py) runs elsewhere and is never reachable
+    this way; when the handoff carries a resume_url instead, that buyer
+    process gets a best-effort, no-authority ping (_notify_resume_url) and
+    re-verifies for itself."""
     session = session_factory()
     try:
         handoff = consume_handoff(session, handoff_token, result_policy_id=policy_id)
@@ -186,6 +236,7 @@ async def _consume_and_resume(
         chat_user_id = handoff.chat_user_id
         chat_channel_id = handoff.chat_channel_id
         request_text = handoff.request_text
+        resume_url = handoff.resume_url
     except HandoffError as e:
         session.rollback()
         sync_alert("handoff_resume_failed", e.message, {"reason_code": e.reason_code})
@@ -194,17 +245,25 @@ async def _consume_and_resume(
         session.close()
 
     await send_dm(config, chat_user_id, "Signed. Resuming your order…")
-    result = await resume_after_signing(
-        config,
-        InProcessMCPClient(config),
-        chat_platform=chat_platform,
-        chat_user_id=chat_user_id,
-        chat_channel_id=chat_channel_id,
-        request_text=request_text,
-        policy_id=policy_id,
-        trace_id=f"trace_handoff_{handoff_token[:8]}",
-    )
-    return {"resumed": True, "shop_result": result}
+
+    outcome: dict[str, Any] = {"resumed": False}
+    if config.discord.buyer_bot_enabled:
+        result = await resume_after_signing(
+            config,
+            InProcessMCPClient(config),
+            chat_platform=chat_platform,
+            chat_user_id=chat_user_id,
+            chat_channel_id=chat_channel_id,
+            request_text=request_text,
+            policy_id=policy_id,
+            trace_id=f"trace_handoff_{handoff_token[:8]}",
+        )
+        outcome = {"resumed": True, "shop_result": result}
+
+    if resume_url:
+        await _notify_resume_url(config, resume_url, handoff_token)
+
+    return outcome
 
 
 def _apply_amendment_delta(policy: IntentPolicy, delta: dict[str, Any]) -> IntentPolicy:
@@ -320,6 +379,7 @@ async def _approve_amendment(
             config,
             handoff.chat_user_id,
             "Amendment approved. " + render_shop_result(shop_result),
+            embed=build_shop_result_embed(shop_result),
         )
         return {"applied": True, "shop_result": shop_result}
     finally:

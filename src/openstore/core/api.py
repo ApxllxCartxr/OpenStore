@@ -27,7 +27,7 @@ from openstore.core.idempotency import (
     generate_idempotency_key,
 )
 from openstore.core.ledger import verify_ledger_balances
-from openstore.core.webauthn_rp import complete_assertion
+from openstore.core.webauthn_rp import WebAuthnError, complete_assertion
 from openstore.core.webhooks import (
     process_webhook_retry_queue,
 )
@@ -103,7 +103,7 @@ def create_checkout(
             assertion_verified = verified
             # Calculate assertion age
             assertion_age = webauthn_assertion.get("age_seconds", 0)
-        except Exception:
+        except WebAuthnError:
             assertion_verified = False
 
     return create_checkout_from_policy(
@@ -384,9 +384,7 @@ def confirm_checkout(
                 signature=webauthn_assertion["signature"],
                 challenge_b64url=webauthn_assertion["challenge"],
             )
-        except Exception:
-            verified = False
-        if not verified:
+        except WebAuthnError:
             raise CommerceError("assertion_required", "WebAuthn assertion failed to verify", 400)
 
     # Re-check the spend cap server-side (exposure: settled + in-flight RESERVE

@@ -55,7 +55,7 @@ def run_from_worker_thread(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
-def _to_discord_embed(fields: dict[str, Any]) -> Any:
+def build_discord_embed(fields: dict[str, Any]) -> Any:
     """Build a real discord.Embed from the plain dict the trace methods
     assemble. discord.py's Messageable.send(embed=...) calls .to_dict() on
     whatever it's given — a raw dict has no such method and raised
@@ -124,7 +124,7 @@ class DiscordNotifier:
         if not channel_id:
             return
         try:
-            discord_embed = _to_discord_embed(embed) if embed else None
+            discord_embed = build_discord_embed(embed) if embed else None
             for guild in client.guilds:
                 for ch in guild.channels:
                     if ch.id == channel_id:
@@ -196,17 +196,24 @@ class DiscordNotifier:
         )
 
 
-async def send_dm(config: Settings, user_id: str, message: str) -> None:
+async def send_dm(
+    config: Settings, user_id: str, message: str, embed: dict[str, Any] | None = None
+) -> None:
     """Direct-message a chat user by platform id. Offline (token
     absent/"token") logs instead of sending, matching the four trace-channel
-    methods' offline behaviour — tests never touch the network."""
+    methods' offline behaviour — tests never touch the network.
+
+    `embed`, when given, is the same plain-dict shape build_discord_embed()
+    expects (title/description/fields/timestamp) — callers never need to
+    import discord themselves."""
     client = _init_discord(config)
     if client is None:
         logger.info(f"[dm:{user_id}] {message}")
         return
     try:
         user = await client.fetch_user(int(user_id))
-        await user.send(message)
+        discord_embed = build_discord_embed(embed) if embed else None
+        await user.send(message, embed=discord_embed)
     except Exception as e:
         logger.warning(f"Discord DM error to {user_id}: {e}")
 

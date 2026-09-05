@@ -76,6 +76,36 @@ def search_catalog_items(
     return results
 
 
+def suggest_related_items(
+    config: Settings, cart_skus: list[str], limit: int = 2
+) -> list[dict[str, Any]]:
+    """S14: deterministic cross-sell — no LLM call, just a catalog lookup over
+    each cart item's related_skus. Never touches cart/money state (display
+    only); candidates already in the cart are excluded. Order is stable
+    (first cart item's related_skus first, then the next's, deduped)."""
+    items = load_catalog(config)
+    by_sku = {item["sku"]: item for item in items}
+    cart_set = set(cart_skus)
+
+    suggestions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for sku in cart_skus:
+        item = by_sku.get(sku)
+        if not item:
+            continue
+        for related_sku in item.get("related_skus", []):
+            if related_sku in cart_set or related_sku in seen:
+                continue
+            related_item = by_sku.get(related_sku)
+            if not related_item:
+                continue
+            suggestions.append(related_item)
+            seen.add(related_sku)
+            if len(suggestions) >= limit:
+                return suggestions
+    return suggestions
+
+
 def get_catalog_item(config: Settings, sku: str) -> dict[str, Any] | None:
     """Get a single catalog item by SKU."""
     items = load_catalog(config)

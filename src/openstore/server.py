@@ -146,7 +146,15 @@ def create_app(config: Settings) -> FastAPI:
                 intents.message_content = True  # privileged; toggle in the Discord dev portal
                 client = discord.Client(intents=intents)
                 set_discord_client(client)
-                BuyerBot(config, BuyerAgent(config, InProcessMCPClient(config))).register(client)
+                # Gated separately from the client itself: the client is
+                # shared with the notifier (four trace channels + DMs)
+                # regardless of whether this process also hosts the buyer
+                # bot. Two merchants on one Discord bot_token must not both
+                # register a BuyerBot, or both get the same DM and reply.
+                if config.discord.buyer_bot_enabled:
+                    BuyerBot(config, BuyerAgent(config, InProcessMCPClient(config))).register(
+                        client
+                    )
                 discord_task = asyncio.create_task(client.start(token))
             except Exception as exc:
                 console_print(f"Warning: Discord client not started: {exc}")
@@ -302,8 +310,72 @@ def create_app(config: Settings) -> FastAPI:
                 "checkout:confirm",
             ],
             "response_types_supported": ["code"],
-            "grant_types_supported": ["authorization_code"],
+            "grant_types_supported": ["authorization_code", "client_credentials"],
             "code_challenge_methods_supported": ["S256"],
+        }
+
+    @app.post("/oauth/token")
+    async def oauth_token(request: Request) -> Any:
+        from fastapi.responses import JSONResponse
+
+        from openstore.core.database import session_scope
+        from openstore.core.oauth import (
+            ACCESS_TOKEN_TTL_SECONDS,
+            OAuthError,
+            create_token_pair,
+            validate_client,
+        )
+
+        body = await request.json()
+        grant_type = body.get("grant_type")
+
+        if grant_type != "client_credentials":
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "unsupported_grant_type",
+                    "error_description": f"Grant type {grant_type!r} is not supported",
+                },
+            )
+
+        client_id = body.get("client_id")
+        client_secret = body.get("client_secret")
+        requested_scope = body.get("scope")
+
+        try:
+            # session_scope commits on success / rolls back on error (INV-11) — a
+            # plain get_session()+close() silently drops every write this call makes.
+            with session_scope(config) as session:
+                client = validate_client(
+                    session,
+                    client_id=str(client_id) if client_id else "",
+                    client_secret=str(client_secret) if client_secret else None,
+                )
+
+                # Never grant a scope the client isn't registered for: intersect
+                # any requested scope with the client's registered set.
+                if requested_scope:
+                    requested_scopes = set(str(requested_scope).split())
+                    granted_scopes = [s for s in client.scopes if s in requested_scopes]
+                else:
+                    granted_scopes = list(client.scopes)
+
+                access_token, _refresh_token = create_token_pair(
+                    session,
+                    client_id=client.client_id,
+                    scopes=granted_scopes,
+                )
+        except OAuthError as e:
+            return JSONResponse(
+                status_code=e.status_code,
+                content={"error": e.error, "error_description": e.description},
+            )
+
+        return {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": ACCESS_TOKEN_TTL_SECONDS,
+            "scope": " ".join(granted_scopes),
         }
 
     @app.get("/.well-known/poai-jwks.json")
@@ -335,7 +407,7 @@ def create_app(config: Settings) -> FastAPI:
     @app.post("/agent/mcp")
     async def agent_mcp(request: Request) -> dict[str, Any]:
         from openstore.core.database import get_session
-        from openstore.core.oauth import validate_access_token
+        from openstore.core.oauth import OAuthError, validate_access_token
         from openstore.surfaces.mcp_server import handle_mcp_request
 
         body = await request.json()
@@ -350,8 +422,9 @@ def create_app(config: Settings) -> FastAPI:
                 token_record = validate_access_token(session, bearer_token)
                 token_scopes = token_record.scopes
                 client_id = token_record.client_id
-            except Exception:
-                pass
+            except OAuthError as e:
+                session.close()
+                return {"error": e.error, "message": e.description}
             finally:
                 session.close()
 

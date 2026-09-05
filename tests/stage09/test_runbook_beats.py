@@ -55,10 +55,15 @@ def _settings() -> Settings:
         merchant=MerchantConfig(name="Gelateria Milano", currency="INR"),
         razorpay=RazorpayConfig(key_id="rzp_test_runbook", key_secret="s"),
         discord=DiscordConfig(
-            bot_token="t", buyer_trace_channel_id=1, merchant_trace_channel_id=2,
-            money_trace_channel_id=3, alerts_channel_id=4,
+            bot_token="t",
+            buyer_trace_channel_id=1,
+            merchant_trace_channel_id=2,
+            money_trace_channel_id=3,
+            alerts_channel_id=4,
         ),
-        webauthn=WebAuthnConfig(rp_id="localhost", rp_name="OpenStore", origin="http://localhost:8000"),
+        webauthn=WebAuthnConfig(
+            rp_id="localhost", rp_name="OpenStore", origin="http://localhost:8000"
+        ),
         database=DatabaseConfig(url="sqlite://"),
         llm=LLMSettings(),
         campaign=CampaignSettings(),
@@ -125,9 +130,11 @@ def session(tmp_path: Path):
     )
     s.catalog_path = str(cat)
     import openstore.core.database as db_mod
+
     db_mod._engine = None
     # Force catalog cache reload for THIS catalog path
     import openstore.surfaces.catalog as cat_mod
+
     cat_mod.CATALOG_CACHE = None
     init_database(s)
     ses = get_session(s)
@@ -161,8 +168,10 @@ def catalog_session(tmp_path: Path):
     )
     cfg.catalog_path = str(cat)
     import openstore.core.database as db_mod
+
     db_mod._engine = None
     import openstore.surfaces.catalog as cat_mod
+
     cat_mod.CATALOG_CACHE = None
     init_database(cfg)
     ses = get_session(cfg)
@@ -174,6 +183,7 @@ def catalog_session(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # Beat 4: the agentic failure + over-cap
 # ---------------------------------------------------------------------------
+
 
 class TestBeat4AgenticFailure:
     """policy.tag_violation -> negotiation -> NO_COMPLIANT_PATH -> amendment
@@ -208,8 +218,9 @@ class TestBeat4AgenticFailure:
 
         # Cart with a non-vegan item: pistachio (tag "pistachio" not in ["vegan"])
         ctx = CompilerContext(
-            cart_items=[{"sku": "gelato_pistachio", "qty": 1, "unit_minor": 18000,
-                         "tags": ["pistachio"]}],
+            cart_items=[
+                {"sku": "gelato_pistachio", "qty": 1, "unit_minor": 18000, "tags": ["pistachio"]}
+            ],
             policy=pol,
             merchant_id="gelateria-milano",
             currency="INR",
@@ -224,14 +235,36 @@ class TestBeat4AgenticFailure:
         assert not result.allowed
         assert result.reason_code == "policy.tag_violation"
 
-    def test_merchant_negotiation_responds_with_counter(self):
+    def test_merchant_negotiation_responds_with_counter(self, monkeypatch):
+        import json as _json
+
+        from openstore.agents.llm import DummyProvider, register_provider
+
+        class _Provider(DummyProvider):
+            def chat(self, messages, **kwargs):
+                return _json.dumps({"action": "remove_violating_tags", "rationale": "tag mismatch"})
+
+        register_provider("test_beat4_counter", _Provider)
+        monkeypatch.setenv("LLM_PROVIDER", "test_beat4_counter")
+
         agent = MerchantAgent(_settings())
         cart = [{"sku": "gelato_vanilla", "qty": 1, "unit_minor": 15000, "tags": ["vegan"]}]
         msg = agent.negotiate(cart, "policy.tag_violation", "trace_001", policy={})
         assert msg["from"] == "merchant_agent"
         assert msg["state"] == "COUNTERED"
 
-    def test_merchant_negotiation_unrecoverable_returns_no_compliant_path(self):
+    def test_merchant_negotiation_unrecoverable_returns_no_compliant_path(self, monkeypatch):
+        import json as _json
+
+        from openstore.agents.llm import DummyProvider, register_provider
+
+        class _Provider(DummyProvider):
+            def chat(self, messages, **kwargs):
+                return _json.dumps({"action": "no_compliant_path", "rationale": "no fix available"})
+
+        register_provider("test_beat4_none", _Provider)
+        monkeypatch.setenv("LLM_PROVIDER", "test_beat4_none")
+
         agent = MerchantAgent(_settings())
         # Empty cart cannot be recovered
         msg = agent.negotiate([], "policy.no_human_authority", "trace_002", policy={})
@@ -278,8 +311,7 @@ class TestBeat4AgenticFailure:
 
         # Cart 600 INR > 500 INR cap -> DENY
         ctx = CompilerContext(
-            cart_items=[{"sku": "luxury_box", "qty": 1, "unit_minor": 60000,
-                         "tags": []}],
+            cart_items=[{"sku": "luxury_box", "qty": 1, "unit_minor": 60000, "tags": []}],
             policy=pol,
             merchant_id="gelateria-milano",
             currency="INR",
@@ -299,6 +331,7 @@ class TestBeat4AgenticFailure:
 # Beat 5: campaign beat
 # ---------------------------------------------------------------------------
 
+
 class TestBeat5Campaign:
     """Seeded analytics -> draft -> approve -> list_campaigns discovery."""
 
@@ -317,29 +350,37 @@ class TestBeat5Campaign:
         _seed_checkouts(session, "gelateria-milano")
         now = datetime.now(UTC)
         c = create_campaign(
-            session, config, merchant_id="gelateria-milano",
-            title="Pistachio Push", rationale="Slow mover, summer heat.",
+            session,
+            config,
+            merchant_id="gelateria-milano",
+            title="Pistachio Push",
+            rationale="Slow mover, summer heat.",
             discount_bps=1500,
             applies_to_skus=["gelato_pistachio"],
-            starts_at=now, ends_at=now + timedelta(days=7),
+            starts_at=now,
+            ends_at=now + timedelta(days=7),
         )
         # Validator accepts the campaign
         validate_campaign(session, c, config)
 
         # Approve with WebAuthn -> ACTIVE
         activated = activate_campaign(
-            session, c.id, approver_credential_id="cred_op",
+            session,
+            c.id,
+            approver_credential_id="cred_op",
             webauthn_assertion={"signature": "sig", "challenge": "x"},
         )
         assert activated.state == CampaignState.ACTIVE
 
         # list_campaigns discovers it
-        active = list(session.exec(
-            select(Campaign).where(
-                Campaign.merchant_id == "gelateria-milano",
-                Campaign.state == CampaignState.ACTIVE,
-            )
-        ).all())
+        active = list(
+            session.exec(
+                select(Campaign).where(
+                    Campaign.merchant_id == "gelateria-milano",
+                    Campaign.state == CampaignState.ACTIVE,
+                )
+            ).all()
+        )
         assert len(active) == 1
         assert active[0].id == c.id
 
@@ -347,6 +388,7 @@ class TestBeat5Campaign:
 # ---------------------------------------------------------------------------
 # Beat 6: the dispute
 # ---------------------------------------------------------------------------
+
 
 class TestBeat6Dispute:
     """openstore-verify offline on an exported bundle; tampered variant
@@ -356,19 +398,29 @@ class TestBeat6Dispute:
         from openstore.core.poai import create_poai_bundle
 
         bundle = create_poai_bundle(
-            transaction={"checkout_id": "chk_beat6", "amount_minor": 15000,
-                         "merchant_id": "gelateria-milano", "currency": "INR"},
-            human_intent={"request_text": "buy gelato",
-                          "request_digest": "sha256:"
-                          + __import__("hashlib").sha256(b"buy gelato").hexdigest()},
+            transaction={
+                "checkout_id": "chk_beat6",
+                "amount_minor": 15000,
+                "merchant_id": "gelateria-milano",
+                "currency": "INR",
+            },
+            human_intent={
+                "request_text": "buy gelato",
+                "request_digest": "sha256:"
+                + __import__("hashlib").sha256(b"buy gelato").hexdigest(),
+            },
             authority={"webauthn": {"credential_id": "cred_beat6"}},
-            goods={"items": [{"sku": "vanilla", "unit_minor": 15000, "qty": 1}],
-                   "catalog_digest": "sha256:dummy"},
-            agent={"client_id": "test", "scopes": ["checkout:confirm"],
-                   "token_jti": "jti_beat6"},
-            adjudication={"verdict": "ALLOW",
-                          "transcript": [{"check": "human_authority_present",
-                                          "result": "pass", "reason_code": None}]},
+            goods={
+                "items": [{"sku": "vanilla", "unit_minor": 15000, "qty": 1}],
+                "catalog_digest": "sha256:dummy",
+            },
+            agent={"client_id": "test", "scopes": ["checkout:confirm"], "token_jti": "jti_beat6"},
+            adjudication={
+                "verdict": "ALLOW",
+                "transcript": [
+                    {"check": "human_authority_present", "result": "pass", "reason_code": None}
+                ],
+            },
             notification={"receipt_digest": "sha256:dummy"},
             aal={"level": 2},
         )
@@ -376,6 +428,7 @@ class TestBeat6Dispute:
         # the hash chain check should be deterministic and consistent.
         # Bundle's own chain is self-consistent: rerun build should match
         from openstore.core.poai import SECTION_ORDER, build_hash_chain, canonical_json_bytes
+
         sections = {n: canonical_json_bytes(bundle.get(n)) for n in SECTION_ORDER}
         expected = build_hash_chain(sections)
         assert bundle["chain"]["root"] == expected["root"]
@@ -389,19 +442,29 @@ class TestBeat6Dispute:
         )
 
         bundle = create_poai_bundle(
-            transaction={"checkout_id": "chk_beat6_t", "amount_minor": 15000,
-                         "merchant_id": "gelateria-milano", "currency": "INR"},
-            human_intent={"request_text": "buy gelato",
-                          "request_digest": "sha256:"
-                          + __import__("hashlib").sha256(b"buy gelato").hexdigest()},
+            transaction={
+                "checkout_id": "chk_beat6_t",
+                "amount_minor": 15000,
+                "merchant_id": "gelateria-milano",
+                "currency": "INR",
+            },
+            human_intent={
+                "request_text": "buy gelato",
+                "request_digest": "sha256:"
+                + __import__("hashlib").sha256(b"buy gelato").hexdigest(),
+            },
             authority={"webauthn": {"credential_id": "cred_t"}},
-            goods={"items": [{"sku": "vanilla", "unit_minor": 15000, "qty": 1}],
-                   "catalog_digest": "sha256:dummy"},
-            agent={"client_id": "test", "scopes": ["checkout:confirm"],
-                   "token_jti": "jti_t"},
-            adjudication={"verdict": "ALLOW",
-                          "transcript": [{"check": "human_authority_present",
-                                          "result": "pass", "reason_code": None}]},
+            goods={
+                "items": [{"sku": "vanilla", "unit_minor": 15000, "qty": 1}],
+                "catalog_digest": "sha256:dummy",
+            },
+            agent={"client_id": "test", "scopes": ["checkout:confirm"], "token_jti": "jti_t"},
+            adjudication={
+                "verdict": "ALLOW",
+                "transcript": [
+                    {"check": "human_authority_present", "result": "pass", "reason_code": None}
+                ],
+            },
             notification={"receipt_digest": "sha256:dummy"},
             aal={"level": 2},
         )

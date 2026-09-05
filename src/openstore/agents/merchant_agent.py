@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Any
 
+from openstore.agents.llm import llm_chat
 from openstore.config import Settings
 from openstore.notifier import sync_merchant_trace
 
@@ -22,6 +23,22 @@ NEGOTIATION_STATES = frozenset(
         "AMENDMENT_REQUESTED",
     }
 )
+
+NEGOTIATE_ACTIONS = frozenset(
+    {"remove_violating_tags", "swap_sku", "reduce_qty", "no_compliant_path"}
+)
+
+_ACTION_TO_CART_DELTA: dict[str, dict[str, Any]] = {
+    "remove_violating_tags": {"remove_violating_tags": True},
+    "swap_sku": {"swap_sku": True},
+    "reduce_qty": {"reduce_qty": True},
+}
+
+
+class MerchantAgentError(Exception):
+    """Raised when the LLM's response violates the closed output contract for a
+    merchant-agent reasoning step (invalid JSON, unrecognized action, etc). Distinct
+    from llm.LLMError, which means the provider/transport itself failed."""
 
 
 class NegotiationMessage:
@@ -145,51 +162,72 @@ class MerchantAgent:
         """
         S7.3: On a recoverable DENY, propose a counter-offer.
 
+        Reasons over the actual cart/policy contents (not just reason_code) via an
+        LLM call constrained to the closed action space `apply_cart_delta` already
+        knows how to execute. LLM proposes which action; Python maps it to the exact
+        cart_delta shape and never lets the LLM invent a mutation type (R0.9).
+
         Returns a counter-cart_delta proposal. Final state is either
-        ACCEPTED (cart compiles) or NO_COMPLIANT_PATH.
+        COUNTERED or NO_COMPLIANT_PATH.
+
+        Raises MerchantAgentError if the LLM's response violates the closed output
+        contract, or llm.LLMError if the provider call itself fails. Neither is
+        caught here — fail loud (R0.5), no fallback to a rule-based branch.
         """
         sync_merchant_trace(trace_id, "negotiate", {"reason_code": reason_code})
 
-        if reason_code == "policy.tag_violation":
-            return {
-                "negotiation_id": f"neg_{trace_id[:8]}",
-                "round": 1,
-                "from": "merchant_agent",
-                "state": "COUNTERED",
-                "cart_delta": {"remove_violating_tags": True},
-                "reason_code": reason_code,
-                "trace_id": trace_id,
-            }
-        elif reason_code == "policy.sku_blocked":
-            return {
-                "negotiation_id": f"neg_{trace_id[:8]}",
-                "round": 1,
-                "from": "merchant_agent",
-                "state": "COUNTERED",
-                "cart_delta": {"swap_sku": True},
-                "reason_code": reason_code,
-                "trace_id": trace_id,
-            }
-        elif reason_code == "policy.spend_per_tx_exceeded":
-            return {
-                "negotiation_id": f"neg_{trace_id[:8]}",
-                "round": 1,
-                "from": "merchant_agent",
-                "state": "COUNTERED",
-                "cart_delta": {"reduce_qty": True},
-                "reason_code": reason_code,
-                "trace_id": trace_id,
-            }
-        else:
-            return {
-                "negotiation_id": f"neg_{trace_id[:8]}",
-                "round": 1,
-                "from": "merchant_agent",
-                "state": "NO_COMPLIANT_PATH",
-                "cart_delta": {},
-                "reason_code": reason_code,
-                "trace_id": trace_id,
-            }
+        prompt_payload = {
+            "reason_code": reason_code,
+            "cart": cart,
+            "policy": {
+                "allowed_tags": policy.get("allowed_tags"),
+                "tag_mode": policy.get("tag_mode"),
+                "blocked_skus": policy.get("blocked_skus"),
+                "max_spend_per_tx_minor": policy.get("max_spend_per_tx_minor"),
+            },
+        }
+        system_prompt = (
+            "You are a merchant negotiation agent. Given a denied cart and the "
+            "reason it was denied, decide which ONE of exactly three corrective "
+            "actions to propose: remove_violating_tags (drop items whose tags fail "
+            "the policy), swap_sku (drop blocked SKUs), reduce_qty (reduce "
+            "quantities to fit the spend cap). If none of these three actions can "
+            "plausibly resolve reason_code, respond with no_compliant_path. "
+            'Respond with JSON only: {"action": '
+            '"remove_violating_tags"|"swap_sku"|"reduce_qty"|"no_compliant_path", '
+            '"rationale": "<one sentence>"}.'
+        )
+        response = llm_chat(
+            self.config,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(prompt_payload)},
+            ],
+        )
+
+        try:
+            draft = json.loads(response)
+        except json.JSONDecodeError as e:
+            raise MerchantAgentError(f"negotiate: invalid_json_response: {e}") from e
+
+        action = draft.get("action") if isinstance(draft, dict) else None
+        if action not in NEGOTIATE_ACTIONS:
+            raise MerchantAgentError(f"negotiate: invalid_action:{action!r}")
+
+        rationale = draft.get("rationale", "") if isinstance(draft, dict) else ""
+        state = "NO_COMPLIANT_PATH" if action == "no_compliant_path" else "COUNTERED"
+        cart_delta = dict(_ACTION_TO_CART_DELTA.get(action, {}))
+
+        return {
+            "negotiation_id": f"neg_{trace_id[:8]}",
+            "round": 1,
+            "from": "merchant_agent",
+            "state": state,
+            "cart_delta": cart_delta,
+            "reason_code": reason_code,
+            "trace_id": trace_id,
+            "rationale": rationale,
+        }
 
     def draft_amendment(
         self,
@@ -244,6 +282,11 @@ class MerchantAgent:
         """
         S7.5: Evidence narrator. Writes the human-readable cover note.
         Prose ONLY. The bundle is never modified.
+
+        The fact list below is assembled deterministically from the bundle; an LLM
+        call adds ONE further sentence characterizing the strength of the evidence,
+        explicitly instructed not to invent facts beyond what it's given. Raises
+        on LLM failure — fail loud (R0.5), no fallback to a canned sentence.
         """
         aal = bundle.get("aal", {}).get("level", 0)
         verdict = bundle.get("adjudication", {}).get("verdict", "UNKNOWN")
@@ -251,6 +294,13 @@ class MerchantAgent:
         merchant = bundle.get("transaction", {}).get("merchant_id", "unknown")
         checkout_id = bundle.get("transaction", {}).get("checkout_id", "unknown")
 
+        facts = {
+            "checkout_id": checkout_id,
+            "merchant": merchant,
+            "amount_minor": amount,
+            "verdict": verdict,
+            "aal_level": aal,
+        }
         notes = [
             f"Cover note for evidence bundle covering checkout {checkout_id}.",
             f"Merchant: {merchant}.",
@@ -259,19 +309,19 @@ class MerchantAgent:
             f"AAL level achieved: {aal}.",
         ]
 
-        if aal == 3:
-            notes.append(
-                "The human's authenticator signed this exact cart with user verification; this is the strongest merchant-side evidence of authorized intent available."
-            )
-        elif aal == 2:
-            notes.append(
-                "The human authorized a standing policy with a fresh, user-verified signature, and this cart compiled clean against it; this is evidence of authorized intent, with final allocation resting with the network and issuer."
-            )
-        elif aal == 1:
-            notes.append(
-                "Authority was presented but one or more freshness, attestation, or verification predicates failed; treat the transaction as contested."
-            )
-        elif aal == 0:
-            notes.append("No verifiable human authority exists; no order is created at this level.")
+        system_prompt = (
+            "You are a payments evidence narrator. Given these facts about a "
+            "transaction's authorization level, write ONE additional sentence "
+            "characterizing the strength of the evidence. Do not invent any fact "
+            "not given to you. Respond with plain text, one sentence."
+        )
+        sentence = llm_chat(
+            self.config,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(facts)},
+            ],
+        ).strip()
+        notes.append(sentence)
 
         return " ".join(notes)

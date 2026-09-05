@@ -178,5 +178,37 @@ def serve(
     uvicorn.run(fastapi_app, host=host, port=port, log_config=None)
 
 
+@app.command("federation-register-buyer")
+def federation_register_buyer(
+    config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
+    buyer_name: str = typer.Option(
+        "buyer-agent", "--buyer-name", help="OAuth client_name for the buyer agent"
+    ),
+) -> None:
+    """Provision an OAuth client_credentials client for an out-of-process buyer agent."""
+    config = load_config(config_path)
+
+    from openstore.core.database import apply_migrations, session_scope
+    from openstore.core.oauth import register_client
+
+    apply_migrations(config)
+
+    with session_scope(config) as session:
+        client_id, client_secret = register_client(
+            session,
+            client_name=buyer_name,
+            redirect_uris=[],
+            grant_types=["client_credentials"],
+            scopes=["catalog:read", "cart:write", "checkout:initiate", "checkout:confirm"],
+        )
+
+    console.print(f"[green]✓[/green] Registered buyer OAuth client: {buyer_name}")
+    console.print(f"  client_id:     {client_id}")
+    console.print(f"  client_secret: {client_secret}")
+    console.print(
+        "[yellow]Paste these into the buyer agent's config — the secret is shown once.[/yellow]"
+    )
+
+
 if __name__ == "__main__":
     app()

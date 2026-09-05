@@ -10,6 +10,18 @@ import secrets
 from datetime import UTC, datetime
 from typing import Any
 
+
+class PoAISigningError(Exception):
+    """Raised when PoAI bundle merchant signing fails.
+
+    Per R0.5, signing failures must fail loud — never silently produce a
+    bundle with a null merchant_signature. The caller (psp/router.py::_build_and_store_evidence)
+    decides whether to persist the bundle without a signature or abort.
+    """
+
+    pass
+
+
 # SECTION_ORDER: fixed order of the nine PoAI sections (v3.0, §3.3.0).
 # campaign is appended last (index 8). A non-applying section is JSON null.
 SECTION_ORDER = (
@@ -120,15 +132,20 @@ def sign_merchant_jws_compact(
     header_bytes = canonical_json_bytes({"alg": "ES256", "kid": kid, "typ": "JWT"})
 
     # Build payload
-    payload_bytes = canonical_json_bytes({
-        "bundle_id": bundle_id,
-        "issued_at": issued_at,
-        "root": root,
-    })
+    payload_bytes = canonical_json_bytes(
+        {
+            "bundle_id": bundle_id,
+            "issued_at": issued_at,
+            "root": root,
+        }
+    )
 
     # Sign
-    signing_input = base64.urlsafe_b64encode(header_bytes).decode().rstrip("=") + "." + \
-                    base64.urlsafe_b64encode(payload_bytes).decode().rstrip("=")
+    signing_input = (
+        base64.urlsafe_b64encode(header_bytes).decode().rstrip("=")
+        + "."
+        + base64.urlsafe_b64encode(payload_bytes).decode().rstrip("=")
+    )
     der_sig = key.sign(signing_input.encode("ascii"), ec.ECDSA(hashes.SHA256()))
 
     # DER signature to raw (r || s, each 32 bytes for P-256)
@@ -196,8 +213,12 @@ def evaluate_aal_predicates(bundle: dict[str, Any]) -> dict[str, bool]:
     agent = bundle.get("agent") or {}
     auth_webauthn = authority.get("webauthn") or {}
 
-    e1 = bool(agent.get("client_id") and agent.get("scopes") and agent.get("token_jti")
-              and "checkout:confirm" in agent.get("scopes", []))
+    e1 = bool(
+        agent.get("client_id")
+        and agent.get("scopes")
+        and agent.get("token_jti")
+        and "checkout:confirm" in agent.get("scopes", [])
+    )
 
     auth_data_raw = auth_webauthn.get("authenticator_data", "")
     auth_bytes: bytes | None = None
@@ -224,8 +245,7 @@ def evaluate_aal_predicates(bundle: dict[str, Any]) -> dict[str, bool]:
 
     e5 = False
     binding = auth_webauthn.get("challenge_binding") or {}
-    e5 = (binding.get("mode") == "cart" and
-           binding.get("cart_hash") == goods.get("cart_hash"))
+    e5 = binding.get("mode") == "cart" and binding.get("cart_hash") == goods.get("cart_hash")
 
     e6 = bool(goods.get("catalog_attestations_valid") is True)
 
@@ -233,8 +253,7 @@ def evaluate_aal_predicates(bundle: dict[str, Any]) -> dict[str, bool]:
     # matches. We use the re_execution check's verdict (the verifier runs the
     # same check at runtime); for a well-formed bundle with verdict=ALLOW and a
     # well-formed transcript, e7 is True.
-    e7 = (adjudication.get("verdict") == "ALLOW" and
-          bool(adjudication.get("transcript")))
+    e7 = adjudication.get("verdict") == "ALLOW" and bool(adjudication.get("transcript"))
 
     e8 = bool(human_intent is not None and human_intent != {})
     if e8:
@@ -242,13 +261,25 @@ def evaluate_aal_predicates(bundle: dict[str, Any]) -> dict[str, bool]:
         text_val = human_intent.get("request_text", "")
         if digest_val and text_val:
             computed = hashlib.sha256(text_val.encode("utf-8")).hexdigest()
-            e8 = (computed == digest_val)
+            e8 = computed == digest_val
 
-    e9 = bool(notification is not None and notification != {} and
-              notification.get("receipt_digest") is not None)
+    e9 = bool(
+        notification is not None
+        and notification != {}
+        and notification.get("receipt_digest") is not None
+    )
 
-    return {"e1": e1, "e2": e2, "e3": e3, "e4": e4, "e5": e5,
-            "e6": e6, "e7": e7, "e8": e8, "e9": e9}
+    return {
+        "e1": e1,
+        "e2": e2,
+        "e3": e3,
+        "e4": e4,
+        "e5": e5,
+        "e6": e6,
+        "e7": e7,
+        "e8": e8,
+        "e9": e9,
+    }
 
 
 def compute_aal_level_from_bundle(bundle: dict[str, Any]) -> int:
@@ -288,7 +319,9 @@ def compute_aal_level_from_bundle(bundle: dict[str, Any]) -> int:
     return 2
 
 
-def build_aal_section(level: int, predicates: dict[str, bool], reasons: list[str]) -> dict[str, Any]:
+def build_aal_section(
+    level: int, predicates: dict[str, bool], reasons: list[str]
+) -> dict[str, Any]:
     """Build the aal section of the bundle."""
     return {
         "level": level,
@@ -349,8 +382,8 @@ def create_poai_bundle(
                 private_key_pem=merchant_private_key_pem,
                 merchant_id=merchant_id,
             )
-        except Exception:
-            merchant_signature = None
+        except Exception as e:
+            raise PoAISigningError(f"merchant signing failed: {e}") from e
 
     time_anchor = build_time_anchor(chain["root"])
 
@@ -377,20 +410,59 @@ def create_poai_bundle(
 
 
 def verify_poai_bundle(bundle: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Verify PoAI bundle hash chain and top-level structure.
+    """Verify PoAI bundle — quick-look surface (checks 1-4).
+
+    This is the in-process "quick-look" verifier per Q-026 resolution.
+    It runs checks 1-4: schema, chain_integrity, merchant_signature (structural),
+    and time_anchor. The authoritative verifier is the offline CLI
+    (`openstore-verify`), which runs all 14 checks including the 10
+    content-dependent checks (5-14) that require persisted per-checkout
+    assertion data not available to the server (see Q-019).
 
     Returns (verified, errors).
     """
     errors: list[str] = []
 
-    chain = bundle.get("chain", {})
-    links = chain.get("links", [])
-    root = chain.get("root", "")
-
-    if len(links) != 9:
-        errors.append(f"chain.links must have 9 entries, got {len(links)}")
+    # Check 1: schema
+    required_toplevel = {
+        "poai_version",
+        "bundle_id",
+        "issued_at",
+        "transaction",
+        "human_intent",
+        "authority",
+        "goods",
+        "agent",
+        "adjudication",
+        "notification",
+        "aal",
+        "campaign",
+        "chain",
+    }
+    missing = required_toplevel - set(bundle.keys())
+    if missing:
+        errors.append(f"missing top-level fields: {sorted(missing)}")
         return False, errors
 
+    chain = bundle.get("chain", {})
+    required_chain = {"links", "root", "merchant_signature", "time_anchor"}
+    missing_chain = required_chain - set(chain.keys())
+    if missing_chain:
+        errors.append(f"chain missing fields: {sorted(missing_chain)}")
+        return False, errors
+
+    links = chain.get("links", [])
+    if not isinstance(links, list) or len(links) != 9:
+        errors.append(f"chain.links must be list of 9, got {type(links).__name__} len={len(links)}")
+        return False, errors
+
+    for i, link in enumerate(links):
+        if not isinstance(link, str) or not link.startswith("sha256:"):
+            errors.append(f"chain.links[{i}] must be 'sha256:hex', got {link!r}")
+            return False, errors
+
+    # Check 2: chain integrity
+    root = chain.get("root", "")
     sections_data: dict[str, bytes] = {}
     for i, section_name in enumerate(SECTION_ORDER):
         section_value = bundle.get(section_name)
@@ -405,5 +477,42 @@ def verify_poai_bundle(bundle: dict[str, Any]) -> tuple[bool, list[str]]:
 
     if root != expected["root"]:
         errors.append(f"root: expected {expected['root']}, got {root}")
+
+    # Check 3: merchant_signature (structural only — no JWKS available in-process)
+    sig_str = chain.get("merchant_signature", "")
+    if not sig_str:
+        errors.append("merchant_signature is empty")
+    elif sig_str == "unverified_no_jwks":
+        # Placeholder — in-process verifier cannot verify without JWKS
+        pass
+    else:
+        parts = sig_str.split(".")
+        if len(parts) != 3:
+            errors.append(
+                f"merchant_signature: invalid JWS Compact (expected 3 parts, got {len(parts)})"
+            )
+        else:
+            try:
+                import base64 as _b64
+                import json as _json
+
+                header = _json.loads(_b64.urlsafe_b64decode(parts[0] + "=="))
+                if header.get("alg") != "ES256":
+                    errors.append(
+                        f"merchant_signature: wrong algorithm {header.get('alg')}, expected ES256"
+                    )
+            except Exception as e:
+                errors.append(f"merchant_signature: cannot decode header: {e}")
+
+    # Check 4: time_anchor
+    anchor = chain.get("time_anchor")
+    if anchor is None:
+        errors.append("time_anchor is absent")
+    elif not isinstance(anchor, dict):
+        errors.append(f"time_anchor must be dict, got {type(anchor).__name__}")
+    else:
+        atype = anchor.get("type")
+        if atype not in ("rekor", "merkle_daily"):
+            errors.append(f"time_anchor: unknown anchor type: {atype}")
 
     return len(errors) == 0, errors

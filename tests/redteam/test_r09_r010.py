@@ -24,8 +24,19 @@ def test_buyer_agent_has_no_override_knobs():
         assert not hasattr(agent, attr)
 
 
-def test_merchant_agent_cannot_emit_verdict(session):
+def test_merchant_agent_cannot_emit_verdict(session, monkeypatch):
     """R0.9: negotiate() returns only negotiation states, never an allow/deny command."""
+    import json as _json
+
+    from openstore.agents.llm import DummyProvider, register_provider
+
+    class _Provider(DummyProvider):
+        def chat(self, messages, **kwargs):
+            return _json.dumps({"action": "remove_violating_tags", "rationale": "tag mismatch"})
+
+    register_provider("test_r09_negotiate", _Provider)
+    monkeypatch.setenv("LLM_PROVIDER", "test_r09_negotiate")
+
     agent = MerchantAgent(build_settings())
     cart = [{"sku": "GEL-VAN", "qty": 1, "unit_minor": 21000, "tags": ["vegan"]}]
     result = agent.negotiate(cart, "policy.tag_violation", "trace_001", policy={})

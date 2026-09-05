@@ -1058,5 +1058,10 @@ never dark-pattern.
    REGISTRY.json carry their `policy.*` namespace prefixes to match the §7 error-envelope
    convention exactly.
 4. **Demo script reason codes are namespaced** to match (e.g. `policy.tag_violation`).
+5. **Package layout note (Q-022):** The AAL ladder implementation lives in `core/holdcancel.py`
+   (the hold/cancel state machine). `core/aal.py` exists as a thin re-export for
+   §1.3 layout compliance. `poai.AALLevel` (plain `int` subclass, used for bundle AAL
+   computation) and `holdcancel.AALLevel` (`IntEnum`, used for the hold state machine)
+   coexist intentionally — they serve different type contexts and are not collapsed.
 
 This document replaces both prior files. The first build action remains STEP ZERO (§0.3).
