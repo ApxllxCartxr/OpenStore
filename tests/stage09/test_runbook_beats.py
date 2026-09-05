@@ -29,9 +29,9 @@ from openstore.config import (
     WebAuthnConfig,
 )
 from openstore.core.campaigns import (
-    activate_campaign,
     create_campaign,
     get_analytics_view,
+    submit_for_approval,
     validate_campaign,
 )
 from openstore.core.compiler import CompilerContext, compile_decision
@@ -345,7 +345,9 @@ class TestBeat5Campaign:
         pistachio = next(r for r in view if r["sku"] == "gelato_pistachio")
         assert pistachio["units_sold_30d"] >= 1
 
-    def test_draft_validate_approve_publish(self, catalog_session):
+    def test_draft_validate_approve_publish(
+        self, catalog_session, enrol_approver, approve_campaign
+    ):
         config, session = catalog_session
         _seed_checkouts(session, "gelateria-milano")
         now = datetime.now(UTC)
@@ -360,16 +362,14 @@ class TestBeat5Campaign:
             starts_at=now,
             ends_at=now + timedelta(days=7),
         )
-        # Validator accepts the campaign
+        # Validator accepts the campaign (create_campaign already ran it)
         validate_campaign(session, c, config)
 
-        # Approve with WebAuthn -> ACTIVE
-        activated = activate_campaign(
-            session,
-            c.id,
-            approver_credential_id="cred_op",
-            webauthn_assertion={"signature": "sig", "challenge": "x"},
-        )
+        # Park it for review, then approve with a real passkey ceremony
+        # (DECISION-024: a stub assertion dict no longer publishes anything).
+        submit_for_approval(session, c.id)
+        va = enrol_approver(session, config)
+        activated = approve_campaign(session, config, va, c.id, sign_count=2)
         assert activated.state == CampaignState.ACTIVE
 
         # list_campaigns discovers it

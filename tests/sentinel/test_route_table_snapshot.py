@@ -18,6 +18,7 @@ REGISTRY = json.loads((ROOT / "REGISTRY.json").read_text())
 _REGISTRY_TO_APP = {
     "/campaign/<campaign_id>/approve": "/campaign/{campaign_id}/approve",
     "/campaign/<campaign_id>/reject": "/campaign/{campaign_id}/reject",
+    "/campaign/<campaign_id>/pause": "/campaign/{campaign_id}/pause",
     "/hold/<cancel_token>/cancel": "/hold/{cancel_token}/cancel",
     "/orders/<checkout_id>/evidence": "/orders/{checkout_id}/evidence",
     "/orders/<id>/evidence/view": "/orders/{id}/evidence/view",

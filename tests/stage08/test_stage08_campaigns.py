@@ -38,6 +38,7 @@ from openstore.core.campaigns import (
     activate_campaign,
     create_campaign,
     get_analytics_view,
+    submit_for_approval,
     validate_campaign,
 )
 from openstore.core.compiler import CompilerContext, compile_decision
@@ -260,8 +261,11 @@ class TestLLMDraft:
         assert "top_skus" in draft["source_signals"]
         assert "slow_skus" in draft["source_signals"]
 
-    def test_invalid_json_llm_returns_error(self, config_with_catalog, seeded_session):
-        from openstore.agents.campaign_agent import CampaignAgent
+    def test_invalid_json_llm_fails_loud(self, config_with_catalog, seeded_session):
+        """R0.5: this used to return {"error": ...}, making a broken LLM
+        contract indistinguishable from a draft that happened to carry an
+        'error' key. It now raises."""
+        from openstore.agents.campaign_agent import CampaignAgent, CampaignDraftError
         from openstore.agents.llm import DummyProvider, register_provider
 
         class _BadProvider(DummyProvider):
@@ -274,8 +278,44 @@ class TestLLMDraft:
         os.environ["LLM_PROVIDER"] = "stage08_bad"
 
         agent = CampaignAgent(config_with_catalog)
-        draft = agent.draft_campaign(seeded_session, "gelateria-milano")
-        assert "error" in draft
+        with pytest.raises(CampaignDraftError):
+            agent.draft_campaign(seeded_session, "gelateria-milano")
+
+    def test_out_of_range_discount_is_not_clamped(self, config_with_catalog, seeded_session):
+        """R0.5 forbids coercion: the agent must not quietly pull a 90% draft
+        back into range. The validator rejects it by name instead."""
+        from openstore.agents.campaign_agent import CampaignAgent
+        from openstore.agents.llm import DummyProvider, register_provider
+
+        class _GreedyProvider(DummyProvider):
+            def chat(self, messages, **kwargs):
+                return json.dumps({
+                    "title": "Everything must go",
+                    "rationale": "R",
+                    "discount_bps": 9000,
+                    "applies_to_skus": ["gelato_vanilla"],
+                })
+
+        register_provider("stage08_greedy", _GreedyProvider)
+        config_with_catalog.llm.model = "dummy"
+        import os
+        os.environ["LLM_PROVIDER"] = "stage08_greedy"
+
+        draft = CampaignAgent(config_with_catalog).draft_campaign(
+            seeded_session, "gelateria-milano"
+        )
+        assert draft["discount_bps"] == 9000
+
+        now = datetime.now(UTC)
+        with pytest.raises(CampaignValidationError) as ei:
+            create_campaign(
+                seeded_session, config_with_catalog, merchant_id="gelateria-milano",
+                title=draft["title"], rationale=draft["rationale"],
+                discount_bps=draft["discount_bps"],
+                applies_to_skus=draft["applies_to_skus"],
+                starts_at=now, ends_at=now + timedelta(days=7),
+            )
+        assert ei.value.reason_code == "campaign.discount_out_of_bounds"
 
 
 # ---------------------------------------------------------------------------
@@ -409,29 +449,31 @@ class TestApprovePublish:
             applies_to_skus=["gelato_vanilla"],
             starts_at=now, ends_at=now + timedelta(days=7),
         )
+        submit_for_approval(session, c.id)
         with pytest.raises(CampaignValidationError) as ei:
             activate_campaign(session, c.id, approver_credential_id="", webauthn_assertion=None)
         assert ei.value.reason_code == "campaign.no_webauthn_approval"
-        # State must remain DRAFT
+        # State must remain PENDING_APPROVAL — a refused approval never advances it.
         c2 = session.exec(select(Campaign).where(Campaign.id == c.id)).first()
-        assert c2.state == CampaignState.DRAFT
+        assert c2.state == CampaignState.PENDING_APPROVAL
 
-    def test_activate_with_webauthn_succeeds(self, config_with_catalog, session):
+    def test_activate_with_webauthn_succeeds(
+        self, config_with_catalog, session, enrol_approver, approve_campaign
+    ):
         now = datetime.now(UTC)
+        va = enrol_approver(session, config_with_catalog)
         c = create_campaign(
             session, config_with_catalog, merchant_id="gelateria-milano",
             title="T", rationale="R", discount_bps=1500,
             applies_to_skus=["gelato_vanilla"],
             starts_at=now, ends_at=now + timedelta(days=7),
         )
-        activated = activate_campaign(
-            session, c.id,
-            approver_credential_id="cred_test_001",
-            webauthn_assertion={"signature": "deadbeef", "challenge": "x"},
-        )
+        submit_for_approval(session, c.id)
+        activated = approve_campaign(session, config_with_catalog, va, c.id, sign_count=2)
         assert activated.state == CampaignState.ACTIVE
-        assert activated.approver_credential_id == "cred_test_001"
+        assert activated.approver_credential_id is not None
         assert activated.webauthn_assertion is not None
+        assert activated.approved_at is not None
 
     def test_signed_feed_excludes_non_active(self, config_with_catalog, session):
         now = datetime.now(UTC)
@@ -460,36 +502,36 @@ class TestApprovePublish:
         assert c1.id not in ids
         assert c2.id not in ids
 
-    def test_max_active_enforced(self, config_with_catalog, session):
+    def test_max_active_enforced(
+        self, config_with_catalog, session, enrol_approver, approve_campaign
+    ):
+        """The limit now comes from config.campaign.max_active, which was dead
+        (hardcoded 5) until DECISION-025."""
         now = datetime.now(UTC)
-        # Default max_active = 5
-        activated_ids: list[str] = []
-        for i in range(5):
+        va = enrol_approver(session, config_with_catalog)
+        limit = config_with_catalog.campaign.max_active
+        sign_count = 2
+
+        def _draft(title: str) -> str:
             c = create_campaign(
                 session, config_with_catalog, merchant_id="gelateria-milano",
-                title=f"C{i}", rationale="R", discount_bps=1500,
+                title=title, rationale="R", discount_bps=1500,
                 applies_to_skus=["gelato_vanilla"],
                 starts_at=now, ends_at=now + timedelta(days=7),
             )
-            activate_campaign(
-                session, c.id,
-                approver_credential_id=f"cred_{i}",
-                webauthn_assertion={"signature": f"sig_{i}", "challenge": "x"},
-            )
-            activated_ids.append(c.id)
+            submit_for_approval(session, c.id)
+            return c.id
 
-        # 6th campaign must be rejected
-        c6 = create_campaign(
-            session, config_with_catalog, merchant_id="gelateria-milano",
-            title="C6", rationale="R", discount_bps=1500,
-            applies_to_skus=["gelato_vanilla"],
-            starts_at=now, ends_at=now + timedelta(days=7),
-        )
+        for i in range(limit):
+            approve_campaign(
+                session, config_with_catalog, va, _draft(f"C{i}"), sign_count=sign_count
+            )
+            sign_count += 1
+
+        over_limit = _draft("C-over")
         with pytest.raises(CampaignValidationError) as ei:
-            activate_campaign(
-                session, c6.id,
-                approver_credential_id="cred_6",
-                webauthn_assertion={"signature": "sig_6", "challenge": "x"},
+            approve_campaign(
+                session, config_with_catalog, va, over_limit, sign_count=sign_count
             )
         assert ei.value.reason_code == "campaign.max_active_exceeded"
 
@@ -689,11 +731,12 @@ class TestSignedFeedInvariant:
     """INV-13: no unsigned or out-of-window offer may appear in the feed."""
 
     def test_signed_feed_includes_only_active_in_window(
-        self, client, config_with_catalog
+        self, client, config_with_catalog, enrol_approver, approve_campaign
     ):
         now = datetime.now(UTC)
         s = get_session(config_with_catalog)
         try:
+            va = enrol_approver(s, config_with_catalog)
             # ACTIVE in-window
             c_ok = create_campaign(
                 s, config_with_catalog, merchant_id="gelateria-milano",
@@ -701,10 +744,8 @@ class TestSignedFeedInvariant:
                 applies_to_skus=["gelato_vanilla"],
                 starts_at=now, ends_at=now + timedelta(days=7),
             )
-            activate_campaign(
-                s, c_ok.id, approver_credential_id="cred_x",
-                webauthn_assertion={"signature": "s", "challenge": "x"},
-            )
+            submit_for_approval(s, c_ok.id)
+            approve_campaign(s, config_with_catalog, va, c_ok.id, sign_count=2)
 
             # ACTIVE but out-of-window
             c_oow = create_campaign(
@@ -714,10 +755,8 @@ class TestSignedFeedInvariant:
                 starts_at=now - timedelta(days=30),
                 ends_at=now - timedelta(days=1),
             )
-            activate_campaign(
-                s, c_oow.id, approver_credential_id="cred_y",
-                webauthn_assertion={"signature": "s", "challenge": "y"},
-            )
+            submit_for_approval(s, c_oow.id)
+            approve_campaign(s, config_with_catalog, va, c_oow.id, sign_count=3)
             s.commit()
 
             # Capture IDs while session is still open
