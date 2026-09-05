@@ -357,7 +357,10 @@ class TestAmendmentApproval:
         body = res.json()
         assert body["applied"] is False
         assert body["reason_code"] == "policy.tag_violation"
-        assert any("still doesn't compile" in m for _, m in dm_calls)
+        # The DM says what went wrong in plain language; the raw closed-set
+        # reason_code stays in the JSON response and the trace, never in chat.
+        assert any("still doesn't fit" in m for _, m in dm_calls)
+        assert not any("policy.tag_violation" in m for _, m in dm_calls)
 
         # consumed even though not applied — a decision was rendered
         res2 = client.post(

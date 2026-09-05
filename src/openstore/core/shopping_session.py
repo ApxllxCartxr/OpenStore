@@ -51,6 +51,38 @@ def find_active_session(
     return None
 
 
+def take_expired_session(
+    session: Session, chat_platform: str, chat_user_id: str, chat_channel_id: str
+) -> ShoppingSession | None:
+    """Claim the most recent AWAITING_REPLY session that has timed out, marking
+    it EXPIRED so it is claimed exactly once.
+
+    Expiry used to be purely lazy and completely silent: a buyer who answered a
+    question eleven minutes later had their reply re-read as a brand-new goal
+    with no explanation of why the thread had been dropped. The caller uses this
+    to say so before starting over.
+    """
+    rows = session.exec(
+        select(ShoppingSession)
+        .where(
+            ShoppingSession.chat_platform == chat_platform,
+            ShoppingSession.chat_user_id == chat_user_id,
+            ShoppingSession.chat_channel_id == chat_channel_id,
+            ShoppingSession.state == ShoppingSessionState.AWAITING_REPLY,
+        )
+        .order_by(ShoppingSession.created_at.desc())  # type: ignore[attr-defined]
+    ).all()
+    now = _now()
+    for row in rows:
+        if row.expires_at < now:
+            row.state = ShoppingSessionState.EXPIRED
+            row.updated_at = now
+            session.add(row)
+            session.flush()
+            return row
+    return None
+
+
 def create_session(
     session: Session,
     *,

@@ -45,6 +45,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from openstore.agents.buyer_agent import (
+    _friendly_denial_reason,
     build_shop_result_embed,
     compute_cart_hash,
     render_shop_result,
@@ -445,7 +446,10 @@ async def _approve_amendment(
             await send_dm(
                 config,
                 handoff.chat_user_id,
-                f"Amendment approved, but the cart still doesn't compile: {result.reason_code}.",
+                # Never show a raw closed-set reason_code to a buyer — the same
+                # friendly map the bot uses everywhere else.
+                "Amendment approved, but the cart still doesn't fit — "
+                f"{_friendly_denial_reason(result.reason_code)}.",
             )
             return {
                 "applied": False,

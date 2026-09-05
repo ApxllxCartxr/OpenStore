@@ -184,3 +184,41 @@ class TestFederatedBuyerBotRouting:
         await client.handler(message)
 
         assert calls == ["chai please"]
+
+
+class TestCancelRouting:
+    """`!cancel` used to require a checkout_id as an argument, but
+    build_shop_result_embed deliberately never prints one (a stage07 sentinel
+    pins that it must not), so the documented cancel path could not be used
+    from chat. A bare `!cancel` now targets the caller's latest open order."""
+
+    async def _route(self, settings, monkeypatch, content: str, *, guild_id: int | None):
+        bot = _bot_with_shopping_channel(settings, shopping_channel_id=None)
+        calls: list[str | None] = []
+
+        async def _fake_handle_cancel(message, checkout_id):
+            calls.append(checkout_id)
+
+        monkeypatch.setattr(bot, "_handle_cancel", _fake_handle_cancel)
+        client = _FakeClient()
+        bot.register(client)
+        await client.handler(_FakeMessage(7, 42, content, guild_id=guild_id))
+        return calls
+
+    async def test_bare_bang_cancel_targets_the_latest_order(
+        self, settings, session, monkeypatch
+    ):
+        assert await self._route(settings, monkeypatch, "!cancel", guild_id=99) == [None]
+
+    async def test_bang_cancel_with_an_id_still_targets_that_id(
+        self, settings, session, monkeypatch
+    ):
+        calls = await self._route(settings, monkeypatch, "!cancel chk_123", guild_id=99)
+        assert calls == ["chk_123"]
+
+    async def test_bare_cancel_in_a_dm_is_a_session_abort_not_an_order_cancel(
+        self, settings, session, monkeypatch
+    ):
+        """Bare "cancel" (no bang, no argument) in free-text context keeps its
+        existing meaning: abort the pending question, not the order."""
+        assert await self._route(settings, monkeypatch, "cancel", guild_id=None) == []
