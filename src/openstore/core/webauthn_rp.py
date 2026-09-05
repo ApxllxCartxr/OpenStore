@@ -233,8 +233,10 @@ def _binding_matches(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
     exactly but keys on `amendment_id` instead of `cart_hash`: the buyer's
     approval assertion must be bound to the specific drafted amendment, not
     just "some amendment", so a stale or mismatched challenge can never
-    authorize a different amendment (R0.5). Unknown modes never match (R0.3:
-    unknown value => hard error, never a silent pass).
+    authorize a different amendment (R0.5). `campaign` mode (DECISION-024) keys
+    on `campaign_id` for the same reason: an approval for one campaign must not
+    be spendable on another. Unknown modes never match (R0.3: unknown value =>
+    hard error, never a silent pass).
     """
     expected_mode = expected.get("mode")
     actual_mode = actual.get("mode")
@@ -250,6 +252,10 @@ def _binding_matches(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
         return expected.get("amendment_id") is not None and expected.get(
             "amendment_id"
         ) == actual.get("amendment_id")
+    if expected_mode == "campaign":
+        return expected.get("campaign_id") is not None and expected.get(
+            "campaign_id"
+        ) == actual.get("campaign_id")
     if expected_mode == "policy":
         return True
     return False

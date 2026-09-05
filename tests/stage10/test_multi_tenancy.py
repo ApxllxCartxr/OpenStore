@@ -235,7 +235,7 @@ from datetime import UTC, datetime, timedelta
 cfg = Settings(merchant=MerchantConfig(name='gelateria-milano'), razorpay=RazorpayConfig(key_id='x',key_secret='s'), discord=DiscordConfig(bot_token='t',buyer_trace_channel_id=1,merchant_trace_channel_id=2,money_trace_channel_id=3,alerts_channel_id=4), webauthn=WebAuthnConfig(rp_id='l',rp_name='O',origin='o'), database=DatabaseConfig(url='sqlite:///{g_db}'))
 init_database(cfg); s=get_session(cfg)
 now=datetime.now(UTC)
-c=create_campaign(s,cfg,merchant_id='gelateria-milano',title='Gelato special',rationale='summer',discount_bps=1500,applies_to_skus=['gelato_vanilla'],starts_at=now,ends_at=now+timedelta(days=7))
+c=create_campaign(s,cfg,merchant_id='gelateria-milano',title='Gelato special',rationale='summer',discount_bps=1500,applies_to_skus=[],starts_at=now,ends_at=now+timedelta(days=7))
 s.commit(); s.close()
 """
         subprocess.run([sys.executable, "-c", helper], cwd=ROOT, check=True, capture_output=True)

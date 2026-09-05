@@ -78,17 +78,54 @@ def test_campaign_agent_has_no_session_no_keys():
 
 def test_campaign_draft_is_not_activated(session):
     """R0.9: a drafted campaign is inert until a human approves it."""
+    import json
+    import os
+
     from openstore.agents.campaign_agent import CampaignAgent
+    from openstore.agents.llm import DummyProvider, register_provider
     from openstore.models import Campaign
     from sqlmodel import select
+
+    class _Provider(DummyProvider):
+        def chat(self, messages, **kwargs):
+            return json.dumps(
+                {
+                    "title": "Pistachio push",
+                    "rationale": "Slow mover.",
+                    "discount_bps": 1500,
+                    "applies_to_skus": [],
+                }
+            )
+
+    register_provider("r09_draft", _Provider)
+    os.environ["LLM_PROVIDER"] = "r09_draft"
 
     agent = CampaignAgent(build_settings())
     draft = agent.draft_campaign(session, "gelateria-milano")
     session.commit()
-    assert isinstance(draft, dict)
-    if "error" not in draft:
-        assert "title" in draft
-    # The draft call alone must not have created an ACTIVE campaign row.
-    rows = session.exec(select(Campaign)).all()
-    for row in rows:
-        assert row.state.value != "ACTIVE"
+    assert draft["title"] == "Pistachio push"
+    # The draft call alone must not have created ANY campaign row, let alone an
+    # ACTIVE one — persistence is create_campaign's job and publication needs a
+    # WebAuthn approval (PRD §9.7).
+    assert list(session.exec(select(Campaign)).all()) == []
+
+
+def test_campaign_draft_contract_violation_fails_loud(session):
+    """R0.5: draft_campaign used to wrap its whole body in `except Exception:
+    return {"error": ...}`, so an LLM outage and a broken contract were
+    indistinguishable from a valid draft. Both must now raise."""
+    import os
+
+    import pytest
+    from openstore.agents.campaign_agent import CampaignAgent, CampaignDraftError
+    from openstore.agents.llm import DummyProvider, register_provider
+
+    class _BadProvider(DummyProvider):
+        def chat(self, messages, **kwargs):
+            return "not json {"
+
+    register_provider("r09_bad", _BadProvider)
+    os.environ["LLM_PROVIDER"] = "r09_bad"
+
+    with pytest.raises(CampaignDraftError):
+        CampaignAgent(build_settings()).draft_campaign(session, "gelateria-milano")

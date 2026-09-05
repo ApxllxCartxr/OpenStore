@@ -155,7 +155,11 @@ class TestInstallContract:
         assert "campaigns" in d
 
     def test_campaign_studio_page(self, fresh_client: TestClient):
-        r = fresh_client.get("/campaign/studio")
+        """DECISION-024: the Studio is operator-gated. It previously served the
+        page (and its approve/reject routes) to anyone who could reach the
+        sidecar."""
+        assert fresh_client.get("/campaign/studio").status_code == 401
+        r = fresh_client.get("/campaign/studio", headers={"X-Operator-Id": "op_1"})
         assert r.status_code == 200
         assert "Campaign Studio" in r.text
 

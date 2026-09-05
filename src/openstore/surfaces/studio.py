@@ -53,6 +53,13 @@ from openstore.agents.buyer_agent import (
 from openstore.agents.mcp_client import InProcessMCPClient
 from openstore.config import Settings, merchant_id
 from openstore.core.api import create_checkout_from_policy
+from openstore.core.campaigns import (
+    CampaignValidationError,
+    activate_campaign,
+    get_analytics_view,
+    pause_campaign,
+    reject_campaign,
+)
 from openstore.core.database import get_session
 from openstore.core.handoff import HandoffError, buyer_handle, consume_handoff, resolve_handoff
 from openstore.core.holdcancel import AAL_HOLD_SECONDS
@@ -70,7 +77,14 @@ from openstore.core.webauthn_rp import (
     complete_registration,
     get_user_credentials,
 )
-from openstore.models import AuditLog, Checkout, Handoff, HandoffKind, IntentPolicy
+from openstore.models import (
+    AuditLog,
+    Campaign,
+    Checkout,
+    Handoff,
+    HandoffKind,
+    IntentPolicy,
+)
 from openstore.notifier import send_dm, sync_alert
 from openstore.psp.razorpay_driver import create_payment_link
 
@@ -92,7 +106,26 @@ class RegistrationComplete(BaseModel):
 
 
 class AssertionBegin(BaseModel):
-    pass
+    # DECISION-024: when present, the challenge is bound to
+    # {"mode": "campaign", "campaign_id": ...} instead of {"mode": "policy"},
+    # so an assertion approving one campaign cannot be replayed onto another.
+    campaign_id: str | None = None
+
+
+class CampaignDecision(BaseModel):
+    """Body for POST /campaign/<id>/approve. The assertion fields are mandatory
+    (PRD §9.7: the orchestrator cannot publish without a WebAuthn approval);
+    /reject and /pause take no assertion."""
+
+    approver_credential_id: str
+    client_data_json: str
+    authenticator_data: str
+    signature: str
+    challenge: str
+
+
+class CampaignReject(BaseModel):
+    reason: str = ""
 
 
 class AssertionComplete(BaseModel):
@@ -132,6 +165,83 @@ class _Operator:
 
     def __init__(self, user_id: str):
         self.user_id = user_id
+
+
+_CAMPAIGN_STATUS = {
+    "campaign.not_found": 404,
+    "campaign.invalid_state_transition": 409,
+    "campaign.max_active_exceeded": 409,
+    "campaign.no_webauthn_approval": 401,
+    "campaign.webauthn_verification_failed": 401,
+}
+
+
+def _campaign_txn(
+    session_factory: Callable[[], Session], op: Callable[[Session], Campaign]
+) -> Campaign:
+    """Run one campaign transition in its own transaction, mapping the closed-set
+    reason code onto an HTTP status. A validation failure rolls back — a rejected
+    approval must never leave a half-transitioned row (R0.5)."""
+    session = session_factory()
+    try:
+        try:
+            campaign = op(session)
+            session.commit()
+            session.refresh(campaign)
+            return campaign
+        except CampaignValidationError as e:
+            session.rollback()
+            raise HTTPException(
+                status_code=_CAMPAIGN_STATUS.get(e.reason_code, 422),
+                detail={"reason_code": e.reason_code, "message": e.message},
+            ) from e
+    finally:
+        session.close()
+
+
+def _campaign_rows(session: Session) -> list[dict[str, Any]]:
+    """Every campaign the merchant can act on, newest first. Unlike the public
+    feed (INV-13: ACTIVE and in-window only), the review surface deliberately
+    shows PENDING_APPROVAL, PAUSED, and EXPIRED too — a merchant cannot approve
+    what the feed refuses to show."""
+    campaigns = list(session.exec(select(Campaign).order_by(Campaign.created_at.desc())).all())  # type: ignore[attr-defined]
+    return [
+        {
+            "campaign_id": c.id,
+            "title": c.title,
+            "rationale": c.rationale,
+            "discount_bps": c.discount_bps,
+            "applies_to_skus": c.applies_to_skus,
+            "starts_at": c.starts_at.isoformat() if c.starts_at else None,
+            "ends_at": c.ends_at.isoformat() if c.ends_at else None,
+            "state": c.state.value,
+            "source_signals": c.source_signals,
+            "approver_credential_id": c.approver_credential_id,
+            "approved_at": c.approved_at.isoformat() if c.approved_at else None,
+        }
+        for c in campaigns
+    ]
+
+
+def _order_rows(session: Session, limit: int) -> list[dict[str, Any]]:
+    orders = list(
+        session.exec(
+            select(Checkout).order_by(Checkout.created_at.desc()).limit(limit)  # type: ignore[attr-defined]
+        ).all()
+    )
+    return [
+        {
+            "checkout_id": o.id,
+            "state": o.state.value if hasattr(o.state, "value") else str(o.state),
+            "amount_minor": o.amount_minor,
+            "policy_id": o.policy_id,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "expires_at": o.expires_at.isoformat() if o.expires_at else None,
+            "chat_user_id": o.chat_user_id,
+            "evidence_url": f"/orders/{o.id}/evidence/view" if o.poai_bundle else None,
+        }
+        for o in orders
+    ]
 
 
 def _operator(
@@ -491,7 +601,11 @@ def policy_studio_router(
     async def assertion_begin(
         body: AssertionBegin, operator: _Operator = Depends(_operator)
     ) -> dict[str, Any]:
-        binding = {"mode": "policy"}
+        binding = (
+            {"mode": "campaign", "campaign_id": body.campaign_id}
+            if body.campaign_id
+            else {"mode": "policy"}
+        )
         options = begin_assertion(config, operator.user_id, binding=binding, store=store)
         options["binding"] = binding
         return options
@@ -569,6 +683,102 @@ def policy_studio_router(
             return response
 
         return {"ok": ok, "sign_count": new_sign_count}
+
+    # --------------------------------------------------------------- campaigns
+    # DECISION-024: these lived in server.py with NO authentication at all —
+    # anyone who could route to the sidecar could reject a campaign, or approve
+    # one by posting any truthy dict as the assertion. They now sit behind the
+    # same operator gate as /internal/policy/blast-radius, and approval runs a
+    # real RP verification inside activate_campaign.
+    @router.get("/campaign/studio", response_class=HTMLResponse)
+    async def campaign_studio_page(
+        operator: _Operator = Depends(_operator),
+    ) -> HTMLResponse:
+        session = make_session()
+        try:
+            rows = _campaign_rows(session)
+        finally:
+            session.close()
+        html = (TEMPLATES / "campaign_studio.html").read_text(encoding="utf-8")
+        html = html.replace("__OPERATOR_ID__", _safe_json(operator.user_id))
+        html = html.replace("__CAMPAIGNS_JSON__", _safe_json(rows))
+        return HTMLResponse(html)
+
+    @router.post("/campaign/{campaign_id}/approve")
+    async def campaign_approve(
+        campaign_id: str,
+        body: CampaignDecision,
+        operator: _Operator = Depends(_operator),
+    ) -> dict[str, Any]:
+        def _act(session: Session) -> Campaign:
+            return activate_campaign(
+                session,
+                campaign_id,
+                approver_credential_id=body.approver_credential_id,
+                webauthn_assertion={
+                    "credential_id": body.approver_credential_id,
+                    "client_data_json": body.client_data_json,
+                    "authenticator_data": body.authenticator_data,
+                    "signature": body.signature,
+                    "challenge": body.challenge,
+                },
+                config=config,
+                user_handle=operator.user_id,
+                challenge_store=store,
+                trace_id=f"campaign:{campaign_id}",
+            )
+
+        campaign = _campaign_txn(make_session, _act)
+        return {"status": "approved", "campaign_id": campaign.id, "state": campaign.state.value}
+
+    @router.post("/campaign/{campaign_id}/reject")
+    async def campaign_reject(
+        campaign_id: str,
+        body: CampaignReject,
+        operator: _Operator = Depends(_operator),
+    ) -> dict[str, Any]:
+        campaign = _campaign_txn(
+            make_session,
+            lambda s: reject_campaign(s, campaign_id, body.reason, f"campaign:{campaign_id}"),
+        )
+        return {
+            "status": "rejected",
+            "campaign_id": campaign.id,
+            "state": campaign.state.value,
+            "reason": body.reason,
+        }
+
+    @router.post("/campaign/{campaign_id}/pause")
+    async def campaign_pause(
+        campaign_id: str,
+        operator: _Operator = Depends(_operator),
+    ) -> dict[str, Any]:
+        campaign = _campaign_txn(
+            make_session, lambda s: pause_campaign(s, campaign_id, f"campaign:{campaign_id}")
+        )
+        return {"status": "paused", "campaign_id": campaign.id, "state": campaign.state.value}
+
+    # ------------------------------------------------------------------- admin
+    @router.get("/admin/campaigns")
+    async def admin_campaigns(operator: _Operator = Depends(_operator)) -> dict[str, Any]:
+        session = make_session()
+        try:
+            return {
+                "campaigns": _campaign_rows(session),
+                "analytics": get_analytics_view(session, merchant_id(config)),
+            }
+        finally:
+            session.close()
+
+    @router.get("/admin/orders")
+    async def admin_orders(
+        limit: int = 50, operator: _Operator = Depends(_operator)
+    ) -> dict[str, Any]:
+        session = make_session()
+        try:
+            return {"orders": _order_rows(session, limit)}
+        finally:
+            session.close()
 
     # ------------------------------------------------------------ blast radius
     @router.get("/internal/policy/blast-radius")

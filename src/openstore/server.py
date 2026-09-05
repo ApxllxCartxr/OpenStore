@@ -51,6 +51,7 @@ def _paths_match(route_path: str, gated_template: str) -> bool:
 # this loop's closure — a soft UX nicety, not a money-critical invariant, so
 # it does not need to survive a restart.
 _HOLD_RELEASE_INTERVAL_SECONDS = 30
+_CAMPAIGN_EXPIRY_INTERVAL_SECONDS = 60
 _HOLD_WARNING_WINDOW_SECONDS = 120
 
 
@@ -103,6 +104,30 @@ async def _hold_release_loop(config: Settings) -> None:
             console_print(f"Warning: hold-release loop tick failed: {exc}")
         finally:
             session.close()
+
+
+async def _campaign_expiry_loop(config: Settings) -> None:
+    """PRD §9.4: 'EXPIRED is set by the sweeper when now >= ends_at.'
+
+    Same shape as _hold_release_loop above — no scheduler dependency. Without
+    this, ACTIVE campaigns past their window stayed ACTIVE forever; the signed
+    feed filtered them out (INV-13) but the stored state lied, and PAUSED /
+    EXPIRED were both unreachable.
+    """
+    from openstore.core.campaigns import expire_campaigns_due
+    from openstore.core.database import session_scope
+
+    while True:
+        await asyncio.sleep(_CAMPAIGN_EXPIRY_INTERVAL_SECONDS)
+        try:
+            with session_scope(config) as session:
+                expired = expire_campaigns_due(session)
+            if expired:
+                console_print(f"Campaign sweeper expired {len(expired)} campaign(s)")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            console_print(f"Warning: campaign expiry loop tick failed: {exc}")
 
 
 def create_app(config: Settings) -> FastAPI:
@@ -163,6 +188,10 @@ def create_app(config: Settings) -> FastAPI:
         # callers. Second background task, alongside the Discord client,
         # cancelled the same way on shutdown.
         hold_release_task: asyncio.Task[None] = asyncio.create_task(_hold_release_loop(config))
+        # DECISION-025: PRD §9.4's campaign expiry sweeper.
+        campaign_expiry_task: asyncio.Task[None] = asyncio.create_task(
+            _campaign_expiry_loop(config)
+        )
 
         yield
 
@@ -178,6 +207,10 @@ def create_app(config: Settings) -> FastAPI:
         hold_release_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await hold_release_task
+
+        campaign_expiry_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await campaign_expiry_task
 
         set_main_loop(None)
 
@@ -391,6 +424,13 @@ def create_app(config: Settings) -> FastAPI:
 
         return get_signed_campaign_feed(config, origin)
 
+    # UCP discovery (DECISION-026)
+    @app.get("/.well-known/ucp")
+    async def ucp_manifest(request: Request) -> dict[str, Any]:
+        from openstore.surfaces.wellknown import build_ucp_manifest
+
+        return build_ucp_manifest(config, resolve_public_origin(config, request))
+
     # Agent catalog (S6.5)
     @app.get("/agent/catalog")
     async def agent_catalog(request: Request) -> dict[str, Any]:
@@ -447,10 +487,18 @@ def create_app(config: Settings) -> FastAPI:
             )
         return result
 
-    # ACP endpoint (stub)
+    # ACP endpoint (stub). DECISION-026: the route stays registered, but it is no
+    # longer advertised in the agent-commerce manifest — claiming a protocol the
+    # sidecar does not speak is worse than claiming none.
     @app.post("/agent/acp")
     async def agent_acp() -> dict[str, str]:
-        return {"error": "not implemented"}
+        return {
+            "error": "not_implemented",
+            "message": (
+                "ACP is not implemented. Use the MCP endpoint at /agent/mcp; "
+                "capabilities are discoverable at /.well-known/ucp."
+            ),
+        }
 
     # Campaign feed (S6.4)
     @app.get("/agent/campaigns")
@@ -460,67 +508,10 @@ def create_app(config: Settings) -> FastAPI:
         origin = resolve_public_origin(config, request)
         return get_signed_campaign_feed(config, origin)
 
-    # Campaign approve / reject (REGISTRY routes)
-    @app.post("/campaign/{campaign_id}/approve")
-    async def campaign_approve(campaign_id: str, request: Request) -> dict[str, Any]:
-        from openstore.core.campaigns import CampaignValidationError, activate_campaign
-        from openstore.core.database import get_session as _get_session
-
-        body = await request.json()
-        approver_credential_id = body.get("approver_credential_id", "")
-        webauthn_assertion = body.get("webauthn_assertion")
-
-        session = _get_session(config)
-        try:
-            try:
-                campaign = activate_campaign(
-                    session,
-                    campaign_id,
-                    approver_credential_id=approver_credential_id,
-                    webauthn_assertion=webauthn_assertion,
-                )
-                session.commit()
-                return {
-                    "status": "approved",
-                    "campaign_id": campaign.id,
-                    "state": campaign.state.value,
-                }
-            except CampaignValidationError as e:
-                session.rollback()
-                return {"error": e.reason_code, "message": e.message}
-        finally:
-            session.close()
-
-    @app.post("/campaign/{campaign_id}/reject")
-    async def campaign_reject(campaign_id: str, request: Request) -> dict[str, Any]:
-        from openstore.core.database import get_session as _get_session
-        from openstore.models import Campaign, CampaignState
-
-        body = await request.json()
-        reason = body.get("reason", "")
-
-        session = _get_session(config)
-        try:
-            from sqlmodel import select as _select
-
-            campaign = session.exec(_select(Campaign).where(Campaign.id == campaign_id)).first()
-            if not campaign:
-                return {
-                    "error": "campaign.not_found",
-                    "message": f"Campaign {campaign_id} not found",
-                }
-            campaign.state = CampaignState.REJECTED
-            campaign.updated_at = datetime.now(UTC)
-            session.add(campaign)
-            session.commit()
-            return {"status": "rejected", "campaign_id": campaign.id, "reason": reason}
-        finally:
-            session.close()
-
-    # Campaign Studio (stub)
-    @app.get("/campaign/studio")
-    async def campaign_studio() -> FileResponse:
-        return FileResponse(Path(__file__).parent / "surfaces" / "static" / "campaign_studio.html")
+    # DECISION-024: /campaign/{id}/approve, /reject, /pause and /campaign/studio
+    # moved into policy_studio_router (surfaces/studio.py). They lived here with
+    # no authentication of any kind, and approve passed the request body straight
+    # into activate_campaign, which only checked the assertion was truthy.
 
     # Demo storefront (stub)
     @app.get("/")

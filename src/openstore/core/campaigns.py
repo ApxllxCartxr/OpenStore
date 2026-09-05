@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from openstore.config import Settings
 from openstore.models import Campaign, CampaignState
+from openstore.notifier import sync_merchant_trace
 
 
 class CampaignValidationError(Exception):
@@ -207,8 +208,17 @@ def create_campaign(
     applies_to_skus: list[str],
     starts_at: datetime,
     ends_at: datetime,
+    source_signals: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> Campaign:
-    """Create a DRAFT campaign (S8.2)."""
+    """Create a DRAFT campaign (S8.2).
+
+    DECISION-025: the draft is run through validate_campaign() BEFORE it reaches
+    the DB. Previously nothing in src/ called the validator at all, so R0.9's
+    "the LLM proposes, Python disposes" had no disposer on the only write path —
+    an out-of-bounds discount or an injected rationale would persist and only be
+    caught, if ever, at approval time.
+    """
     import hashlib
     import secrets
 
@@ -234,15 +244,64 @@ def create_campaign(
         applies_to_skus=applies_to_skus,
         starts_at=starts_at,
         ends_at=ends_at,
-        source_signals={},
+        source_signals=source_signals or {},
         draft_digest=draft_digest,
         state=CampaignState.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
 
+    validate_campaign(session, campaign, config)
+
     session.add(campaign)
     session.flush()
+    _trace(trace_id, "campaign_drafted", campaign)
+    return campaign
+
+
+def _trace(trace_id: str | None, action: str, campaign: Campaign, **extra: Any) -> None:
+    """PRD §9.4: every campaign transition is logged to #merchant-trace with its
+    trace_id. sync_merchant_trace is the log-only shim (never network), so this
+    is safe to call from core/."""
+    sync_merchant_trace(
+        trace_id or "campaign",
+        action,
+        {
+            "campaign_id": campaign.id,
+            "merchant_id": campaign.merchant_id,
+            "state": campaign.state.value,
+            **extra,
+        },
+    )
+
+
+def _require(session: Session, campaign_id: str) -> Campaign:
+    campaign = session.exec(select(Campaign).where(Campaign.id == campaign_id)).first()
+    if not campaign:
+        raise CampaignValidationError("campaign.not_found", f"Campaign {campaign_id} not found")
+    return campaign
+
+
+def submit_for_approval(
+    session: Session, campaign_id: str, trace_id: str | None = None
+) -> Campaign:
+    """DRAFT -> PENDING_APPROVAL (PRD §9.4).
+
+    DECISION-025: this transition had no implementation, so PENDING_APPROVAL was
+    unreachable — and the Campaign Studio renders its Approve/Reject controls only
+    for that state, which is why the Studio could never show an actionable campaign.
+    """
+    campaign = _require(session, campaign_id)
+    if campaign.state != CampaignState.DRAFT:
+        raise CampaignValidationError(
+            "campaign.invalid_state_transition",
+            f"Campaign {campaign_id} is {campaign.state.value}, not DRAFT",
+        )
+    campaign.state = CampaignState.PENDING_APPROVAL
+    campaign.updated_at = datetime.now(UTC)
+    session.add(campaign)
+    session.flush()
+    _trace(trace_id, "campaign_submitted", campaign)
     return campaign
 
 
@@ -251,14 +310,33 @@ def activate_campaign(
     campaign_id: str,
     approver_credential_id: str,
     webauthn_assertion: dict[str, Any] | None = None,
+    *,
+    config: Settings | None = None,
+    user_handle: str | None = None,
+    challenge_store: Any | None = None,
+    trace_id: str | None = None,
 ) -> Campaign:
+    """S8.4: approve and publish a campaign. PRD §9.7 — the orchestrator CANNOT
+    publish without a WebAuthn approval.
+
+    DECISION-024 (SECURITY): this previously accepted any truthy assertion dict
+    and never invoked the RP, so `{"x": 1}` was enough to move a campaign ACTIVE
+    and publish a signed, agent-discoverable offer. The assertion is now verified
+    against the RP with binding {"mode": "campaign", "campaign_id": <id>} — the
+    campaign_id inside the binding is what stops an approval for campaign A being
+    replayed onto campaign B.
+
+    `config` and `user_handle` are keyword-only and optional purely so the
+    pre-existing call shape still type-checks; both are REQUIRED for the
+    verification to run, and their absence is a hard error (R0.5), never a skip.
     """
-    S8.4: Approve and activate a campaign.
-    MUST have a valid WebAuthn assertion (no self-approval, R0.5).
-    """
-    campaign = session.exec(select(Campaign).where(Campaign.id == campaign_id)).first()
-    if not campaign:
-        raise CampaignValidationError("campaign.not_found", f"Campaign {campaign_id} not found")
+    campaign = _require(session, campaign_id)
+
+    if campaign.state != CampaignState.PENDING_APPROVAL:
+        raise CampaignValidationError(
+            "campaign.invalid_state_transition",
+            f"Campaign {campaign_id} is {campaign.state.value}, not PENDING_APPROVAL",
+        )
 
     if not webauthn_assertion:
         raise CampaignValidationError(
@@ -266,15 +344,38 @@ def activate_campaign(
             "Campaign activation requires a valid WebAuthn assertion",
         )
 
-    # Count active campaigns
-    active_count = len(list(session.exec(
-        select(Campaign).where(Campaign.state == CampaignState.ACTIVE)
-    ).all()))
+    if config is None or user_handle is None:
+        raise CampaignValidationError(
+            "campaign.no_webauthn_approval",
+            "Campaign activation requires config and user_handle to verify the assertion",
+        )
 
-    if active_count >= 5:  # max_active from config
+    _verify_approval_assertion(
+        session,
+        config,
+        user_handle,
+        campaign_id,
+        approver_credential_id,
+        webauthn_assertion,
+        challenge_store,
+    )
+
+    max_active = config.campaign.max_active
+    active_count = len(
+        list(
+            session.exec(
+                select(Campaign).where(
+                    Campaign.state == CampaignState.ACTIVE,
+                    Campaign.merchant_id == campaign.merchant_id,
+                )
+            ).all()
+        )
+    )
+    if active_count >= max_active:
         raise CampaignValidationError(
             "campaign.max_active_exceeded",
-            f"Max active campaigns ({active_count}) reached",
+            f"Max active campaigns ({max_active}) already reached for "
+            f"{campaign.merchant_id}",
         )
 
     campaign.state = CampaignState.ACTIVE
@@ -284,4 +385,110 @@ def activate_campaign(
     campaign.updated_at = datetime.now(UTC)
     session.add(campaign)
     session.flush()
+    _trace(trace_id, "campaign_approved", campaign, approver=approver_credential_id)
     return campaign
+
+
+def _verify_approval_assertion(
+    session: Session,
+    config: Settings,
+    user_handle: str,
+    campaign_id: str,
+    credential_id: str,
+    assertion: dict[str, Any],
+    challenge_store: Any | None,
+) -> None:
+    """Run the approval assertion through the real RP (DECISION-024)."""
+    from openstore.core.webauthn_rp import WebAuthnError, complete_assertion
+
+    missing = [
+        k
+        for k in ("client_data_json", "authenticator_data", "signature", "challenge")
+        if not assertion.get(k)
+    ]
+    if missing:
+        raise CampaignValidationError(
+            "campaign.no_webauthn_approval",
+            f"Campaign approval assertion is missing {', '.join(missing)}",
+        )
+
+    try:
+        complete_assertion(
+            session,
+            config,
+            user_handle,
+            credential_id,
+            assertion["client_data_json"],
+            assertion["authenticator_data"],
+            assertion["signature"],
+            assertion["challenge"],
+            binding={"mode": "campaign", "campaign_id": campaign_id},
+            store=challenge_store,
+        )
+    except WebAuthnError as e:
+        raise CampaignValidationError(
+            "campaign.webauthn_verification_failed",
+            f"Campaign approval assertion rejected: {e.reason_code}",
+        ) from e
+
+
+def reject_campaign(
+    session: Session, campaign_id: str, reason: str = "", trace_id: str | None = None
+) -> Campaign:
+    """PENDING_APPROVAL -> REJECTED (PRD §9.4). Terminal."""
+    campaign = _require(session, campaign_id)
+    if campaign.state not in (CampaignState.DRAFT, CampaignState.PENDING_APPROVAL):
+        raise CampaignValidationError(
+            "campaign.invalid_state_transition",
+            f"Campaign {campaign_id} is {campaign.state.value} and cannot be rejected",
+        )
+    campaign.state = CampaignState.REJECTED
+    campaign.updated_at = datetime.now(UTC)
+    session.add(campaign)
+    session.flush()
+    _trace(trace_id, "campaign_rejected", campaign, reason=reason)
+    return campaign
+
+
+def pause_campaign(session: Session, campaign_id: str, trace_id: str | None = None) -> Campaign:
+    """ACTIVE -> PAUSED (PRD §9.4). Reversible; drops the offer out of the feed
+    without the finality of REJECTED."""
+    campaign = _require(session, campaign_id)
+    if campaign.state != CampaignState.ACTIVE:
+        raise CampaignValidationError(
+            "campaign.invalid_state_transition",
+            f"Campaign {campaign_id} is {campaign.state.value}, not ACTIVE",
+        )
+    campaign.state = CampaignState.PAUSED
+    campaign.updated_at = datetime.now(UTC)
+    session.add(campaign)
+    session.flush()
+    _trace(trace_id, "campaign_paused", campaign)
+    return campaign
+
+
+def expire_campaigns_due(
+    session: Session, now: datetime | None = None, trace_id: str | None = None
+) -> list[Campaign]:
+    """PRD §9.4: 'EXPIRED is set by the sweeper when now >= ends_at.'
+
+    Sweeps ACTIVE and PAUSED campaigns past their window. Returns the rows it
+    moved so the caller can notify; commits nothing (the caller owns the txn).
+    """
+    cutoff = (now or datetime.now(UTC)).replace(tzinfo=None)
+    due = list(
+        session.exec(
+            select(Campaign).where(
+                Campaign.state.in_([CampaignState.ACTIVE, CampaignState.PAUSED]),  # type: ignore[attr-defined]
+                Campaign.ends_at <= cutoff,
+            )
+        ).all()
+    )
+    for campaign in due:
+        campaign.state = CampaignState.EXPIRED
+        campaign.updated_at = datetime.now(UTC)
+        session.add(campaign)
+        _trace(trace_id, "campaign_expired", campaign)
+    if due:
+        session.flush()
+    return due
