@@ -86,6 +86,15 @@ class CampaignSettings(BaseModel):
     min_bps: int = 500
     max_bps: int = 3000
     max_active: int = 5
+    # DECISION-034: autonomous growth-trigger loop. A SKU counts as "stalled"
+    # once it has at least stall_min_units_30d sales in the last 30 days but
+    # zero in the last 7 — real, deterministic decline, not an LLM guess.
+    # auto_trigger_cooldown_hours bounds how often the loop may draft a new
+    # auto-triggered campaign for the same merchant, regardless of how many
+    # stalls it finds (R0.5: bounded, no runaway draft spam).
+    stall_min_units_30d: int = 3
+    auto_trigger_cooldown_hours: int = 24
+    growth_check_interval_seconds: int = 3600
 
 
 class Settings(BaseSettings):

@@ -130,6 +130,39 @@ async def _campaign_expiry_loop(config: Settings) -> None:
             console_print(f"Warning: campaign expiry loop tick failed: {exc}")
 
 
+async def _campaign_growth_loop(config: Settings) -> None:
+    """DECISION-034: the autonomous half of the growth loop. On a timer,
+    checks this merchant for stalled SKUs (real 30d demand, zero units in the
+    last 7) with no live campaign already covering them, and — bounded by a
+    per-merchant cooldown — drafts one. Same shape as the other two loops:
+    never raises past its own tick, never touches money, and this alone can
+    NEVER activate a campaign (auto_draft_campaign_if_stalled only ever
+    reaches PENDING_APPROVAL) — the same human WebAuthn ceremony at
+    /campaign/studio is still required either way (R0.10)."""
+    from openstore.agents.campaign_agent import auto_draft_campaign_if_stalled
+    from openstore.config import merchant_id as merchant_id_of
+    from openstore.core.database import session_scope
+
+    interval = config.campaign.growth_check_interval_seconds
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            with session_scope(config) as session:
+                campaign = auto_draft_campaign_if_stalled(session, config, merchant_id_of(config))
+                # Extract before the session (and any lazy-load access to a
+                # detached instance) closes at the end of this block.
+                logged = None if campaign is None else (campaign.id, campaign.title)
+            if logged is not None:
+                console_print(
+                    f"Growth loop auto-drafted campaign {logged[0]} "
+                    f"({logged[1]}) — pending approval at /campaign/studio"
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            console_print(f"Warning: campaign growth loop tick failed: {exc}")
+
+
 def create_app(config: Settings) -> FastAPI:
 
     @asynccontextmanager
@@ -192,6 +225,10 @@ def create_app(config: Settings) -> FastAPI:
         campaign_expiry_task: asyncio.Task[None] = asyncio.create_task(
             _campaign_expiry_loop(config)
         )
+        # DECISION-034: autonomous growth trigger, alongside expiry.
+        campaign_growth_task: asyncio.Task[None] = asyncio.create_task(
+            _campaign_growth_loop(config)
+        )
 
         yield
 
@@ -211,6 +248,10 @@ def create_app(config: Settings) -> FastAPI:
         campaign_expiry_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await campaign_expiry_task
+
+        campaign_growth_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await campaign_growth_task
 
         set_main_loop(None)
 

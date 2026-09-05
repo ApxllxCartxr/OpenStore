@@ -69,6 +69,14 @@
   .status.err { color:var(--err-ink); }
   .empty { color:var(--subtle); font-size:.92rem; }
   footer { margin-top:2.5rem; color:var(--subtle); font-size:.8rem; max-width:58ch; }
+  input {
+    width:100%; padding:.55rem .65rem; border:1px solid var(--line); border-radius:8px;
+    font-size:.95rem; font-family:var(--font-sans); background:var(--surface); color:var(--ink);
+    margin-bottom:.75rem;
+  }
+  input:focus { outline:2px solid var(--ink); outline-offset:1px; }
+  label { display:block; font-size:.82rem; font-weight:600; color:var(--muted);
+          margin-bottom:.35rem; text-transform:uppercase; letter-spacing:.02em; }
 </style>
 </head>
 <body>
@@ -76,6 +84,19 @@
 <p class="lede">The orchestrator drafts campaigns from your aggregated sales view and
 sends them here. Nothing reaches the public offer feed until you approve it with your
 passkey — review the signals it reasoned from, then approve or reject.</p>
+
+<div class="card" id="enrolment-panel">
+  <h2>Register your passkey</h2>
+  <p class="rationale">One-time, per operator id. This registers a credential for
+  <b id="operator-label"></b> — the same identity that approves campaigns below. If you've
+  already registered for this operator id, you don't need to do this again.</p>
+  <label for="reg-name">Display name</label>
+  <input id="reg-name" value="Merchant Operator">
+  <div class="actions">
+    <button class="primary" id="enrol-btn">Register passkey</button>
+  </div>
+  <div class="status" id="enrol-status"></div>
+</div>
 
 <div id="list"></div>
 
@@ -166,6 +187,54 @@ function setStatus(id, text, isErr) {
   el.textContent = text;
   el.className = isErr ? "status err" : "status";
 }
+
+async function enforceUserVerified(options) {
+  if (options.authenticatorSelection) {
+    options.authenticatorSelection.userVerification = "required";
+  }
+  options.userVerification = "required";
+  return options;
+}
+
+async function register() {
+  const status = document.getElementById("enrol-status");
+  status.className = "status";
+  status.textContent = "Requesting registration challenge…";
+  const begin = await api("/internal/webauthn/register/begin", {
+    user_name: OPERATOR,
+    display_name: document.getElementById("reg-name").value,
+  });
+  await enforceUserVerified(begin);
+  const publicKey = {
+    ...begin,
+    challenge: b64d(begin.challenge),
+    user: { ...begin.user, id: b64d(begin.user.id) },
+    excludeCredentials: (begin.excludeCredentials || []).map(c => ({ ...c, id: b64d(c.id) })),
+  };
+  const cred = await navigator.credentials.create({ publicKey });
+  const res = await api("/internal/webauthn/register/complete", {
+    credential_id: cred.id,
+    client_data_json: cred.response.clientDataJSON ? b64url(new Uint8Array(cred.response.clientDataJSON)) : "",
+    attestation_object: b64url(new Uint8Array(cred.response.attestationObject)),
+    challenge: begin.challenge,
+  });
+  status.textContent = "Registered credential " + res.credential_id + " (sign_count " + res.sign_count + "). You can approve campaigns below now.";
+}
+
+document.getElementById("operator-label").textContent = OPERATOR || "(no operator id)";
+document.getElementById("enrol-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("enrol-btn");
+  btn.disabled = true;
+  try {
+    await register();
+  } catch (err) {
+    const status = document.getElementById("enrol-status");
+    status.className = "status err";
+    status.textContent = "Failed: " + (err.code || err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 async function approve(id) {
   setStatus(id, "Requesting approval challenge (mode=campaign)…");

@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -247,10 +247,19 @@ def _order_rows(session: Session, limit: int) -> list[dict[str, Any]]:
 
 def _operator(
     x_operator_id: str | None = Header(default=None, alias=_NONCE_HEADER),
+    operator: str | None = Query(default=None),
 ) -> _Operator:
-    if not x_operator_id or not x_operator_id.strip():
+    """operator_id carries no authority of its own (see _Operator's
+    docstring) — it only selects which WebAuthn credential set a session
+    uses, so accepting it as a query param alongside the header weakens
+    nothing. Without this, a plain browser navigation (which cannot set a
+    custom header) could never open a GET route behind this dependency at
+    all — every fetch() the page itself makes afterward already sends the
+    header correctly (JS can set headers; a top-level navigation can't)."""
+    user_id = x_operator_id or operator
+    if not user_id or not user_id.strip():
         raise HTTPException(status_code=401, detail="operator session required")
-    return _Operator(x_operator_id.strip())
+    return _Operator(user_id.strip())
 
 
 _HANDOFF_STATUS = {
@@ -545,7 +554,7 @@ def policy_studio_router(
                 return _render_amendment_page(handoff, token, store)
             user_id = buyer_handle(handoff)
         else:
-            user_id = _operator(x_operator_id).user_id
+            user_id = _operator(x_operator_id, operator=None).user_id
         html = (TEMPLATES / "policy_studio.html").read_text(encoding="utf-8")
         html = html.replace("__OPERATOR_ID__", _safe_json(user_id))
         html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
@@ -783,6 +792,21 @@ def policy_studio_router(
             return {"orders": _order_rows(session, limit)}
         finally:
             session.close()
+
+    @router.get("/admin/orders/view", response_class=HTMLResponse)
+    async def admin_orders_page(
+        limit: int = 50, operator: _Operator = Depends(_operator)
+    ) -> HTMLResponse:
+        session = make_session()
+        try:
+            rows = _order_rows(session, limit)
+        finally:
+            session.close()
+        html = (TEMPLATES / "orders_admin.html").read_text(encoding="utf-8")
+        html = html.replace("__OPERATOR_ID__", _safe_json(operator.user_id))
+        html = html.replace("__ORDERS_JSON__", _safe_json(rows))
+        html = html.replace("__LIMIT__", str(limit))
+        return HTMLResponse(html)
 
     # ------------------------------------------------------------ blast radius
     @router.get("/internal/policy/blast-radius")
