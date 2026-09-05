@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -61,7 +62,32 @@ class TestAgentCommerceManifest:
         assert "protocols" in data
         names = [p["name"] for p in data["protocols"]]
         assert "mcp" in names
-        assert "acp" in names
+        assert "ucp" in names
+
+    def test_manifest_advertises_only_implemented_protocols(self, client):
+        """DECISION-026: the manifest carried an `acp` entry at version
+        "2024-11-01" — a release ACP never published — pointing at /agent/acp,
+        which returns not_implemented. A manifest is a promise; an ACP-aware
+        agent that trusted it would fail on contact."""
+        data = client.get("/.well-known/agent-commerce.json").json()
+        assert "acp" not in [p["name"] for p in data["protocols"]]
+        assert client.post("/agent/acp").json()["error"] == "not_implemented"
+
+    def test_ucp_manifest_declares_only_working_capabilities(self, client):
+        r = client.get("/.well-known/ucp")
+        assert r.status_code == 200
+        data = r.json()
+        service = data["services"][0]
+        assert service["id"] == "dev.ucp.shopping"
+        capability_ids = {c["id"] for c in service["capabilities"]}
+        assert capability_ids == {"dev.ucp.shopping.checkout", "dev.ucp.shopping.discount"}
+        # Fulfilment / order management are NOT implemented and must not appear.
+        assert "dev.ucp.shopping.fulfillment" not in capability_ids
+        # Every declared operation must be a real MCP tool (R0.2).
+        registry = json.loads((Path(__file__).resolve().parents[2] / "REGISTRY.json").read_text())
+        for capability in service["capabilities"]:
+            for op in capability["operations"]:
+                assert op in registry["mcp_tools"], op
 
     def test_manifest_has_campaigns_block(self, client):
         r = client.get("/.well-known/agent-commerce.json")

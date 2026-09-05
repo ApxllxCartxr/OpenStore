@@ -82,6 +82,12 @@ def build_agent_commerce_manifest(config: Settings, origin: str) -> dict[str, An
             "requires_human_approval": True,
             "default_per_tx_cap_minor": 50000,
         },
+        # DECISION-026: the `acp` entry that used to sit here advertised version
+        # "2024-11-01" — a release ACP never published (the real ones are
+        # 2025-09-29, 2025-12-12, 2026-01-16, 2026-01-30, 2026-04-17) — pointing
+        # at /agent/acp, which returns {"error": "not implemented"}. An ACP-aware
+        # agent that trusted the manifest would fail on contact. A manifest is a
+        # promise; only capabilities that actually work belong in it.
         "protocols": [
             {
                 "name": "mcp",
@@ -92,12 +98,11 @@ def build_agent_commerce_manifest(config: Settings, origin: str) -> dict[str, An
                 "spec_excerpt": "/protocols/mcp/spec-excerpt",
             },
             {
-                "name": "acp",
-                "version": "2024-11-01",
-                "endpoint": f"{origin}/agent/acp",
-                "auth": ["oauth2_bearer", "http_message_signature"],
-                "authority_schemes": ["acp_delegated_token", "native_webauthn"],
-                "spec_excerpt": "/protocols/acp/spec-excerpt",
+                "name": "ucp",
+                "version": "2026-01-11",
+                "endpoint": f"{origin}/.well-known/ucp",
+                "auth": ["oauth2_bearer"],
+                "authority_schemes": ["native_webauthn"],
             },
         ],
         "evidence": {
@@ -108,6 +113,86 @@ def build_agent_commerce_manifest(config: Settings, origin: str) -> dict[str, An
         "campaigns": {
             "feed_endpoint": f"{origin}/agent/campaigns",
             "signed_feed": f"{origin}/.well-known/agent-campaigns.json",
+        },
+    }
+
+
+def build_ucp_manifest(config: Settings, origin: str) -> dict[str, Any]:
+    """UCP discovery manifest (DECISION-026).
+
+    UCP (Google/Shopify, announced 2026-01-11) publishes business capabilities at
+    a fixed well-known path so agents need no hardcoded integration. Its model
+    maps almost 1:1 onto what this sidecar already serves, so this declares only
+    capabilities that genuinely work — `dev.ucp.shopping.checkout` over the MCP
+    cart/checkout tools, and `dev.ucp.shopping.discount` over the signed campaign
+    feed. Fulfilment and order-management capabilities are deliberately absent:
+    the sidecar does not implement them, and naming them would repeat exactly the
+    mistake the removed ACP entry made.
+    """
+    return {
+        "version": "2026-01-11",
+        "business": {
+            "id": merchant_id(config),
+            "name": config.merchant.name,
+        },
+        "services": [
+            {
+                "id": "dev.ucp.shopping",
+                "transports": [
+                    {"type": "mcp", "endpoint": f"{origin}/agent/mcp"},
+                ],
+                "capabilities": [
+                    {
+                        "id": "dev.ucp.shopping.checkout",
+                        "operations": [
+                            "create_cart",
+                            "update_cart",
+                            "checkout_initiate",
+                            "checkout_confirm",
+                            "get_order",
+                        ],
+                    },
+                    {
+                        "id": "dev.ucp.shopping.discount",
+                        "operations": ["list_campaigns", "get_campaign"],
+                        "feed": f"{origin}/.well-known/agent-campaigns.json",
+                    },
+                ],
+            }
+        ],
+        "payment_handlers": [
+            {
+                "id": "razorpay",
+                "currencies": ["INR"],
+                # The buyer completes payment on the PSP's hosted page; the
+                # sidecar never takes card data and the agent never holds keys
+                # (R0.10 / INV-2). Stated plainly so an agent does not expect a
+                # delegated payment token it will never receive.
+                "flow": "hosted_payment_link",
+            }
+        ],
+        "authorization": {
+            # OpenStore's differentiator, in UCP's vocabulary: the human signs a
+            # spending policy with a passkey, a deterministic compiler enforces
+            # it on every cart, and each order carries an offline-verifiable
+            # evidence bundle.
+            "scheme": "native_webauthn",
+            "policy_manifest": f"{origin}/.well-known/agent-policy.json",
+            "evidence": {
+                "poai_version": "0.1",
+                "bundle_endpoint": "/orders/{checkout_id}/evidence",
+                "jwks": f"{origin}/.well-known/poai-jwks.json",
+            },
+        },
+        "auth": {
+            "type": "oauth2",
+            "authorization_server": f"{origin}/.well-known/oauth-authorization-server",
+            "scopes_supported": [
+                "catalog:read",
+                "cart:write",
+                "checkout:initiate",
+                "checkout:confirm",
+            ],
         },
     }
 

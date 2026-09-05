@@ -1,38 +1,234 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Campaign Studio</title>
-  <style>
-    body { font-family: system-ui; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-    .campaign { border: 1px solid #ccc; padding: 1rem; margin: 0.5rem 0; border-radius: 4px; }
-    .draft { background: #f9f9f9; }
-    .active { background: #e8f5e9; border-color: #4caf50; }
-    .btn { background: #1976d2; color: white; border: none; padding: 0.5rem 1rem; cursor: pointer; border-radius: 4px; }
-    .btn:hover { background: #1565c0; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campaign Studio — OpenStore</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-mono/index.css">
+<style>
+  :root {
+    --bg:#fafafa; --surface:#ffffff; --ink:#18181b; --muted:#71717a; --subtle:#a1a1aa;
+    --line:#e4e4e7; --accent:#18181b; --accent-ink:#fafafa;
+    --ok-bg:#ecfdf5; --ok-ink:#065f46;
+    --warn-bg:#fffbeb; --warn-ink:#92400e;
+    --err-bg:#fef2f2; --err-ink:#991b1b;
+    --mute-bg:#f4f4f5; --mute-ink:#52525b;
+    --radius:14px; --shadow:0 1px 2px rgba(24,24,27,.04), 0 8px 24px -12px rgba(24,24,27,.08);
+    --font-sans:'Geist Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body {
+    font-family:var(--font-sans); color:var(--ink); background:var(--bg);
+    max-width:760px; margin:0 auto; padding:3.5rem 1.5rem 4rem; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1 { font-size:1.6rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .4rem; }
+  p.lede { color:var(--muted); font-size:.95rem; margin:0 0 2.25rem; max-width:58ch; }
+  .card {
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:1.25rem 1.4rem; margin-bottom:1rem;
+  }
+  .card h2 { font-size:1.05rem; font-weight:600; margin:0 0 .3rem; letter-spacing:-.01em; }
+  .rationale { color:var(--muted); font-size:.9rem; margin:0 0 1rem; max-width:60ch; }
+  .terms {
+    display:flex; flex-wrap:wrap; gap:.4rem 1.4rem; font-family:var(--font-mono);
+    font-size:.8rem; color:var(--muted); margin-bottom:1rem;
+  }
+  .terms b { color:var(--ink); font-weight:500; }
+  .state {
+    display:inline-block; padding:.2rem .55rem; border-radius:6px; font-size:.72rem;
+    font-family:var(--font-mono); font-weight:500; letter-spacing:.02em; vertical-align:.15em;
+    margin-left:.5rem;
+  }
+  .state-DRAFT, .state-PAUSED { background:var(--mute-bg); color:var(--mute-ink); }
+  .state-PENDING_APPROVAL { background:var(--warn-bg); color:var(--warn-ink); }
+  .state-ACTIVE { background:var(--ok-bg); color:var(--ok-ink); }
+  .state-EXPIRED, .state-REJECTED { background:var(--err-bg); color:var(--err-ink); }
+  details.signals { margin-bottom:1rem; }
+  details.signals summary {
+    cursor:pointer; font-size:.82rem; color:var(--muted); user-select:none;
+  }
+  details.signals pre {
+    font-family:var(--font-mono); font-size:.75rem; background:var(--mute-bg);
+    padding:.75rem .9rem; border-radius:9px; margin:.6rem 0 0; overflow-x:auto;
+    color:var(--mute-ink);
+  }
+  .actions { display:flex; gap:.5rem; flex-wrap:wrap; }
+  button {
+    font-family:inherit; font-size:.85rem; font-weight:600; padding:.5rem .95rem;
+    border-radius:9px; border:1px solid var(--line); background:var(--surface);
+    color:var(--ink); cursor:pointer; transition:opacity .15s;
+  }
+  button:hover { opacity:.8; }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  .status { font-family:var(--font-mono); font-size:.78rem; color:var(--muted); margin-top:.75rem; }
+  .status.err { color:var(--err-ink); }
+  .empty { color:var(--subtle); font-size:.92rem; }
+  footer { margin-top:2.5rem; color:var(--subtle); font-size:.8rem; max-width:58ch; }
+</style>
 </head>
 <body>
-  <h1>Campaign Studio</h1>
-  <div id="campaigns"></div>
-  <script>
-    async function loadCampaigns() {
-      const r = await fetch('/agent/campaigns');
-      const data = await r.json();
-      const el = document.getElementById('campaigns');
-      if (!data.campaigns || !data.campaigns.length) {
-        el.innerHTML = '<p>No campaigns. Draft one via the campaign agent.</p>';
-        return;
-      }
-      el.innerHTML = data.campaigns.map(c => `
-        <div class="campaign ${c.state.toLowerCase()}">
-          <h3>${c.title} (${c.state})</h3>
-          <p>${c.discount_bps / 100}% off</p>
-          <p>SKUs: ${(c.applies_to_skus || []).join(', ')}</p>
-        </div>
-      `).join('');
+<h1>Campaign Studio</h1>
+<p class="lede">The orchestrator drafts campaigns from your aggregated sales view and
+sends them here. Nothing reaches the public offer feed until you approve it with your
+passkey — review the signals it reasoned from, then approve or reject.</p>
+
+<div id="list"></div>
+
+<footer>
+Campaigns are drafted by <code>openstore campaign draft</code>, never in this page.
+Approving signs the campaign with a WebAuthn assertion bound to that campaign's id, so an
+approval cannot be replayed onto a different one.
+</footer>
+
+<script>
+"use strict";
+const OPERATOR = __OPERATOR_ID__;
+const CAMPAIGNS = __CAMPAIGNS_JSON__;
+
+const headers = { "Content-Type": "application/json", "X-Operator-Id": OPERATOR };
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers,
+    body: body === undefined ? "{}" : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data && data.detail ? data.detail : data;
+    const code = (detail && detail.reason_code) ? detail.reason_code : ("http_" + res.status);
+    const err = new Error(code);
+    err.code = code;
+    throw err;
+  }
+  return data;
+}
+
+function esc(s) {
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function fmtWindow(c) {
+  if (!c.starts_at || !c.ends_at) return "no window";
+  return c.starts_at.slice(0, 16).replace("T", " ") + " → " +
+         c.ends_at.slice(0, 16).replace("T", " ");
+}
+
+function render() {
+  const el = document.getElementById("list");
+  if (!CAMPAIGNS.length) {
+    el.innerHTML = '<p class="empty">No campaigns yet. Run ' +
+      '<code>openstore campaign draft &lt;config.yaml&gt;</code> to have the ' +
+      'orchestrator propose one.</p>';
+    return;
+  }
+  el.innerHTML = CAMPAIGNS.map(c => {
+    const pending = c.state === "PENDING_APPROVAL";
+    const active = c.state === "ACTIVE";
+    const signals = c.source_signals && Object.keys(c.source_signals).length
+      ? '<details class="signals"><summary>Why the agent proposed this</summary><pre>' +
+        esc(JSON.stringify(c.source_signals, null, 2)) + '</pre></details>'
+      : '';
+    const actions = [];
+    if (pending) {
+      actions.push('<button class="primary" data-act="approve" data-id="' + esc(c.campaign_id) +
+                   '">Approve with passkey</button>');
+      actions.push('<button data-act="reject" data-id="' + esc(c.campaign_id) + '">Reject</button>');
     }
-    loadCampaigns();
-  </script>
+    if (active) {
+      actions.push('<button data-act="pause" data-id="' + esc(c.campaign_id) + '">Pause</button>');
+    }
+    return '<div class="card" id="card-' + esc(c.campaign_id) + '">' +
+      '<h2>' + esc(c.title) + '<span class="state state-' + esc(c.state) + '">' +
+        esc(c.state) + '</span></h2>' +
+      '<p class="rationale">' + esc(c.rationale) + '</p>' +
+      '<div class="terms">' +
+        '<span><b>' + (c.discount_bps / 100) + '%</b> off</span>' +
+        '<span>SKUs <b>' + esc((c.applies_to_skus || []).join(", ") || "none") + '</b></span>' +
+        '<span>' + esc(fmtWindow(c)) + '</span>' +
+      '</div>' + signals +
+      '<div class="actions">' + actions.join("") + '</div>' +
+      '<div class="status" id="status-' + esc(c.campaign_id) + '"></div>' +
+    '</div>';
+  }).join("");
+}
+
+function setStatus(id, text, isErr) {
+  const el = document.getElementById("status-" + id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = isErr ? "status err" : "status";
+}
+
+async function approve(id) {
+  setStatus(id, "Requesting approval challenge (mode=campaign)…");
+  const begin = await api("/internal/webauthn/assertion/begin", { campaign_id: id });
+  const assert = await navigator.credentials.get({
+    publicKey: {
+      challenge: b64d(begin.challenge),
+      rpId: begin.rpId,
+      allowCredentials: [],
+      userVerification: "required",
+    },
+  });
+  setStatus(id, "Verifying assertion and publishing…");
+  const res = await api("/campaign/" + encodeURIComponent(id) + "/approve", {
+    approver_credential_id: assert.id,
+    client_data_json: b64url(new Uint8Array(assert.response.clientDataJSON)),
+    authenticator_data: b64url(new Uint8Array(assert.response.authenticatorData)),
+    signature: b64url(new Uint8Array(assert.response.signature)),
+    challenge: begin.challenge,
+  });
+  setStatus(id, "Approved — now " + res.state + " and in the signed feed.");
+}
+
+async function reject(id) {
+  const reason = prompt("Why are you rejecting this campaign?") || "";
+  const res = await api("/campaign/" + encodeURIComponent(id) + "/reject", { reason });
+  setStatus(id, "Rejected — now " + res.state + ".");
+}
+
+async function pause(id) {
+  const res = await api("/campaign/" + encodeURIComponent(id) + "/pause");
+  setStatus(id, "Paused — now " + res.state + ", out of the feed.");
+}
+
+const ACTIONS = { approve, reject, pause };
+
+document.getElementById("list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  btn.disabled = true;
+  try {
+    await ACTIONS[btn.dataset.act](id);
+  } catch (err) {
+    setStatus(id, "Failed: " + (err.code || err.message), true);
+    btn.disabled = false;
+  }
+});
+
+function b64url(bytes) {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64d(s) {
+  const pad = s.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(pad + "===".slice((pad.length + 3) % 4));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+render();
+</script>
 </body>
 </html>
