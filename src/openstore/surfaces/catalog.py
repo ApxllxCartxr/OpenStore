@@ -12,14 +12,20 @@ import yaml
 
 from openstore.config import Settings
 
+# Legacy single-slot cache. Tests reach in and set this to None to force a
+# reload, so it stays as the invalidation signal, but the real cache below is
+# keyed by (path, mtime): the single slot was shared across every config in a
+# process, so two merchant configs served each other's catalog, and an edited
+# catalog.yaml needed a restart to take effect.
 CATALOG_CACHE: list[dict[str, Any]] | None = None
+
+_CATALOG_BY_PATH: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 def load_catalog(config: Settings) -> list[dict[str, Any]]:
-    """Load catalog from config file (catalog_path). Cached in memory."""
+    """Load the catalog named by config.catalog_path, cached per path and
+    invalidated when the file's mtime changes."""
     global CATALOG_CACHE
-    if CATALOG_CACHE is not None:
-        return CATALOG_CACHE
 
     catalog_path = getattr(config, "catalog_path", None)
     if not catalog_path:
@@ -28,6 +34,13 @@ def load_catalog(config: Settings) -> list[dict[str, Any]]:
     path = Path(catalog_path)
     if not path.exists():
         return []
+
+    key = str(path.resolve())
+    mtime = path.stat().st_mtime
+    if CATALOG_CACHE is not None:
+        cached = _CATALOG_BY_PATH.get(key)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
 
     with open(path) as f:
         data = yaml.safe_load(f) or {}
@@ -49,6 +62,7 @@ def load_catalog(config: Settings) -> list[dict[str, Any]]:
                 "offers": item.get("offers", []),
             }
         )
+    _CATALOG_BY_PATH[key] = (mtime, normalized)
     CATALOG_CACHE = normalized
     return normalized
 
@@ -171,12 +185,62 @@ def build_catalog_attestation(
     return f"{signing_input}.{sig_b64}"
 
 
+def active_offers_by_sku(config: Settings) -> dict[str, list[dict[str, Any]]]:
+    """PRD §9.2 stage 5: publish approved campaigns 'to catalog item offers[]'.
+
+    The catalog's `offers` field has been a dead passthrough since S6.5 — it was
+    normalized on load and never written by anything. This projects the same
+    ACTIVE-and-in-window set the signed feed serves (INV-13), reusing that
+    query so the two can never disagree. It is a convenience view: the campaign
+    signature on /.well-known/agent-campaigns.json remains the authority, and
+    the compiler still re-checks validity at check 12 (R0.8 applied to
+    marketing — offer text is never trusted at face value).
+    """
+    from openstore.core.database import get_session
+
+    session = get_session(config)
+    try:
+        campaigns = _active_in_window_campaigns(session)
+    finally:
+        session.close()
+
+    by_sku: dict[str, list[dict[str, Any]]] = {}
+    for campaign in campaigns:
+        for sku in campaign.applies_to_skus:
+            by_sku.setdefault(sku, []).append(
+                {
+                    "campaign_id": campaign.id,
+                    "title": campaign.title,
+                    "discount_bps": campaign.discount_bps,
+                    "starts_at": campaign.starts_at.isoformat() + "Z",
+                    "ends_at": campaign.ends_at.isoformat() + "Z",
+                }
+            )
+    return by_sku
+
+
+def _active_in_window_campaigns(session: Any) -> list[Any]:
+    from datetime import UTC, datetime
+
+    from sqlmodel import select
+
+    from openstore.models import Campaign, CampaignState
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return [
+        c
+        for c in session.exec(select(Campaign).where(Campaign.state == CampaignState.ACTIVE)).all()
+        if c.starts_at <= now < c.ends_at
+    ]
+
+
 def serve_catalog_feed(
     config: Settings, merchant_id: str, private_key_pem: bytes | None = None
 ) -> dict[str, Any]:
-    """Serve the catalog feed with attestations (S6.5)."""
+    """Serve the catalog feed with attestations (S6.5) and live offers (§9.2)."""
     items = load_catalog(config)
     catalog_digest = compute_catalog_digest(config)
+    offers = active_offers_by_sku(config)
     import time
 
     iat = int(time.time())
@@ -185,22 +249,23 @@ def serve_catalog_feed(
     for item in items:
         attestation = None
         if private_key_pem:
-            try:
-                attestation = build_catalog_attestation(
-                    sku=item["sku"],
-                    price_minor=item["unit_minor"],
-                    tags=item["tags"],
-                    catalog_digest=catalog_digest,
-                    merchant_id=merchant_id,
-                    iat_unix=iat,
-                    private_key_pem=private_key_pem,
-                )
-            except Exception:
-                pass
+            # No bare except here: a signing failure used to be swallowed and the
+            # item served unsigned, which is indistinguishable from "this merchant
+            # has no key" to a reading agent (R0.5).
+            attestation = build_catalog_attestation(
+                sku=item["sku"],
+                price_minor=item["unit_minor"],
+                tags=item["tags"],
+                catalog_digest=catalog_digest,
+                merchant_id=merchant_id,
+                iat_unix=iat,
+                private_key_pem=private_key_pem,
+            )
 
         served_items.append(
             {
                 **item,
+                "offers": offers.get(item["sku"], []),
                 "catalog_attestation": attestation,
             }
         )

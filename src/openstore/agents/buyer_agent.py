@@ -9,17 +9,20 @@ import hashlib
 import json
 import logging
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any, cast
 
 from sqlmodel import select
 
 from openstore.agents.buyer_graph import (
     BuyerGraph,
+    BuyerPlanError,
     cart_signature,
     is_affirmative_reply,
     pending_cart_from_messages,
 )
+from openstore.agents.llm import LLMError
 from openstore.agents.merchant_agent import MerchantAgent, apply_cart_delta
 from openstore.config import Settings, merchant_id
 from openstore.core.database import get_session
@@ -29,15 +32,17 @@ from openstore.core.shopping_session import (
     close_session,
     create_session,
     find_active_session,
+    take_expired_session,
 )
 from openstore.models import (
     Checkout,
     HandoffKind,
     IntentPolicy,
+    OrderState,
     ShoppingSession,
     ShoppingSessionState,
 )
-from openstore.notifier import DiscordNotifier, build_discord_embed, send_dm
+from openstore.notifier import DiscordNotifier, build_discord_embed, send_dm, sync_alert
 from openstore.psp.razorpay_driver import RazorpayError, cancel_checkout_by_id
 from openstore.surfaces.catalog import suggest_related_items
 
@@ -1086,7 +1091,8 @@ def build_shop_result_embed(result: dict[str, Any]) -> dict[str, Any]:
     in chat. Carries only what a buyer needs to act (amount, pay link, hold
     window on success; a plain-language reason on denial) — checkout_id,
     aal_level, trace_id, and the compiler transcript stay in the buyer-trace
-    channel, never here."""
+    channel, never here. That is why `!cancel` takes no argument: the id a
+    buyer would have to quote is deliberately never shown to them."""
     if result.get("awaiting_reply"):
         return {"title": "One more thing…", "description": str(result.get("question", ""))}
     if not result.get("allowed"):
@@ -1105,9 +1111,46 @@ def build_shop_result_embed(result: dict[str, Any]) -> dict[str, Any]:
         fields.append({"name": "Pay here", "value": result["short_url"], "inline": False})
     return {
         "title": "Order placed",
-        "description": "Pay within the hold window to confirm it.",
+        "description": "Pay within the hold window to confirm it. Reply `!cancel` to cancel it.",
         "fields": fields,
     }
+
+
+def _campaign_discount_field(cart: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Show the buyer WHY the total is about to drop.
+
+    The number here is a preview only. The merchant's compiler recomputes the
+    discount server-side on the same per-campaign subtotal basis (check 12 then
+    core/compiler.py's campaign_subtotals) and its `effective_amount_minor` is
+    what is actually charged — R0.8 means the buyer-side agent never gets to
+    assert a price.
+    """
+    by_campaign: dict[str, dict[str, Any]] = {}
+    for item in cart:
+        campaign_id = item.get("campaign_id")
+        if not campaign_id:
+            continue
+        entry = by_campaign.setdefault(
+            campaign_id,
+            {
+                "title": item.get("campaign_title") or campaign_id,
+                "discount_bps": item.get("discount_bps", 0),
+                "subtotal_minor": 0,
+            },
+        )
+        entry["subtotal_minor"] += item["qty"] * item["unit_minor"]
+
+    if not by_campaign:
+        return None
+
+    lines = []
+    for entry in by_campaign.values():
+        saving_minor = (entry["subtotal_minor"] * entry["discount_bps"]) // 10000
+        lines.append(
+            f"{entry['title']} — {entry['discount_bps'] / 100:g}% off "
+            f"(−₹{saving_minor / 100:.2f})"
+        )
+    return {"name": "Offers applied", "value": "\n".join(lines), "inline": False}
 
 
 def build_cart_preview_embed(
@@ -1124,6 +1167,9 @@ def build_cart_preview_embed(
     ]
     total_minor = sum(item["qty"] * item["unit_minor"] for item in cart)
     fields = [{"name": "Total so far", "value": f"₹{total_minor / 100:.2f}", "inline": True}]
+    discount_field = _campaign_discount_field(cart)
+    if discount_field is not None:
+        fields.append(discount_field)
     if suggestions:
         fields.append(
             {
@@ -1164,6 +1210,9 @@ def build_federated_cart_preview_embed(
     fields.append(
         {"name": "Grand total", "value": f"₹{grand_total_minor / 100:.2f}", "inline": True}
     )
+    discount_field = _campaign_discount_field(cart)
+    if discount_field is not None:
+        fields.append(discount_field)
     if suggestions:
         fields.append(
             {
@@ -1287,6 +1336,37 @@ def _federation_enrollment_question(signing_links: dict[str, str]) -> str:
 # started by server.py's lifespan (S11 plan: one discord.Client, shared with
 # the notifier via notifier.set_discord_client). BuyerBot never starts its own
 # connection so there is only ever one Discord login per merchant process.
+_AGENT_FAILURE_MESSAGE = (
+    "Something went wrong on my side while working on that — I've flagged it. "
+    "Try again in a moment, or tell me what you're after in different words."
+)
+
+
+@asynccontextmanager
+async def _report_agent_failures(message: Any, trace_id: str) -> AsyncIterator[None]:
+    """Turn an agent-layer failure into something the buyer can see.
+
+    `BuyerPlanError` (malformed plan JSON, hallucinated_sku, bad selection) and
+    `LLMError` (provider down, out of quota) propagated out of the message
+    handlers with no `except` anywhere: the typing indicator simply stopped and
+    the buyer got nothing at all, indistinguishable from the bot ignoring them.
+    R0.5's fail-loud applies most at the surface a human is watching.
+
+    The raw error goes to logs and #alerts, never to the buyer — it can carry a
+    model transcript.
+    """
+    try:
+        yield
+    except (BuyerPlanError, LLMError) as e:
+        logger.warning("agent turn failed (trace_id=%s): %s", trace_id, e, exc_info=True)
+        sync_alert(
+            "agent_turn_failed",
+            f"{type(e).__name__}: {e}",
+            {"trace_id": trace_id},
+        )
+        await message.channel.send(_AGENT_FAILURE_MESSAGE)
+
+
 class BuyerBot:
     def __init__(self, config: Settings, agent: BuyerAgent):
         self.config = config
@@ -1335,18 +1415,35 @@ class BuyerBot:
                 await self._handle_shop(message, goal)
                 return
 
+            # A bare "!cancel" targets the caller's most recent open checkout.
+            # The embeds deliberately never print a checkout_id (it is not
+            # something a human should have to copy), so requiring one as an
+            # argument made the documented cancel path unusable from chat.
             checkout_id: str | None = None
-            if lower.startswith("!cancel "):
-                checkout_id = content[len("!cancel ") :].strip()
+            wants_cancel = False
+            if lower.startswith("!cancel"):
+                wants_cancel = True
+                checkout_id = content[len("!cancel") :].strip() or None
             elif free_text_context and lower.startswith("cancel "):
-                checkout_id = content[len("cancel ") :].strip()
-            if checkout_id:
+                wants_cancel = True
+                checkout_id = content[len("cancel ") :].strip() or None
+            if wants_cancel:
                 await self._handle_cancel(message, checkout_id)
                 return
 
             db_session = get_session(self.config)
+            expired_goal: str | None = None
             try:
                 pending = find_active_session(db_session, "discord", chat_user_id, chat_channel_id)
+                if pending is None:
+                    # Say so instead of silently re-reading the reply as a brand
+                    # new goal, which is what a timed-out thread used to do.
+                    stale = take_expired_session(
+                        db_session, "discord", chat_user_id, chat_channel_id
+                    )
+                    if stale is not None:
+                        expired_goal = stale.goal
+                        db_session.commit()
             finally:
                 db_session.close()
             if pending is not None:
@@ -1355,6 +1452,12 @@ class BuyerBot:
                     return
                 await self._handle_conversation_reply(message, pending.id)
                 return
+
+            if expired_goal is not None:
+                await message.channel.send(
+                    f"That thread timed out while I waited (I was still on "
+                    f"\"{expired_goal}\"). Starting fresh with what you just said."
+                )
 
             if free_text_context and content:
                 await self._handle_shop(message, content)
@@ -1401,7 +1504,7 @@ class BuyerBot:
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
-        async with message.channel.typing():
+        async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.start_shop(
                 goal,
                 policy_id,
@@ -1510,7 +1613,7 @@ class BuyerBot:
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
-        async with message.channel.typing():
+        async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.continue_shop(
                 messages,
                 message.content,
@@ -1606,17 +1709,44 @@ class BuyerBot:
             f"exception for you to approve: {link}"
         )
 
-    async def _handle_cancel(self, message: Any, checkout_id: str) -> None:
-        """`cancel <checkout_id>` (PRD §3.7, plan item #16): the cancel_token
+    @staticmethod
+    def _latest_cancellable_checkout(session: Any, chat_user_id: str) -> Checkout | None:
+        """Newest checkout of this chat user that is still HELD or PAID — the
+        two states cancel_checkout_by_id can act on (it cancels a hold, or
+        refunds an already-paid order per INV-8)."""
+        latest: Checkout | None = session.exec(
+            select(Checkout)
+            .where(
+                Checkout.chat_user_id == chat_user_id,
+                Checkout.state.in_([OrderState.HELD, OrderState.PAID]),  # type: ignore[attr-defined]
+            )
+            .order_by(Checkout.created_at.desc())  # type: ignore[attr-defined]
+        ).first()
+        return latest
+
+    async def _handle_cancel(self, message: Any, checkout_id: str | None) -> None:
+        """`cancel [<checkout_id>]` (PRD §3.7, plan item #16): the cancel_token
         never reaches the buyer as a raw link — the bot resolves it
         internally and replies in chat. Verifies the checkout belongs to the
         caller before touching it (fail loud, never leak another user's
-        checkout — R0.5)."""
+        checkout — R0.5).
+
+        With no id, targets the caller's most recent cancellable checkout.
+        """
         chat_user_id = str(message.author.id)
 
         session = get_session(self.config)
         try:
-            checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
+            if checkout_id is None:
+                checkout = self._latest_cancellable_checkout(session, chat_user_id)
+                if checkout is None:
+                    await message.channel.send("You have no open orders to cancel.")
+                    return
+                checkout_id = checkout.id
+            else:
+                checkout = session.exec(
+                    select(Checkout).where(Checkout.id == checkout_id)
+                ).first()
             if checkout is None:
                 await message.channel.send(f"I don't see a checkout called {checkout_id}.")
                 return
@@ -1701,7 +1831,7 @@ class FederatedBuyerBot(BuyerBot):
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
-        async with message.channel.typing():
+        async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.start_shop(
                 goal,
                 FEDERATED_POLICY_SENTINEL,
@@ -1772,7 +1902,7 @@ class FederatedBuyerBot(BuyerBot):
         async def _announce_search(query: str) -> None:
             await message.channel.send(f"🔍 Looking for {query}…")
 
-        async with message.channel.typing():
+        async with _report_agent_failures(message, trace_id), message.channel.typing():
             result = await self.agent.continue_shop(
                 messages,
                 message.content,

@@ -107,6 +107,9 @@ class InProcessMCPClient:
     async def get_order(self, checkout_id: str) -> dict[str, Any]:
         return await self.call("get_order", {"checkout_id": checkout_id})
 
+    async def list_campaigns(self) -> dict[str, Any]:
+        return await self.call("list_campaigns", {})
+
 
 class HttpMCPClient:
     """An MCP client for ONE merchant reachable over HTTP (S12).
@@ -181,6 +184,10 @@ class HttpMCPClient:
     async def get_order(self, checkout_id: str) -> dict[str, Any]:
         return await self.call("get_order", {"checkout_id": checkout_id}, require_auth=True)
 
+    async def list_campaigns(self) -> dict[str, Any]:
+        # catalog:read, like search — no scope gate at surfaces/mcp_server.py.
+        return await self.call("list_campaigns", {}, require_auth=False)
+
 
 class FederatingMCPClient:
     """Fans search out across many merchant origins; routes cart/checkout to one.
@@ -251,3 +258,41 @@ class FederatingMCPClient:
             merged.extend(outcome)
 
         return {"success": True, "data": {"items": merged, "count": len(merged)}}
+
+    async def list_campaigns(self) -> dict[str, Any]:
+        """Fan out campaign discovery the same way search fans out, stamping
+        each campaign with the merchant it actually came from (never from the
+        remote payload). One unreachable origin contributes nothing rather than
+        failing the buyer's turn."""
+
+        async def _list_one(merchant_id: str, client: HttpMCPClient) -> list[dict[str, Any]]:
+            result = await client.list_campaigns()
+            if not result.get("success"):
+                logger.warning(
+                    "federated campaigns: merchant %s returned an error: %s",
+                    merchant_id,
+                    result.get("error"),
+                )
+                return []
+            stamped = []
+            for campaign in result.get("data", {}).get("campaigns", []):
+                campaign = dict(campaign)
+                campaign["merchant_id"] = merchant_id
+                stamped.append(campaign)
+            return stamped
+
+        results = await asyncio.gather(
+            *(_list_one(merchant_id, client) for merchant_id, client in self._clients.items()),
+            return_exceptions=True,
+        )
+
+        merged: list[dict[str, Any]] = []
+        for merchant_id, outcome in zip(self._clients.keys(), results, strict=True):
+            if isinstance(outcome, BaseException):
+                logger.warning(
+                    "federated campaigns: merchant %s unreachable: %s", merchant_id, outcome
+                )
+                continue
+            merged.extend(outcome)
+
+        return {"success": True, "data": {"campaigns": merged, "count": len(merged)}}

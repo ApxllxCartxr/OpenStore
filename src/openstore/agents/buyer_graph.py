@@ -286,6 +286,44 @@ def _normalize_search_queries(query: Any) -> list[str]:
     return queries
 
 
+async def _campaign_offers(mcp: Any) -> dict[tuple[str, str], dict[str, Any]]:
+    """Index the merchant's live offers by (merchant_id, sku).
+
+    This is how a buyer agent discovers a campaign at all — before it, the
+    orchestrator published into a void: no cart line ever carried a campaign_id,
+    so compiler check 12 and the discount math were unreachable in production.
+
+    The LLM is NOT told to pick offers, and there is no new plan action. Python
+    attaches campaign_id to whatever the model selects (R0.8/R0.9 applied to
+    marketing): a model cannot invent a discount, and if it somehow named a
+    stale one the compiler would reject the cart at check 12 anyway.
+
+    A merchant with no campaigns, or an origin that fails, contributes nothing.
+    """
+    lister = getattr(mcp, "list_campaigns", None)
+    if lister is None:
+        return {}
+    result = await lister()
+    if not result.get("success"):
+        return {}
+
+    offers: dict[tuple[str, str], dict[str, Any]] = {}
+    for campaign in result.get("data", {}).get("campaigns", []):
+        campaign_merchant = campaign.get("merchant_id")
+        for sku in campaign.get("applies_to_skus", []):
+            # First offer wins, so a SKU covered by two campaigns is stable
+            # across turns rather than flipping on dict ordering.
+            offers.setdefault(
+                (campaign_merchant, sku),
+                {
+                    "campaign_id": campaign["campaign_id"],
+                    "title": campaign.get("title", ""),
+                    "discount_bps": campaign.get("discount_bps", 0),
+                },
+            )
+    return offers
+
+
 async def _run_search(state: BuyerPlanState, *, mcp: Any, config: Settings) -> dict[str, Any]:
     draft = _parse_agent_action(state["messages"][-1]["content"])
     queries = _normalize_search_queries(draft.get("query", ""))
@@ -294,6 +332,7 @@ async def _run_search(state: BuyerPlanState, *, mcp: Any, config: Settings) -> d
         raise BuyerPlanError(f"plan: malformed_search_tags:{tags!r}")
 
     on_search = state.get("on_search")
+    offers = await _campaign_offers(mcp)
     merged = dict(state["all_search_results"])
     results_by_query: dict[str, list[dict[str, Any]]] = {}
     for query in queries:
@@ -311,6 +350,11 @@ async def _run_search(state: BuyerPlanState, *, mcp: Any, config: Settings) -> d
             # items that never needed it.
             if "merchant_id" not in item:
                 item["merchant_id"] = merchant_id(config)
+            offer = offers.get((item["merchant_id"], item["sku"]))
+            if offer is not None:
+                item["campaign_id"] = offer["campaign_id"]
+                item["campaign_title"] = offer["title"]
+                item["discount_bps"] = offer["discount_bps"]
             merged[f"{item['merchant_id']}::{item['sku']}"] = item
 
     tool_result_message = {
@@ -382,16 +426,22 @@ def _validate_selection(state: BuyerPlanState) -> dict[str, Any]:
             raise BuyerPlanError(f"plan: hallucinated_sku:{sku}")
 
         source = by_key[key]
-        cart.append(
-            {
-                "sku": sku,
-                "merchant_id": entry_merchant_id,
-                "qty": qty,
-                "unit_minor": source["unit_minor"],
-                "tags": source.get("tags", []),
-                "name": source.get("name", sku),
-            }
-        )
+        line = {
+            "sku": sku,
+            "merchant_id": entry_merchant_id,
+            "qty": qty,
+            "unit_minor": source["unit_minor"],
+            "tags": source.get("tags", []),
+            "name": source.get("name", sku),
+        }
+        # The campaign comes from the search result Python stamped, never from
+        # the model's selection payload — an LLM cannot name a discount into
+        # existence, and the compiler re-checks validity at check 12 regardless.
+        if source.get("campaign_id"):
+            line["campaign_id"] = source["campaign_id"]
+            line["campaign_title"] = source.get("campaign_title", "")
+            line["discount_bps"] = source.get("discount_bps", 0)
+        cart.append(line)
 
     return {"cart": cart}
 

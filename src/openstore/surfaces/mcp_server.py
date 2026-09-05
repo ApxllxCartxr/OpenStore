@@ -7,6 +7,7 @@ import secrets
 from typing import Any
 
 from openstore.config import Settings
+from openstore.config import merchant_id as _merchant_id
 from openstore.core.api import CommerceError
 
 
@@ -559,20 +560,32 @@ def list_campaigns(
     session: Any,
     merchant_id: str,
 ) -> MCPToolResult:
-    """MCP tool: list_campaigns. Returns ACTIVE campaigns for the merchant."""
+    """MCP tool: list_campaigns. Returns ACTIVE, in-window campaigns.
+
+    The window filter matters: it used to return every ACTIVE row regardless of
+    starts_at/ends_at, so a buyer agent could discover an offer that compiler
+    check 12 then rejected with policy.campaign_outside_window. INV-13 says a
+    buyer MUST treat an out-of-window offer as non-existent — so it is not
+    shown, exactly as the signed feed already does.
+    """
     try:
+        from datetime import UTC, datetime
+
         from sqlmodel import select
 
         from openstore.models import Campaign, CampaignState
 
-        campaigns = list(
-            session.exec(
+        now = datetime.now(UTC).replace(tzinfo=None)
+        campaigns = [
+            c
+            for c in session.exec(
                 select(Campaign).where(
                     Campaign.merchant_id == merchant_id,
                     Campaign.state == CampaignState.ACTIVE,
                 )
             ).all()
-        )
+            if c.starts_at <= now < c.ends_at
+        ]
         return MCPToolResult(
             success=True,
             data={
@@ -901,10 +914,14 @@ def handle_mcp_request(
             assertion=arguments.get("assertion", {}),
         )
     elif tool_name == "list_campaigns":
+        # merchant_id comes from THIS sidecar's config, never from the caller's
+        # arguments (R0.8, and DECISION-015 makes each process single-tenant).
+        # Taking it from the payload let an agent scope the query to a merchant
+        # it does not represent, and an omitted argument silently returned [].
         result = list_campaigns(
             config=config,
             session=session,
-            merchant_id=arguments.get("merchant_id", ""),
+            merchant_id=_merchant_id(config),
         )
     elif tool_name == "get_campaign":
         result = get_campaign(
