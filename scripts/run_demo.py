@@ -60,7 +60,7 @@ def _have_razorpay_creds(config: Settings) -> bool:
 
 def _load_or_create_demo_config() -> Settings:
     """Load gelateria.yaml, or build a demo config from the CLI helper."""
-    config_path = ROOT / "gelateria.yaml"
+    config_path = ROOT / "configs" / "gelateria.yaml"
     if not config_path.exists():
         from openstore.cli import build_config_dict
         import yaml
@@ -68,7 +68,7 @@ def _load_or_create_demo_config() -> Settings:
         cfg = build_config_dict("Gelateria Milano", "INR")
         config_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 
-    catalog_path = ROOT / "catalog.yaml"
+    catalog_path = ROOT / "configs" / "catalog.yaml"
     if not catalog_path.exists():
         catalog_path.write_text(
             "- sku: gelato_vanilla\n  name: Vanilla Gelato\n"

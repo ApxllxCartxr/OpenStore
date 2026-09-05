@@ -24,7 +24,7 @@ from openstore.psp import razorpay_driver as driver
 from openstore.psp import router as psp_router_module
 from openstore.surfaces import mcp_server
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "GOLDEN" / "razorpay"
+GOLDEN_DIR = Path(__file__).resolve().parents[1] / "GOLDEN" / "razorpay"
 
 
 @pytest.fixture()

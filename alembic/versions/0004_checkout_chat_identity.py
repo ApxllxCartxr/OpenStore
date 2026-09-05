@@ -9,7 +9,7 @@ hold-release loop) knows which Discord user to DM when a payment lands, a
 hold nears expiry, or a hold releases. Adds `chat_platform`, `chat_user_id`,
 `chat_channel_id` — all nullable, since not every checkout is chat-originated
 (API/test-created checkouts leave these unset) — mirroring the `handoffs`
-table's same-named fields exactly (SPECS/stage-11-chat-flow.md, plan
+table's same-named fields exactly (docs/SPECS/stage-11-chat-flow.md, plan
 go-with-the-push-functional-hearth.md, Q-018).
 
 0001 uses SQLModel.metadata.create_all, so a fresh DB already gets these

@@ -22,7 +22,7 @@ from openstore.models import Checkout, LedgerEntry, OrderState
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-GOLDEN_DIR = Path("GOLDEN/ledger")
+GOLDEN_DIR = Path("tests/GOLDEN/ledger")
 
 _LIFECYCLES = {
     "reserve_capture": lambda s, ref: (

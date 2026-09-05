@@ -26,7 +26,7 @@ webauthn:
   origin: "http://localhost:8000"
 
 database:
-  url: "sqlite:///openstore.db"
+  url: "sqlite:///data/openstore.db"
 
 llm:
   model: "gpt-4o-mini"

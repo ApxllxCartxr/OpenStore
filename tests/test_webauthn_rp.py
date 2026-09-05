@@ -31,7 +31,7 @@ from openstore.core.webauthn_rp import (
 from openstore.models import WebAuthnCredential
 from sqlmodel import select
 
-GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "webauthn"
+GOLDEN = Path(__file__).resolve().parent / "GOLDEN" / "webauthn"
 
 
 def _load(name: str) -> dict:
@@ -45,10 +45,15 @@ def rp_settings() -> Settings:
         merchant=MerchantConfig(name="Test"),
         razorpay=RazorpayConfig(key_id="k", key_secret="s"),
         discord=DiscordConfig(
-            bot_token="t", buyer_trace_channel_id=1, merchant_trace_channel_id=2,
-            money_trace_channel_id=3, alerts_channel_id=4,
+            bot_token="t",
+            buyer_trace_channel_id=1,
+            merchant_trace_channel_id=2,
+            money_trace_channel_id=3,
+            alerts_channel_id=4,
         ),
-        webauthn=WebAuthnConfig(rp_id="openstore.test", rp_name="x", origin="https://openstore.test"),
+        webauthn=WebAuthnConfig(
+            rp_id="openstore.test", rp_name="x", origin="https://openstore.test"
+        ),
         database=DatabaseConfig(url="sqlite://"),
         llm=LLMSettings(),
         campaign=CampaignSettings(),
@@ -91,8 +96,14 @@ def _enroll(session, rp_settings, reg_name: str, user: str = "op1"):
     store = ChallengeStore()
     store.issue(challenge(reg_name), {"mode": "policy"})
     return complete_registration(
-        session, rp_settings, user, reg["credential_id"], reg["client_data_json"],
-        reg["attestation_object"], challenge(reg_name), store=store,
+        session,
+        rp_settings,
+        user,
+        reg["credential_id"],
+        reg["client_data_json"],
+        reg["attestation_object"],
+        challenge(reg_name),
+        store=store,
     )
 
 
@@ -116,8 +127,13 @@ def test_registration_eddsa_unsupported_alg(rp_session, rp_settings):
     store.issue(challenge("registration_eddsa_unsupported"), {"mode": "policy"})
     with pytest.raises(WebAuthnError) as ei:
         complete_registration(
-            rp_session, rp_settings, "op1", reg["credential_id"], reg["client_data_json"],
-            reg["attestation_object"], challenge("registration_eddsa_unsupported"),
+            rp_session,
+            rp_settings,
+            "op1",
+            reg["credential_id"],
+            reg["client_data_json"],
+            reg["attestation_object"],
+            challenge("registration_eddsa_unsupported"),
             store=store,
         )
     assert ei.value.reason_code == "webauthn_unsupported_alg"
@@ -128,8 +144,16 @@ def test_registration_challenge_single_use(rp_session, rp_settings):
     chal = challenge("registration_es256")
     store = ChallengeStore()
     store.issue(chal, {"mode": "policy"})
-    complete_registration(rp_session, rp_settings, "op1", reg["credential_id"],
-                          reg["client_data_json"], reg["attestation_object"], chal, store=store)
+    complete_registration(
+        rp_session,
+        rp_settings,
+        "op1",
+        reg["credential_id"],
+        reg["client_data_json"],
+        reg["attestation_object"],
+        chal,
+        store=store,
+    )
     with pytest.raises(WebAuthnError) as ei:
         store.consume(chal)
     assert ei.value.reason_code == "assertion_required"
@@ -158,9 +182,16 @@ def test_assertion_es256_pass(rp_session, rp_settings):
     store = ChallengeStore()
     store.issue(challenge("assertion_es256"), {"mode": "policy"})
     ok, new_count = complete_assertion(
-        rp_session, rp_settings, "op1", f["credential_id"], f["client_data_json"],
-        f["authenticator_data"], f["signature"], challenge("assertion_es256"),
-        binding={"mode": "policy"}, store=store,
+        rp_session,
+        rp_settings,
+        "op1",
+        f["credential_id"],
+        f["client_data_json"],
+        f["authenticator_data"],
+        f["signature"],
+        challenge("assertion_es256"),
+        binding={"mode": "policy"},
+        store=store,
     )
     assert ok is True
     assert new_count == 4
@@ -172,9 +203,16 @@ def test_assertion_rs256_pass(rp_session, rp_settings):
     store = ChallengeStore()
     store.issue(challenge("assertion_rs256"), {"mode": "policy"})
     ok, new_count = complete_assertion(
-        rp_session, rp_settings, "op1", f["credential_id"], f["client_data_json"],
-        f["authenticator_data"], f["signature"], challenge("assertion_rs256"),
-        binding={"mode": "policy"}, store=store,
+        rp_session,
+        rp_settings,
+        "op1",
+        f["credential_id"],
+        f["client_data_json"],
+        f["authenticator_data"],
+        f["signature"],
+        challenge("assertion_rs256"),
+        binding={"mode": "policy"},
+        store=store,
     )
     assert ok is True
     assert new_count == 2
@@ -190,12 +228,20 @@ def test_assertion_wrong_challenge(rp_session, rp_settings):
     store.issue(f["expected_challenge"], {"mode": "policy"})
     with pytest.raises(WebAuthnError) as ei:
         complete_assertion(
-            rp_session, rp_settings, "op1", f["credential_id"], f["client_data_json"],
-            f["authenticator_data"], f["signature"], f["expected_challenge"],
-            binding={"mode": "policy"}, store=store,
+            rp_session,
+            rp_settings,
+            "op1",
+            f["credential_id"],
+            f["client_data_json"],
+            f["authenticator_data"],
+            f["signature"],
+            f["expected_challenge"],
+            binding={"mode": "policy"},
+            store=store,
         )
     assert ei.value.reason_code == "assertion_required"
     assert ei.value.failure_type == "assertion_signature_invalid"
+
 
 def test_assertion_sign_count_regression(rp_session, rp_settings):
     _enroll(rp_session, rp_settings, "registration_es256")
@@ -203,9 +249,7 @@ def test_assertion_sign_count_regression(rp_session, rp_settings):
     # Simulate prior replays so the stored sign count equals the fixture's
     # received sign count (both 5) -> monotonicity must reject.
     cred = rp_session.exec(
-        select(WebAuthnCredential).where(
-            WebAuthnCredential.credential_id == f["credential_id"]
-        )
+        select(WebAuthnCredential).where(WebAuthnCredential.credential_id == f["credential_id"])
     ).first()
     cred.sign_count = f["stored_sign_count"]
     rp_session.add(cred)
@@ -215,10 +259,16 @@ def test_assertion_sign_count_regression(rp_session, rp_settings):
     store.issue(challenge("assertion_sign_count_regression"), {"mode": "policy"})
     with pytest.raises(WebAuthnError) as ei:
         complete_assertion(
-            rp_session, rp_settings, "op1", f["credential_id"], f["client_data_json"],
-            f["authenticator_data"], f["signature"],
+            rp_session,
+            rp_settings,
+            "op1",
+            f["credential_id"],
+            f["client_data_json"],
+            f["authenticator_data"],
+            f["signature"],
             challenge("assertion_sign_count_regression"),
-            binding={"mode": "policy"}, store=store,
+            binding={"mode": "policy"},
+            store=store,
         )
     assert ei.value.reason_code == "assertion_required"
     assert ei.value.failure_type == "sign_count_regression"
@@ -237,9 +287,16 @@ def test_assertion_uv_flag_missing(rp_session, rp_settings):
     store.issue(challenge("assertion_es256"), {"mode": "policy"})
     with pytest.raises(WebAuthnError) as ei:
         complete_assertion(
-            rp_session, rp_settings, "op1", f["credential_id"], f["client_data_json"],
-            auth_data, f["signature"], challenge("assertion_es256"),
-            binding={"mode": "policy"}, store=store,
+            rp_session,
+            rp_settings,
+            "op1",
+            f["credential_id"],
+            f["client_data_json"],
+            auth_data,
+            f["signature"],
+            challenge("assertion_es256"),
+            binding={"mode": "policy"},
+            store=store,
         )
     assert ei.value.reason_code == "assertion_required"
     assert ei.value.failure_type == "uv_flag_missing"
@@ -255,9 +312,16 @@ def test_assertion_binding_mismatch(rp_session, rp_settings):
     store.issue(challenge("assertion_es256"), {"mode": "cart", "cart_hash": "hash-a"})
     with pytest.raises(WebAuthnError) as ei:
         complete_assertion(
-            rp_session, rp_settings, "op1", cred["credential_id"], f["client_data_json"],
-            f["authenticator_data"], f["signature"], challenge("assertion_es256"),
-            binding={"mode": "cart", "cart_hash": "hash-b"}, store=store,
+            rp_session,
+            rp_settings,
+            "op1",
+            cred["credential_id"],
+            f["client_data_json"],
+            f["authenticator_data"],
+            f["signature"],
+            challenge("assertion_es256"),
+            binding={"mode": "cart", "cart_hash": "hash-b"},
+            store=store,
         )
     assert ei.value.reason_code == "assertion_required"
     assert ei.value.failure_type == "challenge_mismatch"
@@ -271,8 +335,15 @@ def test_assertion_binding_cart_match(rp_session, rp_settings):
     store = ChallengeStore()
     store.issue(challenge("assertion_es256"), {"mode": "cart", "cart_hash": "hash-a"})
     ok, _ = complete_assertion(
-        rp_session, rp_settings, "op1", cred["credential_id"], f["client_data_json"],
-        f["authenticator_data"], f["signature"], challenge("assertion_es256"),
-        binding={"mode": "cart", "cart_hash": "hash-a"}, store=store,
+        rp_session,
+        rp_settings,
+        "op1",
+        cred["credential_id"],
+        f["client_data_json"],
+        f["authenticator_data"],
+        f["signature"],
+        challenge("assertion_es256"),
+        binding={"mode": "cart", "cart_hash": "hash-a"},
+        store=store,
     )
     assert ok is True

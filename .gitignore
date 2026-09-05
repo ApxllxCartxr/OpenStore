@@ -45,9 +45,10 @@ Thumbs.db
 catalog.yaml
 .env.example
 
-# Local opencode tooling
+# AI agent harness tooling (local only, never in the remote repo)
 .opencode/
 .opencode/mutants/
+.claude/
 
 # Mutation testing output (mutmut)
 mutants/

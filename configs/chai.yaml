@@ -30,7 +30,7 @@ webauthn:
   origin: "http://localhost:8001"
 
 database:
-  url: "sqlite:///chai_openstore.db"
+  url: "sqlite:///data/chai_openstore.db"
 
 llm:
   model: "gpt-4o-mini"

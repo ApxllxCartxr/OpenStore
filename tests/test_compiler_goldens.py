@@ -17,7 +17,7 @@ from openstore.core.compiler import CompilerContext, compile_decision
 from openstore.core.policy_signing import aggregate_cap_exceeds
 from openstore.models import IntentPolicy
 
-GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "compiler" / "vectors.json"
+GOLDEN = Path(__file__).resolve().parent / "GOLDEN" / "compiler" / "vectors.json"
 
 # Reason codes the root-path compiler cannot produce this stage; their vectors are
 # authored (expected pinned in the fixture) and dispatched to a signing-layer gate.
@@ -75,13 +75,24 @@ def test_vectors_present_and_sufficient():
     vectors = _load()
     assert len(vectors) >= 40
     required = [
-        "allow_happy_path", "assertion_required", "policy.currency_mismatch",
-        "policy.merchant_mismatch", "policy.policy_not_yet_valid", "policy.policy_expired",
-        "policy.tx_count_exceeded", "policy.qty_invalid", "policy.sku_duplicate",
-        "policy.sku_blocked", "policy.tag_violation_all", "policy.tag_violation_any",
-        "policy.spend_per_tx_exceeded", "policy.spend_envelope_exceeded",
-        "policy.spend_cumulative_exceeded", "policy.campaign_inactive",
-        "policy.campaign_outside_window", "two_policy_cumulative_isolation",
+        "allow_happy_path",
+        "assertion_required",
+        "policy.currency_mismatch",
+        "policy.merchant_mismatch",
+        "policy.policy_not_yet_valid",
+        "policy.policy_expired",
+        "policy.tx_count_exceeded",
+        "policy.qty_invalid",
+        "policy.sku_duplicate",
+        "policy.sku_blocked",
+        "policy.tag_violation_all",
+        "policy.tag_violation_any",
+        "policy.spend_per_tx_exceeded",
+        "policy.spend_envelope_exceeded",
+        "policy.spend_cumulative_exceeded",
+        "policy.campaign_inactive",
+        "policy.campaign_outside_window",
+        "two_policy_cumulative_isolation",
         "policy.aggregate_cap_exceeded",
     ]
     names = {v["name"] for v in vectors}
@@ -183,17 +194,23 @@ def test_aggregate_cap_vector_shape_and_gate():
     # aggregate above the per-user cap is rejected with policy.aggregate_cap_exceeded.
     cap = 500_000
     # Fail: 450_000 already spent + 100_000 new budget = 550_000 > cap.
-    assert aggregate_cap_exceeds(
-        max_spend_total_minor=100_000,
-        aggregate_spent_minor=450_000,
-        per_user_aggregate_cap_minor=cap,
-    ) is True
+    assert (
+        aggregate_cap_exceeds(
+            max_spend_total_minor=100_000,
+            aggregate_spent_minor=450_000,
+            per_user_aggregate_cap_minor=cap,
+        )
+        is True
+    )
     # Pass: 200_000 spent + 100_000 new budget = 300_000 <= cap.
-    assert aggregate_cap_exceeds(
-        max_spend_total_minor=100_000,
-        aggregate_spent_minor=200_000,
-        per_user_aggregate_cap_minor=cap,
-    ) is False
+    assert (
+        aggregate_cap_exceeds(
+            max_spend_total_minor=100_000,
+            aggregate_spent_minor=200_000,
+            per_user_aggregate_cap_minor=cap,
+        )
+        is False
+    )
 
 
 def test_authored_envelope_vector_shape():
@@ -205,4 +222,5 @@ def test_authored_envelope_vector_shape():
     # delegated-only and is skipped on the root path (PRD §3.2). The code is part
     # of the closed reason-code set but only enforced on delegated envelopes.
     from openstore.core.compiler import REASON_CODES
+
     assert "policy.spend_envelope_exceeded" in REASON_CODES

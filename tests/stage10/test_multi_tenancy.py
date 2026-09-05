@@ -30,7 +30,7 @@ from openstore.core.database import init_database
 from openstore.server import create_app
 
 ROOT = Path(__file__).resolve().parents[2]
-CHAI_YAML = ROOT / "chai.yaml"
+CHAI_YAML = ROOT / "configs" / "chai.yaml"
 
 
 def _settings(name: str, db_url: str, origin: str) -> Settings:
@@ -38,8 +38,10 @@ def _settings(name: str, db_url: str, origin: str) -> Settings:
         merchant=MerchantConfig(name=name),
         razorpay=RazorpayConfig(key_id="rzp_test_xxx", key_secret="s"),
         discord=DiscordConfig(
-            bot_token="token", buyer_trace_channel_id=1,
-            merchant_trace_channel_id=2, money_trace_channel_id=3,
+            bot_token="token",
+            buyer_trace_channel_id=1,
+            merchant_trace_channel_id=2,
+            money_trace_channel_id=3,
             alerts_channel_id=4,
         ),
         webauthn=WebAuthnConfig(rp_id="localhost", rp_name="OpenStore", origin=origin),
@@ -51,16 +53,19 @@ def _settings(name: str, db_url: str, origin: str) -> Settings:
 
 def _clear_engine() -> None:
     import openstore.core.database as db_mod
+
     db_mod._engine = None
 
 
 def _clear_poai_keys() -> None:
     import openstore.surfaces.wellknown as wk
+
     wk.POAI_KEYS = {}
 
 
 def _clear_catalog_cache() -> None:
     import openstore.surfaces.catalog as cat
+
     cat.CATALOG_CACHE = None
 
 
@@ -131,9 +136,7 @@ class TestPerMerchantPoaiKeys:
         assert "chai-house-key-1" not in gelato_kids
         assert "gelateria-milano-key-1" not in chai_kids
 
-    def test_verifier_selects_by_kid_from_jwks_dir(
-        self, tmp_path: Path, gelato, chai
-    ):
+    def test_verifier_selects_by_kid_from_jwks_dir(self, tmp_path: Path, gelato, chai):
         """The verifier's --merchant-jwks accepts a directory and selects by kid."""
         _, g = gelato
         _, c = chai
@@ -152,8 +155,11 @@ class TestPerMerchantPoaiKeys:
             merchant_id="chai-house",
         )
         assert bundle["chain"]["merchant_signature"] is not None
-        header = json.loads(__import__("base64").urlsafe_b64decode(
-            bundle["chain"]["merchant_signature"].split(".")[0] + "=="))
+        header = json.loads(
+            __import__("base64").urlsafe_b64decode(
+                bundle["chain"]["merchant_signature"].split(".")[0] + "=="
+            )
+        )
         assert header["kid"] == "chai-house-key-1"
 
         ctx = checks.VerifierContext(bundle=bundle, jwks_dir=tmp_path)
@@ -177,9 +183,12 @@ _SUBPROCESS = ROOT / "tests" / "stage10" / "_merchant_run.py"
 def _run_merchant(db_path: Path, merchant_id: str, op: str, *args: str):
     import subprocess
     import sys
+
     proc = subprocess.run(
         [sys.executable, str(_SUBPROCESS), str(db_path), merchant_id, op, *args],
-        capture_output=True, text=True, cwd=ROOT,
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
     )
     assert proc.returncode == 0, f"merchant subprocess failed ({merchant_id} {op}): {proc.stderr}"
     return proc.stdout.strip()
@@ -226,6 +235,7 @@ class TestCrossMerchantIsolation:
         # Seed a campaign directly in gelateria's install
         import subprocess
         import sys
+
         helper = f"""
 import sys; sys.path.insert(0, {str(ROOT)!r} + '/src')
 from openstore.config import Settings, MerchantConfig, RazorpayConfig, DiscordConfig, WebAuthnConfig, DatabaseConfig, LLMSettings, CampaignSettings
@@ -258,6 +268,7 @@ class TestChaiConfig:
     def test_chai_yaml_loads(self):
         """`openstore serve chai.yaml` must load the second merchant config."""
         from openstore.config import load_config
+
         assert CHAI_YAML.exists()
         cfg = load_config(CHAI_YAML)
         assert cfg.merchant.name == "Chai House"

@@ -21,7 +21,7 @@ from openstore.config import (
 from openstore.core.database import init_database
 from openstore.server import create_app
 
-GOLDEN = Path(__file__).resolve().parents[2] / "GOLDEN"
+GOLDEN = Path(__file__).resolve().parents[1] / "GOLDEN"
 
 
 @pytest.fixture()
@@ -30,10 +30,15 @@ def config() -> Settings:
         merchant=MerchantConfig(name="Gelateria Milano", currency="INR"),
         razorpay=RazorpayConfig(key_id="rzp_test_xxxxxxxx", key_secret="test"),
         discord=DiscordConfig(
-            bot_token="t", buyer_trace_channel_id=1, merchant_trace_channel_id=2,
-            money_trace_channel_id=3, alerts_channel_id=4,
+            bot_token="t",
+            buyer_trace_channel_id=1,
+            merchant_trace_channel_id=2,
+            money_trace_channel_id=3,
+            alerts_channel_id=4,
         ),
-        webauthn=WebAuthnConfig(rp_id="localhost", rp_name="OpenStore", origin="http://localhost:8000"),
+        webauthn=WebAuthnConfig(
+            rp_id="localhost", rp_name="OpenStore", origin="http://localhost:8000"
+        ),
         database=DatabaseConfig(url="sqlite://"),
         llm=LLMSettings(),
         campaign=CampaignSettings(),
@@ -43,6 +48,7 @@ def config() -> Settings:
 @pytest.fixture()
 def client(config: Settings):
     import openstore.core.database as db_mod
+
     db_mod._engine = None
     init_database(config)
     app = create_app(config)
@@ -145,10 +151,13 @@ class TestMCPTools:
         assert "unknown_tool" in data["error"]["reason_code"]
 
     def test_list_campaigns_empty(self, client):
-        r = client.post("/agent/mcp", json={
-            "tool": "list_campaigns",
-            "arguments": {"merchant_id": "test"},
-        })
+        r = client.post(
+            "/agent/mcp",
+            json={
+                "tool": "list_campaigns",
+                "arguments": {"merchant_id": "test"},
+            },
+        )
         assert r.status_code == 200
         data = r.json()
         assert data["success"] is True
@@ -158,6 +167,7 @@ class TestMCPTools:
 class TestCatalogFeed:
     def test_catalog_endpoint_returns_items(self, client, tmp_path):
         import openstore.surfaces.catalog as catalog_mod
+
         catalog_mod.CATALOG_CACHE = None
         catalog = tmp_path / "catalog.yaml"
         catalog.write_text("""

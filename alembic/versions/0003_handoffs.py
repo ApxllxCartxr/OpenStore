@@ -6,7 +6,7 @@ Create Date: 2026-09-03
 
 The `handoffs` table parks a chat conversation while a human completes an
 out-of-band ceremony (policy signing, amendment approval) in a browser, then
-resumes it (SPECS/stage-11-chat-flow.md, plan
+resumes it (docs/SPECS/stage-11-chat-flow.md, plan
 go-with-the-push-functional-hearth.md).
 
 0001 uses SQLModel.metadata.create_all, so a fresh DB already gets `handoffs`

@@ -42,7 +42,7 @@ from openstore.devtools.virtual_authenticator import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-GOLDEN = ROOT / "GOLDEN" / "webauthn"
+GOLDEN = ROOT / "tests" / "GOLDEN" / "webauthn"
 KEYS = GOLDEN / "keys"
 
 RP_ID = RP_ID_DEFAULT

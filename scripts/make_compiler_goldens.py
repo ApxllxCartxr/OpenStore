@@ -21,7 +21,7 @@ from pathlib import Path
 from openstore.core.compiler import CompilerContext, CompilerResult, compile_decision
 from openstore.models import IntentPolicy
 
-GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "compiler" / "vectors.json"
+GOLDEN = Path(__file__).resolve().parent.parent / "tests" / "GOLDEN" / "compiler" / "vectors.json"
 
 AGGREGATE = 4102444800  # far-future Unix seconds (year 2100)
 NOW = int(datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp())
@@ -54,8 +54,18 @@ def _make_policy(**overrides) -> IntentPolicy:
     return IntentPolicy(**base)
 
 
-def _ctx(policy, *, cart_items, assertion=True, merchant_id="m_test", currency="INR",
-         count=0, cumulative=0, now=NOW, campaign_lookup=None):
+def _ctx(
+    policy,
+    *,
+    cart_items,
+    assertion=True,
+    merchant_id="m_test",
+    currency="INR",
+    count=0,
+    cumulative=0,
+    now=NOW,
+    campaign_lookup=None,
+):
     return CompilerContext(
         cart_items=cart_items,
         policy=policy,
@@ -174,7 +184,11 @@ def main() -> None:
 
     # check 6 — policy.sku_duplicate
     p = _make_policy()
-    vectors.append(_vector("policy.sku_duplicate", p, [_item("SKU_A", 1, 100_00), _item("SKU_A", 2, 100_00)], {}))
+    vectors.append(
+        _vector(
+            "policy.sku_duplicate", p, [_item("SKU_A", 1, 100_00), _item("SKU_A", 2, 100_00)], {}
+        )
+    )
 
     # check 7 — policy.sku_blocked
     p = _make_policy(blocked_skus=["SKU_B"])
@@ -182,11 +196,15 @@ def main() -> None:
 
     # check 8 mode=all — policy.tag_violation
     p = _make_policy(allowed_tags=["beverage"], tag_mode="all")
-    vectors.append(_vector("policy.tag_violation_all", p, [_item("SKU_B", 1, 200_00, tags=["snack"])], {}))
+    vectors.append(
+        _vector("policy.tag_violation_all", p, [_item("SKU_B", 1, 200_00, tags=["snack"])], {})
+    )
 
     # check 8 mode=any — policy.tag_violation
     p = _make_policy(allowed_tags=["beverage", "confection"], tag_mode="any")
-    vectors.append(_vector("policy.tag_violation_any", p, [_item("SKU_B", 1, 200_00, tags=["savoury"])], {}))
+    vectors.append(
+        _vector("policy.tag_violation_any", p, [_item("SKU_B", 1, 200_00, tags=["savoury"])], {})
+    )
 
     # check 9 — policy.spend_per_tx_exceeded
     p = _make_policy(max_spend_per_tx_minor=500_00)
@@ -198,7 +216,11 @@ def main() -> None:
 
     # check 12 — policy.campaign_inactive (campaign missing)
     p = _make_policy()
-    vectors.append(_vector("policy.campaign_inactive", p, [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")], {}))
+    vectors.append(
+        _vector(
+            "policy.campaign_inactive", p, [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")], {}
+        )
+    )
 
     # check 12 — policy.campaign_inactive (state PAUSED)
     p = _make_policy()
@@ -214,7 +236,14 @@ def main() -> None:
             },
         }
     }
-    vectors.append(_vector("policy.campaign_inactive_state", p, [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")], {"campaign_lookup": paused}))
+    vectors.append(
+        _vector(
+            "policy.campaign_inactive_state",
+            p,
+            [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")],
+            {"campaign_lookup": paused},
+        )
+    )
 
     # check 12 — policy.campaign_outside_window
     p = _make_policy()
@@ -230,7 +259,14 @@ def main() -> None:
             },
         }
     }
-    vectors.append(_vector("policy.campaign_outside_window", p, [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")], {"campaign_lookup": outside}))
+    vectors.append(
+        _vector(
+            "policy.campaign_outside_window",
+            p,
+            [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")],
+            {"campaign_lookup": outside},
+        )
+    )
 
     # ordering proof: checks 4 (expired) AND 9 (per-tx) -> policy_expired first
     p = _make_policy(expires_at=NOW - 1, max_spend_per_tx_minor=50_00)
@@ -238,51 +274,107 @@ def main() -> None:
 
     # ordering proof: checks 1 (currency) AND 12 (campaign) -> currency_mismatch first
     p = _make_policy()
-    vectors.append(_vector("ordering_check1_before_check12", p, [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")], {"currency": "USD"}))
+    vectors.append(
+        _vector(
+            "ordering_check1_before_check12",
+            p,
+            [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")],
+            {"currency": "USD"},
+        )
+    )
 
     # two_policy_cumulative_isolation (Q-003): B clean -> check 11 sees spent=0
     p_b = _make_policy(id="pol-B")
-    vectors.append(_vector(
-        "two_policy_cumulative_isolation", p_b, [chai], {"cumulative": 0},
-        note="Policy B's per-policy cumulative spend is scoped to 0 (PRD §3.2c); "
-             "check 11 passes even though policy A had prior CAPTURE legs.",
-    ))
+    vectors.append(
+        _vector(
+            "two_policy_cumulative_isolation",
+            p_b,
+            [chai],
+            {"cumulative": 0},
+            note="Policy B's per-policy cumulative spend is scoped to 0 (PRD §3.2c); "
+            "check 11 passes even though policy A had prior CAPTURE legs.",
+        )
+    )
 
     # companion: policy A at its own high cumulative -> spend_cumulative_exceeded
     p_a = _make_policy(id="pol-A", max_spend_total_minor=250_00)
-    vectors.append(_vector(
-        "two_policy_cumulative_spent_A", p_a, [chai], {"cumulative": 200_00},
-        note="Policy A evaluated with its own scoped cumulative independent of B.",
-    ))
+    vectors.append(
+        _vector(
+            "two_policy_cumulative_spent_A",
+            p_a,
+            [chai],
+            {"cumulative": 200_00},
+            note="Policy A evaluated with its own scoped cumulative independent of B.",
+        )
+    )
 
     # policy.spend_envelope_exceeded (delegated-only, authored expected)
     p = _make_policy()
-    vectors.append(_vector(
-        "policy.spend_envelope_exceeded", p, [chai], {},
-        expected={"allowed": False, "reason_code": "policy.spend_envelope_exceeded", "transcript": []},
-        note="Check 10 spend_envelope is delegated-only and skipped on the root path "
-             "(PRD §3.2). The root compiler cannot reach this code this stage; expected "
-             "is authored so the closed-set coverage list is complete.",
-    ))
+    vectors.append(
+        _vector(
+            "policy.spend_envelope_exceeded",
+            p,
+            [chai],
+            {},
+            expected={
+                "allowed": False,
+                "reason_code": "policy.spend_envelope_exceeded",
+                "transcript": [],
+            },
+            note="Check 10 spend_envelope is delegated-only and skipped on the root path "
+            "(PRD §3.2). The root compiler cannot reach this code this stage; expected "
+            "is authored so the closed-set coverage list is complete.",
+        )
+    )
 
     # policy.aggregate_cap_exceeded (signing-time, authored expected)
     p = _make_policy()
-    vectors.append(_vector(
-        "policy.aggregate_cap_exceeded", p, [chai], {},
-        expected={"allowed": False, "reason_code": "policy.aggregate_cap_exceeded", "transcript": []},
-        note="Aggregate cap is enforced at policy signing time (PRD §3.2a, S3.5), not "
-             "inside the compiler check ladder. Behavioral gate lives in policy_signing.py.",
-    ))
+    vectors.append(
+        _vector(
+            "policy.aggregate_cap_exceeded",
+            p,
+            [chai],
+            {},
+            expected={
+                "allowed": False,
+                "reason_code": "policy.aggregate_cap_exceeded",
+                "transcript": [],
+            },
+            note="Aggregate cap is enforced at policy signing time (PRD §3.2a, S3.5), not "
+            "inside the compiler check ladder. Behavioral gate lives in policy_signing.py.",
+        )
+    )
 
     # stock passes for each remaining check name (reach >= 40 vectors)
     tag_any_ok = _make_policy(allowed_tags=["beverage"], tag_mode="any")
-    vectors.append(_vector("pass_tag_any_intersection", tag_any_ok, [_item("SKU_A", 1, 100_00, tags=["beverage", "x"])], {}))
+    vectors.append(
+        _vector(
+            "pass_tag_any_intersection",
+            tag_any_ok,
+            [_item("SKU_A", 1, 100_00, tags=["beverage", "x"])],
+            {},
+        )
+    )
 
     tag_all_ok = _make_policy(allowed_tags=["beverage", "x"], tag_mode="all")
-    vectors.append(_vector("pass_tag_all_subset", tag_all_ok, [_item("SKU_A", 1, 100_00, tags=["beverage", "x"])], {}))
+    vectors.append(
+        _vector(
+            "pass_tag_all_subset",
+            tag_all_ok,
+            [_item("SKU_A", 1, 100_00, tags=["beverage", "x"])],
+            {},
+        )
+    )
 
     empty_allowed_tags_ok = _make_policy(allowed_tags=[])
-    vectors.append(_vector("pass_tag_unconstrained", empty_allowed_tags_ok, [_item("SKU_A", 1, 100_00, tags=["anything"])], {}))
+    vectors.append(
+        _vector(
+            "pass_tag_unconstrained",
+            empty_allowed_tags_ok,
+            [_item("SKU_A", 1, 100_00, tags=["anything"])],
+            {},
+        )
+    )
 
     blocked_empty_ok = _make_policy(blocked_skus=[])
     vectors.append(_vector("pass_blocked_empty", blocked_empty_ok, [chai], {}))
@@ -294,9 +386,17 @@ def main() -> None:
     vectors.append(_vector("pass_per_tx_exact", per_tx_ok, [_item("SKU_A", 1, 500_00)], {}))
 
     decimals_pass = _make_policy()
-    vectors.append(_vector("pass_multiline_skus", decimals_pass, [
-        _item("SKU_A", 2, 100_00), _item("SKU_B", 3, 200_00),
-    ], {}))
+    vectors.append(
+        _vector(
+            "pass_multiline_skus",
+            decimals_pass,
+            [
+                _item("SKU_A", 2, 100_00),
+                _item("SKU_B", 3, 200_00),
+            ],
+            {},
+        )
+    )
 
     early_valid = _make_policy(not_before=0, expires_at=AGGREGATE)
     vectors.append(_vector("pass_then_valid_window_large", early_valid, [chai], {"count": 0}))
@@ -314,7 +414,14 @@ def main() -> None:
             },
         }
     }
-    vectors.append(_vector("pass_campaign_active_in_window", _make_policy(), [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")], {"campaign_lookup": active}))
+    vectors.append(
+        _vector(
+            "pass_campaign_active_in_window",
+            _make_policy(),
+            [_item("SKU_A", 1, 100_00, campaign_id="CAMP_X")],
+            {"campaign_lookup": active},
+        )
+    )
 
     # Reach a clear >= 40 threshold deterministically.
     for i in range(6):
@@ -322,7 +429,9 @@ def main() -> None:
         vectors.append(_vector(f"pass_extra_{i}", p, [chai, samosa], {}))
 
     p = _make_policy(id="pass-large-single", max_spend_per_tx_minor=2_000_000)
-    vectors.append(_vector("pass_large_single_sku", p, [_item("SKU_A", 4, 500_00)], {"cumulative": 0}))
+    vectors.append(
+        _vector("pass_large_single_sku", p, [_item("SKU_A", 4, 500_00)], {"cumulative": 0})
+    )
 
     p = _make_policy(id="pass-equal-tags", allowed_tags=["beverage", "snack"], tag_mode="all")
     vectors.append(_vector("pass_equal_tags", p, [chai, samosa], {}))
@@ -335,13 +444,24 @@ def main() -> None:
     print(f"wrote {len(vectors)} vectors to {GOLDEN}")
 
     required = [
-        "allow_happy_path", "assertion_required", "policy.currency_mismatch",
-        "policy.merchant_mismatch", "policy.policy_not_yet_valid", "policy.policy_expired",
-        "policy.tx_count_exceeded", "policy.qty_invalid", "policy.sku_duplicate",
-        "policy.sku_blocked", "policy.tag_violation_all", "policy.tag_violation_any",
-        "policy.spend_per_tx_exceeded", "policy.spend_envelope_exceeded",
-        "policy.spend_cumulative_exceeded", "policy.campaign_inactive",
-        "policy.campaign_outside_window", "two_policy_cumulative_isolation",
+        "allow_happy_path",
+        "assertion_required",
+        "policy.currency_mismatch",
+        "policy.merchant_mismatch",
+        "policy.policy_not_yet_valid",
+        "policy.policy_expired",
+        "policy.tx_count_exceeded",
+        "policy.qty_invalid",
+        "policy.sku_duplicate",
+        "policy.sku_blocked",
+        "policy.tag_violation_all",
+        "policy.tag_violation_any",
+        "policy.spend_per_tx_exceeded",
+        "policy.spend_envelope_exceeded",
+        "policy.spend_cumulative_exceeded",
+        "policy.campaign_inactive",
+        "policy.campaign_outside_window",
+        "two_policy_cumulative_isolation",
         "policy.aggregate_cap_exceeded",
     ]
     names = {v["name"] for v in vectors}

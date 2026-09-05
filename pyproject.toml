@@ -102,7 +102,7 @@ tests_dir = [
     "tests/redteam/test_inv5_ledger.py",
     "tests/redteam/test_inv6_inv7_webhooks.py",
 ]
-also_copy = ["REGISTRY.json", "GOLDEN"]
+also_copy = ["REGISTRY.json", "tests/GOLDEN"]
 
 [dependency-groups]
 dev = [

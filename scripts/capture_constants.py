@@ -87,14 +87,22 @@ def capture_payment_link_create_error(
         "capture_date": CAPTURE_DATE,
         "reference_id": reference_id,
         "first_request_status": r1.status_code,
-        "first_request_body": r1.json() if r1.headers.get("content-type", "").startswith("application/json") else r1.text[:500],
+        "first_request_body": r1.json()
+        if r1.headers.get("content-type", "").startswith("application/json")
+        else r1.text[:500],
     }
 
     r2 = razorpay_request("POST", url, key_id, key_secret, data)
     result["second_request_status"] = r2.status_code
-    result["second_request_body"] = r2.json() if r2.headers.get("content-type", "").startswith("application/json") else r2.text[:500]
+    result["second_request_body"] = (
+        r2.json()
+        if r2.headers.get("content-type", "").startswith("application/json")
+        else r2.text[:500]
+    )
 
-    duplicate_error = r2.json() if r2.headers.get("content-type", "").startswith("application/json") else {}
+    duplicate_error = (
+        r2.json() if r2.headers.get("content-type", "").startswith("application/json") else {}
+    )
     result["error_code"] = duplicate_error.get("error", {}).get("code", "UNKNOWN")
     result["error_description"] = duplicate_error.get("error", {}).get("description", "")
 
@@ -110,9 +118,7 @@ def capture_payment_link_create_error(
     return result
 
 
-def capture_cancel_already_paid(
-    key_id: str, key_secret: str, output_dir: Path
-) -> dict[str, Any]:
+def capture_cancel_already_paid(key_id: str, key_secret: str, output_dir: Path) -> dict[str, Any]:
     """S5.1: Capture cancel-already-paid HTTP 400 body shape (DECISIONS §11.1.2)."""
     print("Capturing cancel-already-paid error...")
     reference_id = f"test_cancel_{int(time.time())}"
@@ -140,7 +146,7 @@ def capture_cancel_already_paid(
         "capture_date": CAPTURE_DATE,
         "reference_id": reference_id,
         "note": "This capture requires a payment link that has been paid. "
-                "Manual verification may be needed.",
+        "Manual verification may be needed.",
     }
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
@@ -153,9 +159,7 @@ def capture_cancel_already_paid(
     return result
 
 
-def capture_webhook_fixtures(
-    key_id: str, key_secret: str, output_dir: Path
-) -> dict[str, Any]:
+def capture_webhook_fixtures(key_id: str, key_secret: str, output_dir: Path) -> dict[str, Any]:
     """S5.1: Capture real webhook body shapes for the four events."""
     print("Capturing webhook body shapes...")
 
@@ -258,11 +262,15 @@ def capture_webhook_fixtures(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Capture Razorpay test-mode constants [verify-at-build]")
+    parser = argparse.ArgumentParser(
+        description="Capture Razorpay test-mode constants [verify-at-build]"
+    )
     parser.add_argument("--key-id", required=True, help="Razorpay test-mode key_id")
     parser.add_argument("--key-secret", required=True, help="Razorpay test-mode key_secret")
-    parser.add_argument("--output", default="GOLDEN/razorpay", help="Output directory")
-    parser.add_argument("--skip-live", action="store_true", help="Skip live API calls, create placeholder fixtures")
+    parser.add_argument("--output", default="tests/GOLDEN/razorpay", help="Output directory")
+    parser.add_argument(
+        "--skip-live", action="store_true", help="Skip live API calls, create placeholder fixtures"
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output)
@@ -280,8 +288,6 @@ def main() -> int:
     if not args.key_id.startswith("rzp_test_"):
         print(f"ERROR: key_id must start with 'rzp_test_' (test mode only). Got: {args.key_id!r}")
         return 1
-
-
 
     try:
         capture_payment_link_create_error(args.key_id, args.key_secret, output_dir)

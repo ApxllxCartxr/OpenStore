@@ -25,7 +25,7 @@ from openstore.psp import razorpay_driver as driver
 from openstore.psp import router as psp_router_module
 from openstore.surfaces.evidence import evidence_router
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "GOLDEN" / "razorpay"
+GOLDEN_DIR = Path(__file__).resolve().parents[1] / "GOLDEN" / "razorpay"
 
 
 @pytest.fixture()
@@ -66,8 +66,12 @@ def _make_held_checkout(
         cart_snapshot={"items": [{"sku": "vanilla", "qty": 1, "unit_minor": amount_minor}]},
     )
     create_reserve_entry(
-        session=session, trace_id=checkout.trace_id, client_id=checkout.client_id,
-        checkout_id=checkout.id, amount_minor=amount_minor, currency="INR",
+        session=session,
+        trace_id=checkout.trace_id,
+        client_id=checkout.client_id,
+        checkout_id=checkout.id,
+        amount_minor=amount_minor,
+        currency="INR",
     )
     update_checkout_state(session=session, checkout_id=checkout.id, new_state=OrderState.HELD)
     checkout.chat_platform = "discord"
@@ -131,8 +135,12 @@ class TestWebhookProducesEvidence:
         body = json.dumps(payload).encode()
 
         event = driver.persist_raw_webhook_event(
-            session=session, raw_body=body, signature="test", x_event_id="evt_ev_webhook",
-            trace_id="trace_ev_webhook", client_id="razorpay",
+            session=session,
+            raw_body=body,
+            signature="test",
+            x_event_id="evt_ev_webhook",
+            trace_id="trace_ev_webhook",
+            client_id="razorpay",
         )
         session.commit()
 

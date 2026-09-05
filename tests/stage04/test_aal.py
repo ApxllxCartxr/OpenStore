@@ -14,7 +14,7 @@ from openstore.core.poai import (
     get_aal_liability_sentence,
 )
 
-GOLDEN = Path(__file__).resolve().parent.parent.parent / "GOLDEN" / "poai"
+GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "poai"
 
 
 def _load(name: str) -> dict:
@@ -56,10 +56,13 @@ class TestEvaluateAALPredicates:
         tampered = copy.deepcopy(bundle)
         # Strip UV bit from authenticator_data
         import base64
+
         auth_raw = tampered["authority"]["webauthn"]["authenticator_data"]
         auth_bytes = bytearray(base64.urlsafe_b64decode(auth_raw + "=="))
         auth_bytes[32] &= ~0x04  # clear UV bit
-        tampered["authority"]["webauthn"]["authenticator_data"] = base64.urlsafe_b64encode(bytes(auth_bytes)).decode().rstrip("=")
+        tampered["authority"]["webauthn"]["authenticator_data"] = (
+            base64.urlsafe_b64encode(bytes(auth_bytes)).decode().rstrip("=")
+        )
         p = evaluate_aal_predicates(tampered)
         assert p["e2"] is False
         assert p["e4"] is False
@@ -75,9 +78,17 @@ class TestComputeAALLevel:
         assert compute_aal_level_from_bundle(bundle) == 3
 
     def test_no_authority_returns_aal0(self):
-        empty = {"transaction": None, "human_intent": None, "authority": None,
-                 "goods": None, "agent": None, "adjudication": None,
-                 "notification": None, "aal": None, "campaign": None}
+        empty = {
+            "transaction": None,
+            "human_intent": None,
+            "authority": None,
+            "goods": None,
+            "agent": None,
+            "adjudication": None,
+            "notification": None,
+            "aal": None,
+            "campaign": None,
+        }
         assert compute_aal_level_from_bundle(empty) == 0
 
 

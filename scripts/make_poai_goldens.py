@@ -27,9 +27,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 ROOT = Path(__file__).resolve().parent.parent
-CANONICAL_DIR = ROOT / "GOLDEN" / "canonical"
-HASHCHAIN_DIR = ROOT / "GOLDEN" / "hashchain"
-POAI_DIR = ROOT / "GOLDEN" / "poai"
+CANONICAL_DIR = ROOT / "tests" / "GOLDEN" / "canonical"
+HASHCHAIN_DIR = ROOT / "tests" / "GOLDEN" / "hashchain"
+POAI_DIR = ROOT / "tests" / "GOLDEN" / "poai"
 POAI_KEYS = POAI_DIR / "keys"
 POAI_JWKS = POAI_DIR / "jwks"
 
@@ -100,11 +100,15 @@ def _es256_sign(priv_bytes: bytes, signing_input: str) -> str:
     return b64u(raw_sig)
 
 
-def _sign_bundle_jws(bundle_id: str, issued_at: str, root: str,
-                      priv_bytes: bytes, kid: str) -> str:
-    header = json.dumps({"alg": "ES256", "kid": kid, "typ": "JWT"}, sort_keys=True, separators=(",", ":"))
-    payload = json.dumps({"bundle_id": bundle_id, "issued_at": issued_at, "root": root},
-                          sort_keys=True, separators=(",", ":"))
+def _sign_bundle_jws(bundle_id: str, issued_at: str, root: str, priv_bytes: bytes, kid: str) -> str:
+    header = json.dumps(
+        {"alg": "ES256", "kid": kid, "typ": "JWT"}, sort_keys=True, separators=(",", ":")
+    )
+    payload = json.dumps(
+        {"bundle_id": bundle_id, "issued_at": issued_at, "root": root},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     header_b64 = b64u(header.encode("utf-8"))
     payload_b64 = b64u(payload.encode("utf-8"))
     signing_input = f"{header_b64}.{payload_b64}"
@@ -113,8 +117,9 @@ def _sign_bundle_jws(bundle_id: str, issued_at: str, root: str,
 
 
 def _make_time_anchor(root: str, salt_b64: str) -> dict:
-    salt_digest_input = json.dumps({"root": root, "salt": salt_b64}, sort_keys=True,
-                                    separators=(",", ":")).encode("utf-8")
+    salt_digest_input = json.dumps(
+        {"root": root, "salt": salt_b64}, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
     digest = hashlib.sha256(salt_digest_input).hexdigest()
     return {"type": "merkle_daily", "salt": salt_b64, "root": root, "digest": f"sha256:{digest}"}
 
@@ -132,6 +137,7 @@ def _section_hash(data: bytes) -> str:
 def _build_chain(sections_data: dict) -> tuple[list[str], str]:
     """Build hash chain and return (links, root)."""
     from openstore.core.poai import SECTION_ORDER
+
     links_out: list[str] = []
     prev_digest = b""
     for name in SECTION_ORDER:
@@ -161,6 +167,7 @@ def make_canonical_vectors() -> None:
     empty containers, key-order independence, and integer fidelity."""
 
     import sys
+
     sys.path.insert(0, str(ROOT / "src"))
     from openstore.core.poai import canonical_json_bytes
 
@@ -240,25 +247,31 @@ def make_hashchain_vectors() -> None:
     # Case 1: all null sections (all b"null")
     null_data = {name: b"null" for name in SECTION_ORDER}
     links_null, root_null = _build_chain(null_data)
-    _write_json(HASHCHAIN_DIR / "all_null_sections.json", {
-        "description": "all 9 sections are JSON null",
-        "sections": {name: None for name in SECTION_ORDER},
-        "links": links_null,
-        "root": root_null,
-    })
+    _write_json(
+        HASHCHAIN_DIR / "all_null_sections.json",
+        {
+            "description": "all 9 sections are JSON null",
+            "sections": {name: None for name in SECTION_ORDER},
+            "links": links_null,
+            "root": root_null,
+        },
+    )
 
     # Case 2: one section non-null (transaction only)
     tx = {"merchant_id": "m_test", "amount_minor": 10000}
     sec_data = {name: b"null" for name in SECTION_ORDER}
     sec_data["transaction"] = _canonical_json_bytes(tx)
     links_one, root_one = _build_chain(sec_data)
-    _write_json(HASHCHAIN_DIR / "one_section.json", {
-        "description": "only transaction section populated",
-        "sections": {name: None for name in SECTION_ORDER},
-        "sections_override": {"transaction": tx},
-        "links": links_one,
-        "root": root_one,
-    })
+    _write_json(
+        HASHCHAIN_DIR / "one_section.json",
+        {
+            "description": "only transaction section populated",
+            "sections": {name: None for name in SECTION_ORDER},
+            "sections_override": {"transaction": tx},
+            "links": links_one,
+            "root": root_one,
+        },
+    )
 
     # Case 3: all sections populated
     full_sections = {
@@ -276,12 +289,15 @@ def make_hashchain_vectors() -> None:
     for name in SECTION_ORDER:
         full_sec_data[name] = _canonical_json_bytes(full_sections.get(name))
     links_full, root_full = _build_chain(full_sec_data)
-    _write_json(HASHCHAIN_DIR / "all_sections.json", {
-        "description": "all 9 sections populated (campaign null)",
-        "sections": full_sections,
-        "links": links_full,
-        "root": root_full,
-    })
+    _write_json(
+        HASHCHAIN_DIR / "all_sections.json",
+        {
+            "description": "all 9 sections populated (campaign null)",
+            "sections": full_sections,
+            "links": links_full,
+            "root": root_full,
+        },
+    )
 
     print(f"wrote 3 hash chain vectors to {HASHCHAIN_DIR}")
 
@@ -329,7 +345,9 @@ def make_bundle_base(priv_bytes: bytes, jwks: dict) -> dict:
         "policy_hash": hashlib.sha256("policy_content".encode()).hexdigest(),
         "webauthn": {
             "credential_id": "cred_es256_test",
-            "client_data_json": b64u(b'{"type":"webauthn.get","challenge":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","origin":"https://openstore.test","crossOrigin":false}'),
+            "client_data_json": b64u(
+                b'{"type":"webauthn.get","challenge":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","origin":"https://openstore.test","crossOrigin":false}'
+            ),
             "authenticator_data": b64u(bytes(auth_data)),
             "signature": b64u(b"\x00" * 72),
             "uv": True,
@@ -339,7 +357,12 @@ def make_bundle_base(priv_bytes: bytes, jwks: dict) -> dict:
             "challenge_binding": {"mode": "policy"},
         },
         "enrolment": {
-            "public_key": {"kty": "EC", "crv": "P-256", "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+            "public_key": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            },
             "aaguid": "00000000-0000-0000-0000-000000000000",
             "attestation_format": "none",
             "enrolled_at": "2030-01-01T00:00:00Z",
@@ -349,7 +372,9 @@ def make_bundle_base(priv_bytes: bytes, jwks: dict) -> dict:
     }
 
     goods = {
-        "cart_hash": hashlib.sha256('[{"sku":"GEL-VAN-500","qty":1,"unit_minor":21000,"tags":["vegan","dairy-free"]}]'.encode()).hexdigest(),
+        "cart_hash": hashlib.sha256(
+            '[{"sku":"GEL-VAN-500","qty":1,"unit_minor":21000,"tags":["vegan","dairy-free"]}]'.encode()
+        ).hexdigest(),
         "cart_version": 1,
         "items": [
             {
@@ -420,8 +445,14 @@ def make_bundle_base(priv_bytes: bytes, jwks: dict) -> dict:
     }
 
 
-def _assemble_bundle(base: dict, level: int, predicates: dict, reasons: list[str],
-                     campaign: dict | None = None, bundle_id: str = "poai_test_bundle") -> dict:
+def _assemble_bundle(
+    base: dict,
+    level: int,
+    predicates: dict,
+    reasons: list[str],
+    campaign: dict | None = None,
+    bundle_id: str = "poai_test_bundle",
+) -> dict:
     """Assemble a full PoAI bundle."""
     from openstore.core.poai import SECTION_ORDER
 
@@ -499,16 +530,25 @@ def make_poai_vectors() -> None:
     ]
 
     bundle_aal2 = _assemble_bundle(
-        base, level=2, predicates=aal2_predicates, reasons=aal2_reasons,
-        bundle_id="poai_test_bundle_aal2"
+        base,
+        level=2,
+        predicates=aal2_predicates,
+        reasons=aal2_reasons,
+        bundle_id="poai_test_bundle_aal2",
     )
     _write_json(POAI_DIR / "bundle_aal2.json", bundle_aal2)
 
     # --- AAL3 bundle: cart-bound challenge (e5 = True) ---
     aal3_predicates = {
-        "e1": True, "e2": True, "e3": True, "e4": True,
+        "e1": True,
+        "e2": True,
+        "e3": True,
+        "e4": True,
         "e5": True,  # cart-bound challenge
-        "e6": False, "e7": True, "e8": True, "e9": True,
+        "e6": False,
+        "e7": True,
+        "e8": True,
+        "e9": True,
     }
     # Modify the authority to have cart-bound challenge
     aal3_authority = dict(base["authority"])
@@ -530,8 +570,11 @@ def make_poai_vectors() -> None:
     ]
 
     bundle_aal3 = _assemble_bundle(
-        aal3_base, level=3, predicates=aal3_predicates, reasons=aal3_reasons,
-        bundle_id="poai_test_bundle_aal3"
+        aal3_base,
+        level=3,
+        predicates=aal3_predicates,
+        reasons=aal3_reasons,
+        bundle_id="poai_test_bundle_aal3",
     )
     _write_json(POAI_DIR / "bundle_aal3.json", bundle_aal3)
 
@@ -553,7 +596,9 @@ def make_poai_vectors() -> None:
     # --- Bad merchant signature ---
     bad_sig_bundle = dict(bundle_aal2)
     bad_sig_bundle["chain"] = dict(bad_sig_bundle["chain"])
-    bad_sig_bundle["chain"]["merchant_signature"] = "eyJhbGciOiJFUzI1NiIsImtpZCI6ImdlbGF0ZXJpYS1yb21hLWtleS0xIiwidHlwIjoiSldUIn0.eyJidW5kbGVfaWQiOiJwb2FpX3Rlc3RfYnVuZGxlX2FhbDIiLCJpc3N1ZWRfYXQiOiIyMDMwLTAxLTAxVDAwOjAwOjAwWiIsInJvb3QiOiI2ZmQ0YmE5YjVjYTk4MjhhM2Y0NjdlMjMzMmMxMjNhYTgyODM2ZGMxOGQxOTRmNjM2NGUwYjgyMzhhZjhlZmQxMyJ9.INVALID"
+    bad_sig_bundle["chain"]["merchant_signature"] = (
+        "eyJhbGciOiJFUzI1NiIsImtpZCI6ImdlbGF0ZXJpYS1yb21hLWtleS0xIiwidHlwIjoiSldUIn0.eyJidW5kbGVfaWQiOiJwb2FpX3Rlc3RfYnVuZGxlX2FhbDIiLCJpc3N1ZWRfYXQiOiIyMDMwLTAxLTAxVDAwOjAwOjAwWiIsInJvb3QiOiI2ZmQ0YmE5YjVjYTk4MjhhM2Y0NjdlMjMzMmMxMjNhYTgyODM2ZGMxOGQxOTRmNjM2NGUwYjgyMzhhZjhlZmQxMyJ9.INVALID"
+    )
     _write_json(POAI_DIR / "bundle_bad_merchant_sig.json", bad_sig_bundle)
 
     # --- Missing time anchor ---

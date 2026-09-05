@@ -14,7 +14,7 @@ from openstore.core.poai import (
 )
 from openstore.verify import checks
 
-GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "poai"
+GOLDEN = Path(__file__).resolve().parent / "GOLDEN" / "poai"
 
 
 def _load(name: str) -> dict:
@@ -114,7 +114,9 @@ class TestHashChainGolden:
     """Hash chain vectors from GOLDEN/hashchain must reproduce deterministically."""
 
     def test_all_null_sections_chain(self):
-        with open(Path(__file__).resolve().parent.parent / "GOLDEN" / "hashchain" / "all_null_sections.json") as f:
+        with open(
+            Path(__file__).resolve().parent / "GOLDEN" / "hashchain" / "all_null_sections.json"
+        ) as f:
             v = json.load(f)
         sections_data = {name: b"null" for name in SECTION_ORDER}
         chain = build_hash_chain(sections_data)

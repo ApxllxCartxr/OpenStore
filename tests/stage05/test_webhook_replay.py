@@ -31,7 +31,7 @@ from openstore.models import Checkout, OrderState, WebhookEvent
 from openstore.psp.razorpay_driver import process_webhook_in_worker
 from openstore.psp.router import psp_router
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "GOLDEN" / "razorpay"
+GOLDEN_DIR = Path(__file__).resolve().parents[1] / "GOLDEN" / "razorpay"
 
 WEBHOOK_SECRET = "whsec_test_replay"
 
@@ -66,6 +66,7 @@ def app(config: Settings):
 
     # Reset the engine and DB to ensure clean state per test
     from openstore.psp.router import set_psp_config
+
     db_mod._engine = None
 
     init_database(config)
@@ -153,9 +154,9 @@ def test_webhook_replay_payment_link_paid(config, app, session):
     # Process the event in worker (TestClient's BackgroundTasks fires synchronously
     # via the test runner; we explicitly process it for determinism)
     events = session.exec(
-        __import__("sqlmodel").select(WebhookEvent).where(
-            WebhookEvent.psp_event_id == "evt_replay_paid_001"
-        )
+        __import__("sqlmodel")
+        .select(WebhookEvent)
+        .where(WebhookEvent.psp_event_id == "evt_replay_paid_001")
     ).all()
     for event in events:
         process_webhook_in_worker(session, event)
@@ -186,6 +187,7 @@ def test_webhook_duplicate_delivery_is_idempotent(config, app, session):
 
     # Only ONE webhook event recorded (dedupe on event_id)
     from sqlmodel import select
+
     events = session.exec(
         select(WebhookEvent).where(WebhookEvent.psp_event_id == "evt_replay_dupe_001")
     ).all()
@@ -240,6 +242,7 @@ def test_webhook_replay_payment_failed(config, app, session):
     assert response.status_code == 200
 
     from sqlmodel import select
+
     events = session.exec(
         select(WebhookEvent).where(WebhookEvent.psp_event_id == "evt_replay_failed_001")
     ).all()
@@ -270,6 +273,7 @@ def test_webhook_replay_payment_link_cancelled(config, app, session):
     assert response.status_code == 200
 
     from sqlmodel import select
+
     events = session.exec(
         select(WebhookEvent).where(WebhookEvent.psp_event_id == "evt_replay_cancelled_001")
     ).all()
@@ -320,6 +324,7 @@ def test_webhook_replay_out_of_order_terminal_absorbs(config, app, session):
     assert response.status_code == 200
 
     from sqlmodel import select
+
     events = session.exec(
         select(WebhookEvent).where(WebhookEvent.psp_event_id == "evt_replay_ooo_001")
     ).all()
@@ -344,7 +349,10 @@ def test_hold_cancel_token_path(config, app, session):
     session.commit()
 
     mock_client = MagicMock()
-    mock_client.payment_link.cancel.return_value = {"id": "plink_CANCEL_HAPPY", "status": "cancelled"}
+    mock_client.payment_link.cancel.return_value = {
+        "id": "plink_CANCEL_HAPPY",
+        "status": "cancelled",
+    }
 
     import openstore.psp.razorpay_driver as driver_mod
 
@@ -352,7 +360,9 @@ def test_hold_cancel_token_path(config, app, session):
     driver_mod._get_client = lambda _: mock_client  # type: ignore[assignment]
     try:
         client = TestClient(app)
-        response = client.post(f"/hold/{cancel_token}/cancel", json={"trace_id": "trace_cancel_happy"})
+        response = client.post(
+            f"/hold/{cancel_token}/cancel", json={"trace_id": "trace_cancel_happy"}
+        )
 
         assert response.status_code == 200
         body = response.json()

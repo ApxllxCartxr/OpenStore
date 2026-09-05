@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openstore.core.poai import canonical_json_bytes
 
-GOLDEN = Path(__file__).resolve().parent.parent.parent / "GOLDEN" / "canonical"
+GOLDEN = Path(__file__).resolve().parent.parent / "GOLDEN" / "canonical"
 
 
 def _load(name: str) -> dict:
@@ -57,14 +57,16 @@ class TestCanonicalJSON:
 
     def test_mixed_types(self):
         v = _load("mixed_types")
-        computed = canonical_json_bytes({
-            "sku": "GEL-VAN-500",
-            "price_minor": 21000,
-            "tags": ["vegan", "dairy-free"],
-            "catalog_digest": "sha256:abc123",
-            "merchant_id": "gelateria-roma",
-            "iat": 1787000000,
-        })
+        computed = canonical_json_bytes(
+            {
+                "sku": "GEL-VAN-500",
+                "price_minor": 21000,
+                "tags": ["vegan", "dairy-free"],
+                "catalog_digest": "sha256:abc123",
+                "merchant_id": "gelateria-roma",
+                "iat": 1787000000,
+            }
+        )
         assert computed == bytes.fromhex(v["canonical_hex"])
 
     def test_null_is_bnull_not_absent(self):
