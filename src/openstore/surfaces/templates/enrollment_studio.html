@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign your policies — OpenStore</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-mono/index.css">
+<style>
+  :root {
+    --bg:#fafafa; --surface:#ffffff; --ink:#18181b; --muted:#71717a; --subtle:#a1a1aa;
+    --line:#e4e4e7; --accent:#18181b; --accent-ink:#fafafa;
+    --ok-bg:#ecfdf5; --ok-ink:#065f46; --ok-dot:#16a34a;
+    --pending-bg:#fafaf9; --pending-ink:#78716c; --pending-dot:#d4d4d8;
+    --radius:14px; --shadow:0 1px 2px rgba(24,24,27,.04), 0 8px 24px -12px rgba(24,24,27,.08);
+    --font-sans:'Geist Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body {
+    font-family:var(--font-sans); color:var(--ink); background:var(--bg);
+    max-width:640px; margin:0 auto; padding:3.5rem 1.5rem 4rem; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1 { font-size:1.6rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .4rem; }
+  p.lede { color:var(--muted); font-size:.95rem; margin:0 0 2rem; max-width:46ch; }
+  .card {
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:1.1rem 1.25rem; margin-bottom:.85rem;
+    display:flex; align-items:center; justify-content:space-between; gap:1rem;
+  }
+  .card .info { min-width:0; }
+  .card .name { font-weight:600; font-size:1rem; margin:0 0 .15rem; }
+  .card .status {
+    display:inline-flex; align-items:center; gap:.4rem; font-size:.82rem;
+    font-family:var(--font-mono); color:var(--pending-ink);
+  }
+  .dot { width:.5rem; height:.5rem; border-radius:50%; background:var(--pending-dot); flex:none; }
+  .status.done { color:var(--ok-ink); }
+  .status.done .dot { background:var(--ok-dot); }
+  a.sign-btn {
+    background:var(--accent); color:var(--accent-ink); text-decoration:none;
+    font-size:.88rem; font-weight:600; padding:.55rem 1rem; border-radius:9px;
+    white-space:nowrap; transition:opacity .15s;
+  }
+  a.sign-btn:hover { opacity:.85; }
+  a.sign-btn.done { background:var(--ok-bg); color:var(--ok-ink); pointer-events:none; }
+  #all-done {
+    display:none; margin-top:1.5rem; padding:1rem 1.25rem; border-radius:var(--radius);
+    background:var(--ok-bg); color:var(--ok-ink); font-size:.92rem; text-align:center;
+  }
+  footer { margin-top:2.5rem; color:var(--subtle); font-size:.8rem; }
+</style>
+</head>
+<body>
+<h1>Sign your spending policies</h1>
+<p class="lede">You're shopping across multiple stores. Each one needs its own passkey
+signature — sign at each store below, in any order.</p>
+
+<div id="list"></div>
+<div id="all-done">All signed. Reply in your chat to continue the order.</div>
+
+<footer>Each signature is verified independently by that store — this page never
+sees or holds any of it.</footer>
+
+<script>
+"use strict";
+const GROUP_ID = __GROUP_ID__;
+const ENTRIES = __ENTRIES_JSON__;
+
+function render(signed) {
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  let doneCount = 0;
+  for (const e of ENTRIES) {
+    const isDone = !!signed[e.merchant_id];
+    if (isDone) doneCount++;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="info">
+        <p class="name">${e.merchant_name}</p>
+        <span class="status${isDone ? ' done' : ''}"><span class="dot"></span>${isDone ? 'Signed' : 'Pending'}</span>
+      </div>
+      <a class="sign-btn${isDone ? ' done' : ''}" href="${e.sign_url}" target="_blank" rel="noopener">
+        ${isDone ? 'Signed' : 'Sign with passkey'}
+      </a>`;
+    list.appendChild(card);
+  }
+  document.getElementById("all-done").style.display =
+    doneCount === ENTRIES.length ? "block" : "none";
+}
+
+async function poll() {
+  try {
+    const res = await fetch(`/enroll/${GROUP_ID}/status`);
+    if (!res.ok) return;
+    const data = await res.json();
+    render(data.signed || {});
+  } catch (e) { /* transient — next poll retries */ }
+}
+
+render({});
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>

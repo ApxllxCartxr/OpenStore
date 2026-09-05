@@ -4,36 +4,52 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Policy Studio — OpenStore</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-mono/index.css">
 <style>
-  :root { --ink:#1a1a1a; --muted:#5b6570; --line:#e3e6e8; --accent:#0b5c; }
+  :root {
+    --ink:#18181b; --muted:#71717a; --line:#e4e4e7; --surface:#ffffff; --bg:#fafafa;
+    --accent:#18181b; --accent-ink:#fafafa;
+    --ok-bg:#ecfdf5; --ok-ink:#065f46; --err-bg:#fef2f2; --err-ink:#991b1b;
+    --warn-border:#f59e0b; --warn-bg:#fffbeb; --warn-ink:#78350f;
+    --radius:14px; --shadow:0 1px 2px rgba(24,24,27,.04), 0 8px 24px -14px rgba(24,24,27,.10);
+    --font-sans:'Geist Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
   * { box-sizing:border-box; }
-  body { font-family:system-ui,sans-serif; color:var(--ink); max-width:760px;
-         margin:0 auto; padding:2rem 1.25rem; line-height:1.5; }
-  h1 { font-size:1.5rem; margin:0 0 .25rem; }
-  p.lede { color:var(--muted); margin:0 0 1.5rem; }
-  .panel { border:1px solid var(--line); border-radius:10px; padding:1.25rem;
-           margin:1rem 0; }
-  .panel h2 { font-size:1.05rem; margin:0 0 .75rem; }
-  .field { margin:.85rem 0; }
-  label { display:block; font-size:.85rem; font-weight:600; margin-bottom:.3rem; }
-  input, select { width:100%; padding:.5rem; border:1px solid var(--line);
-                  border-radius:6px; font-size:.95rem; }
+  body { font-family:var(--font-sans); color:var(--ink); background:var(--bg); max-width:760px;
+         margin:0 auto; padding:3rem 1.25rem 4rem; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  h1 { font-size:1.7rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .3rem; }
+  p.lede { color:var(--muted); margin:0 0 1.75rem; font-size:.95rem; max-width:60ch; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+           box-shadow:var(--shadow); padding:1.5rem; margin:1.1rem 0; }
+  .panel h2 { font-size:1rem; font-weight:600; margin:0 0 1rem; }
+  .field { margin:.9rem 0; }
+  label { display:block; font-size:.82rem; font-weight:600; color:var(--muted);
+          margin-bottom:.35rem; text-transform:uppercase; letter-spacing:.02em; }
+  input, select { width:100%; padding:.55rem .65rem; border:1px solid var(--line);
+                  border-radius:8px; font-size:.95rem; font-family:var(--font-sans);
+                  background:var(--surface); color:var(--ink); }
+  input:focus, select:focus { outline:2px solid var(--ink); outline-offset:1px; }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-  button { padding:.65rem 1.1rem; border:0; border-radius:6px; cursor:pointer;
-           font-size:.95rem; font-weight:600; }
-  .primary { background:var(--accent); color:#fff; }
-  .ghost { background:#f2f4f5; color:var(--ink); }
+  button { padding:.65rem 1.15rem; border:0; border-radius:9px; cursor:pointer;
+           font-size:.92rem; font-weight:600; font-family:var(--font-sans); transition:opacity .15s; }
+  button:hover { opacity:.85; }
+  .primary { background:var(--accent); color:var(--accent-ink); }
+  .ghost { background:#f4f4f5; color:var(--ink); }
   button:disabled { opacity:.5; cursor:not-allowed; }
-  table { border-collapse:collapse; width:100%; font-size:.9rem; }
-  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); }
-  pre { background:#f6f7f8; padding:.75rem; border-radius:6px; overflow:auto;
-        font-size:.8rem; white-space:pre-wrap; }
-  .meta { color:var(--muted); font-size:.85rem; }
-  .banner { padding:.75rem; border-radius:6px; margin:1rem 0; font-size:.9rem; }
-  .banner.ok { background:#e7f6ec; color:#14532d; }
-  .banner.err { background:#fdecea; color:#7f1d1d; }
-  .cap-note { border-left:4px solid #f0b429; background:#fff8e1; padding:.6rem .8rem;
-              margin:1rem 0; font-size:.9rem; }
+  table { border-collapse:collapse; width:100%; font-size:.88rem; }
+  th, td { text-align:left; padding:.55rem .6rem; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.02em; }
+  pre { background:#f4f4f5; padding:.85rem; border-radius:9px; overflow:auto;
+        font-size:.8rem; white-space:pre-wrap; font-family:var(--font-mono); }
+  .meta { color:var(--muted); font-size:.85rem; font-family:var(--font-mono); }
+  .banner { padding:.85rem 1rem; border-radius:10px; margin:1rem 0; font-size:.9rem; }
+  .banner.ok { background:var(--ok-bg); color:var(--ok-ink); }
+  .banner.err { background:var(--err-bg); color:var(--err-ink); }
+  .cap-note { border-left:3px solid var(--warn-border); background:var(--warn-bg); color:var(--warn-ink);
+              padding:.7rem .9rem; margin:1rem 0; font-size:.88rem; border-radius:0 8px 8px 0; }
 </style>
 </head>
 <body>

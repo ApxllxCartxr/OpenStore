@@ -4,21 +4,34 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Amendment Approval — OpenStore</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-mono/index.css">
 <style>
-  :root{--muted:#64748b;--line:#e2e8f0;--bg:#f8fafc;--ok:#16a34a;--err:#dc2626}
+  :root{
+    --muted:#71717a;--line:#e4e4e7;--bg:#fafafa;--surface:#fff;--ink:#18181b;
+    --ok:#16a34a;--err:#dc2626;--shadow:0 1px 2px rgba(24,24,27,.04),0 8px 24px -14px rgba(24,24,27,.10);
+    --font-sans:'Geist Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:system-ui,sans-serif;color:#1e293b;background:var(--bg);padding:1.5rem;max-width:640px;margin:0 auto}
-  h1{font-size:1.3rem;margin-bottom:.5rem}
-  p.lede{color:var(--muted);font-size:.85rem;margin-bottom:1.25rem}
-  .panel{border:1px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:1rem;background:#fff}
-  .panel h2{font-size:.9rem;margin-bottom:.5rem;color:#334155}
-  dl{display:grid;grid-template-columns:auto 1fr;gap:.35rem .75rem;font-size:.85rem}
+  body{font-family:var(--font-sans);color:var(--ink);background:var(--bg);padding:3rem 1.25rem 4rem;
+       max-width:640px;margin:0 auto;line-height:1.5;-webkit-font-smoothing:antialiased}
+  h1{font-size:1.5rem;font-weight:600;letter-spacing:-.02em;margin-bottom:.4rem}
+  p.lede{color:var(--muted);font-size:.9rem;margin-bottom:1.75rem;max-width:56ch}
+  .panel{border:1px solid var(--line);border-radius:14px;padding:1.25rem;margin-bottom:1rem;
+         background:var(--surface);box-shadow:var(--shadow)}
+  .panel h2{font-size:.85rem;font-weight:600;margin-bottom:.75rem;color:var(--muted);
+            text-transform:uppercase;letter-spacing:.02em}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:.5rem .9rem;font-size:.88rem}
   dt{color:var(--muted)}
   .buttons{display:flex;gap:.75rem}
-  button{border:0;border-radius:6px;padding:.6rem 1.1rem;cursor:pointer;font-size:.9rem}
+  button{border:0;border-radius:9px;padding:.65rem 1.15rem;cursor:pointer;font-size:.9rem;
+         font-weight:600;font-family:var(--font-sans);transition:opacity .15s}
+  button:hover{opacity:.85}
   #approve-btn{background:var(--ok);color:#fff}
   #reject-btn{background:var(--err);color:#fff}
-  #status{margin-top:1rem;font-size:.85rem;white-space:pre-wrap}
+  #status{margin-top:1.25rem;font-size:.83rem;font-family:var(--font-mono);white-space:pre-wrap;color:var(--muted)}
 </style>
 </head>
 <body>
