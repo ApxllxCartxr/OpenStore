@@ -44,6 +44,8 @@ def build_config_dict(
             "rp_name": "OpenStore Demo",
             "origin": "http://localhost:8000",
         },
+        # Production: set DATABASE__URL (nested-delimiter override) to a
+        # postgresql+psycopg:// URL. The YAML default stays SQLite for local dev.
         "database": {"url": "sqlite:///openstore.db"},
         "llm": {"model": "gpt-4o-mini", "temperature": 0.2},
         "campaign": {"min_bps": 500, "max_bps": 3000, "max_active": 5},
@@ -63,6 +65,9 @@ RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxxxxxx
 RAZORPAY_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxx
 
 DISCORD_BOT_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Production database (Postgres). Local dev omits this and uses SQLite.
+# DATABASE__URL=postgresql+psycopg://openstore:secret@db:5432/openstore
 """
 
 CATALOG_TEMPLATE = """# OpenStore catalog — SKUs in integer paise (minor units)

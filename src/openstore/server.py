@@ -60,7 +60,7 @@ async def _hold_release_loop(config: Settings) -> None:
 
     from openstore.core.database import get_session
     from openstore.models import Checkout, OrderState
-    from openstore.notifier import send_dm
+    from openstore.notifier import send_dm, try_edit_dm
     from openstore.psp.razorpay_driver import hold_release_worker_tick_with_notifications
 
     warned: set[str] = set()
@@ -68,6 +68,23 @@ async def _hold_release_loop(config: Settings) -> None:
         await asyncio.sleep(_HOLD_RELEASE_INTERVAL_SECONDS)
         session = get_session(config)
         try:
+            # Q-032b: reconcile near-expiry HELD rows against the PSP before
+            # warning/releasing, so a lost webhook does not kill a paid order.
+            # Best-effort: never blocks the release path below.
+            try:
+                from openstore.psp.razorpay_driver import reconcile_held_before_release
+
+                reconciled = reconcile_held_before_release(
+                    config, session, warn_window_seconds=_HOLD_WARNING_WINDOW_SECONDS
+                )
+                if reconciled["reconciled"]:
+                    session.commit()
+                    console_print(
+                        f"Hold loop reconciled {reconciled['reconciled']}/"
+                        f"{reconciled['checked']} near-expiry hold(s) from PSP"
+                    )
+            except Exception as exc:
+                console_print(f"Warning: pre-release PSP reconcile failed: {exc}")
             now = datetime.now(UTC).replace(tzinfo=None)
             warn_cutoff = now + timedelta(seconds=_HOLD_WARNING_WINDOW_SECONDS)
             soon = session.exec(
@@ -93,10 +110,18 @@ async def _hold_release_loop(config: Settings) -> None:
             session.commit()
             for item in released:
                 warned.discard(item["checkout_id"])
+                _release_msg = "Hold released — order not completed in time."
+                if item.get("discord_message_id"):
+                    await try_edit_dm(
+                        config,
+                        item["chat_user_id"],
+                        item["discord_message_id"],
+                        _release_msg,
+                    )
                 await send_dm(
                     config,
                     item["chat_user_id"],
-                    "Hold released — order not completed in time.",
+                    _release_msg,
                 )
         except asyncio.CancelledError:
             raise

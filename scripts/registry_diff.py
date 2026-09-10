@@ -12,9 +12,26 @@ from pathlib import Path
 
 # Exception classes whose FIRST positional argument is a closed-set reason code.
 # Q-028: nine campaign.* codes lived in the tree unregistered because this script
-# only ever validated REGISTRY.json's shape and never read source. Any new
-# reason-code-carrying exception belongs in this map.
-_REASON_CODE_EXCEPTIONS = {"CampaignValidationError"}
+# only ever validated REGISTRY.json's shape and never read source. Q-035 widens
+# the scan to every reason-code-carrying exception. OAuth protocol errors
+# (invalid_client/invalid_grant/invalid_token per RFC 6749) live in the HTTP
+# `error` field, not REGISTRY — only auth.*-prefixed OAuthError codes are
+# checked. WebAuthnError is checked only for registered codes
+# (assertion_required/webauthn_unsupported_alg); audit-only failure_type
+# strings (Q-005 AMENDMENT) are never reason codes.
+_REASON_CODE_EXCEPTIONS = {
+    "CampaignValidationError",
+    "RazorpayError",
+    "CommerceError",
+    "HandoffError",
+    "WebhookError",
+}
+# Prefix-gated: only codes starting with one of these prefixes are checked for
+# these exception types (lets protocol-local names pass through).
+_PREFIX_GATED: dict[str, tuple[str, ...]] = {
+    "OAuthError": ("auth.",),
+    "WebAuthnError": ("assertion_required", "webauthn_unsupported_alg"),
+}
 
 _SRC = Path("src/openstore")
 
@@ -42,14 +59,21 @@ def check_raised_reason_codes(registry: dict) -> int:
                 continue
             func = node.func
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-            if name not in _REASON_CODE_EXCEPTIONS:
-                continue
             first = node.args[0]
             if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
                 continue
-            if first.value not in known:
+            code = first.value
+            if name in _REASON_CODE_EXCEPTIONS:
+                pass
+            elif name in _PREFIX_GATED:
+                prefixes = _PREFIX_GATED[name]
+                if not code.startswith(prefixes):
+                    continue
+            else:
+                continue
+            if code not in known:
                 print(
-                    f"UNREGISTERED REASON CODE {first.value!r} "
+                    f"UNREGISTERED REASON CODE {code!r} "
                     f"raised at {path}:{node.lineno}",
                     file=sys.stderr,
                 )

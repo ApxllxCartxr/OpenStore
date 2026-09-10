@@ -42,6 +42,7 @@ EXPECTED_COLUMNS = {
         "chat_platform",
         "chat_user_id",
         "chat_channel_id",
+        "discord_message_id",
         "request_text",
         "poai_bundle",
     },
@@ -205,7 +206,9 @@ EXPECTED_COLUMNS = {
         "result_policy_id",
         "amendment_draft",
         "resume_url",
+        "cart_payload",
     },
+
     "shopping_sessions": {
         "id",
         "chat_platform",

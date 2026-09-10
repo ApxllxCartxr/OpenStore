@@ -99,7 +99,7 @@ def psp_router(config: Settings) -> APIRouter:
                 select(Checkout).where(Checkout.cancel_token == cancel_token)
             ).first()
             if not checkout:
-                raise HTTPException(status_code=404, detail="invalid_cancel_token")
+                raise HTTPException(status_code=404, detail="checkout.invalid_cancel_token")
 
             mock_rz = None
             try:
@@ -190,8 +190,19 @@ def _push_chat_notification(cfg: Settings, session: Any, event: WebhookEvent) ->
         message = "Hold cancelled."
         trace_action = "CANCELLED"
 
-    from openstore.notifier import DiscordNotifier, run_from_worker_thread, send_dm
+    from openstore.notifier import (
+        DiscordNotifier,
+        run_from_worker_thread,
+        send_dm,
+        try_edit_dm,
+    )
 
+    # Q-032a: edit the original "Pay here" message in place when its id was
+    # stamped at shop time; the DM below remains the source of truth.
+    if checkout.discord_message_id:
+        run_from_worker_thread(
+            try_edit_dm(cfg, checkout.chat_user_id, checkout.discord_message_id, message)
+        )
     run_from_worker_thread(send_dm(cfg, checkout.chat_user_id, message))
     run_from_worker_thread(
         DiscordNotifier(cfg).money_trace(

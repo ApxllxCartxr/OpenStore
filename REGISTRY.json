@@ -13,8 +13,16 @@
     "campaign.injection_content","campaign.no_webauthn_approval",
     "campaign.webauthn_verification_failed","campaign.max_active_exceeded",
     "campaign.invalid_state_transition",
-    "checkout.not_found","checkout.not_owned","psp.invalid_state",
-    "auth.insufficient_scope"],
+    "checkout.not_found","checkout.not_owned","checkout.invalid_state",
+    "checkout.invalid_cancel_token","policy.not_found","psp.invalid_state",
+    "psp.checkout_not_found","psp.no_payment_link","psp.no_payment",
+    "psp.no_payment_id","psp.create_failed","psp.cancel_failed",
+    "psp.refund_failed","psp.amount_invalid","psp.currency_mismatch",
+    "psp.live_key_forbidden","psp.duplicate_unrecoverable",
+    "webhook.unknown_event","webhook.missing_reference_id",
+    "webhook.invalid_transition","webhook.invalid_payload",
+    "webhook.amount_mismatch","webhook.currency_mismatch",
+    "auth.insufficient_scope","auth.unknown_tool","internal_error"],
   "error_namespaces": ["auth.*","policy.*","checkout.*","psp.*","ratelimit.*","agent.*",
     "hold.*","authority.*","orchestration.*","campaign.*"],
   "authority_reason_codes": ["authority.unknown_scheme","authority.scheme_capped_native_webauthn",
@@ -26,7 +34,8 @@
     "checkout_initiate","checkout_confirm","get_order","get_audit_log",
     "webauthn_register_begin","webauthn_register_complete","webauthn_begin_assertion",
     "webauthn_complete_assertion","list_campaigns","get_campaign",
-    "resolve_policy","create_policy_handoff","list_orders","cancel_order"],
+    "resolve_policy","create_policy_handoff","create_cart_handoff",
+    "list_orders","cancel_order","set_order_message"],
   "oauth_scopes": ["catalog:read","cart:write","checkout:initiate","checkout:confirm"],
   "aal_levels": [0,1,2,3],
   "checkout_states": ["PENDING","POLICY_VERIFIED","ORDER_CREATED","REJECTED"],
@@ -79,6 +88,8 @@
     "/internal/metrics",
     "/admin/*",
     "/intent/amendment/<amendment_id>/approve",
-    "/intent/amendment/<amendment_id>/reject"
+    "/intent/amendment/<amendment_id>/reject",
+    "/intent/cart/<cart_id>/approve",
+    "/intent/cart/<cart_id>/reject"
   ]
 }

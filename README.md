@@ -418,21 +418,24 @@ Built by one person with an AI agent across fifteen stages. The honest ledger:
   The discount is recomputed server-side by compiler check 12 and recorded in the evidence bundle.
 
 **Not yet:**
-- ❌ **Payment stays outside the conversation** — the buyer gets a Razorpay hosted-page link
-  and completion arrives by webhook. A late or lost webhook leaves them with no signal until
-  the hold expires. This is the one place the UX is clearly behind ACP, whose Shared Payment
-  Token exists so the buyer never leaves the agent surface. Scoped in Q-032; both candidate
-  repairs touch the money path and deserve their own stage.
-- ❌ **AAL2/AAL3 from chat** — there is no chat ceremony that produces a fresh per-cart
-  passkey assertion, so a chat-only checkout grades at AAL1 rather than AAL2. The Policy
-  Studio says so on the form. Scoped in Q-033; the WebAuthn binding mode already exists, but
-  a new `HandoffKind` is a closed-set change.
+- ✅ **Payment stays in the conversation** — the hold loop reconciles near-expiry
+  holds against the PSP before releasing (a lost webhook no longer kills a paid
+  order), and the original pay message is edited in place on payment/release
+  (Q-032, Stage 16). The buyer still pays on Razorpay's hosted page — no agent
+  ever holds a payment credential (R0.10).
+- ✅ **AAL2/AAL3 from chat** — `/intent/studio?token=` renders a per-cart approval
+  page (`HandoffKind.CART`) with a cart-hash-bound WebAuthn challenge; approval
+  creates the checkout with a verified assertion so it grades by amount (AAL2/AAL3).
+  Replay onto a different cart fails closed. (Q-033, Stage 16.)
 - ❌ **Frontend polish** — Policy Studio, Campaign Studio, `/admin/orders` and the Evidence
   Viewer are served and functional, but they're utilitarian, not designed.
 - ❌ **Live Razorpay capture at scale** — the driver is tested against golden fixtures and
   exercised against real test-mode payment links; sustained live-mode traffic is untested.
-- ❌ **Deployment story** — runs locally on SQLite; Docker/cloud beyond the sidecar
-  integration contract (SID-1..7, implemented at the Stage 10 freeze).
+- ✅ **Deployment story** — `Dockerfile` + `docker-compose.yml` (Postgres 16,
+  one database per merchant, buyer + merchant-bot profiles) with migrations at
+  boot, `/health/live` + `/health/ready` gates, and a runbook (`docs/DEPLOY.md`).
+  Fresh compose brings both demo merchants to the Alembic head with readiness
+  green. SQLite remains the local-dev default.
 - ❌ **Third-party agent discovery** — the manifest surface exists; being indexed by real
   platforms (ChatGPT/UCP/Merchant Center) needs MCP wire-protocol conformance and dynamic
   client registration on top of hosting. That's the next stage, not a missing idea.

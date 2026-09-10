@@ -377,7 +377,12 @@ class TestHoldReleaseNotifications:
         session.commit()
 
         assert released == [
-            {"checkout_id": checkout.id, "chat_user_id": "d99", "state": "CANCELLED"}
+            {
+                "checkout_id": checkout.id,
+                "chat_user_id": "d99",
+                "state": "CANCELLED",
+                "discord_message_id": None,
+            }
         ]
 
     def test_released_hold_without_chat_user_id_is_not_reported(self, settings, session):

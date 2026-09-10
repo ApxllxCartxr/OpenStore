@@ -81,7 +81,7 @@ def create_checkout(
     ).first()
 
     if not policy:
-        raise CommerceError("policy_not_found", "Active policy not found for merchant", 404)
+        raise CommerceError("policy.not_found", "Active policy not found for merchant", 404)
 
     # Verify WebAuthn assertion if provided
     assertion_verified = False
@@ -370,14 +370,16 @@ def confirm_checkout(
     checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
-        raise CommerceError("checkout_not_found", "Checkout not found", 404)
+        raise CommerceError("checkout.not_found", "Checkout not found", 404)
 
     # Terminal states are absorbing: confirm is idempotent once released/refunded.
     if checkout.state in (OrderState.RELEASED, OrderState.PAID, OrderState.REFUNDED):
         return checkout
 
     if checkout.state != OrderState.HELD:
-        raise CommerceError("invalid_state", f"Checkout not in HELD state: {checkout.state}", 400)
+        raise CommerceError(
+            "checkout.invalid_state", f"Checkout not in HELD state: {checkout.state}", 400
+        )
 
     policy = None
     if checkout.policy_id:
@@ -454,10 +456,12 @@ def cancel_hold_flow(
     checkout = session.exec(select(Checkout).where(Checkout.cancel_token == cancel_token)).first()
 
     if not checkout:
-        raise CommerceError("invalid_cancel_token", "Cancel token not found", 404)
+        raise CommerceError("checkout.invalid_cancel_token", "Cancel token not found", 404)
 
     if checkout.state != OrderState.HELD:
-        raise CommerceError("invalid_state", f"Checkout not in HELD state: {checkout.state}", 400)
+        raise CommerceError(
+            "checkout.invalid_state", f"Checkout not in HELD state: {checkout.state}", 400
+        )
 
     return cancel_hold(
         session=session,
@@ -476,7 +480,7 @@ def verify_checkout_evidence(
     checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
 
     if not checkout:
-        return {"error": "checkout_not_found"}
+        return {"error": "checkout.not_found"}
 
     # Get ledger entries
     ledger_entries = list(

@@ -196,6 +196,32 @@ class DiscordNotifier:
         )
 
 
+async def try_edit_dm(
+    config: Settings, user_id: str, message_id: str, message: str
+) -> bool:
+    """Q-032a: best-effort in-place edit of a previously sent DM ("Pay here"
+    -> "Payment received"). Returns True on success, False on any failure
+    (offline, unknown message, API error) — callers always DM separately, so
+    a failed edit never loses the signal."""
+    client = _init_discord(config)
+    if client is None:
+        return False
+    try:
+        user = await client.fetch_user(int(user_id))
+        channel = getattr(user, "dm_channel", None)
+        if channel is None:
+            try:
+                channel = await user.create_dm()
+            except Exception:
+                return False
+        msg = await channel.fetch_message(int(message_id))
+        await msg.edit(content=message)
+        return True
+    except Exception as e:
+        logger.warning(f"Discord DM edit error to {user_id}: {e}")
+        return False
+
+
 async def send_dm(
     config: Settings, user_id: str, message: str, embed: dict[str, Any] | None = None
 ) -> None:

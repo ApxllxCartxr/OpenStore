@@ -811,6 +811,21 @@ def _apply_payment_link_paid(
     if not checkout:
         return
 
+    # Q-027 primary path: persist the PSP payment id (pay_...) at webhook time
+    # so refund_checkout prefers the stored value. Live payment_link.paid
+    # webhooks carry payload.payment.entity.id; fixtures pre-dating the live
+    # capture may not — extraction is best-effort, never a hard error.
+    if not checkout.psp_payment_id:
+        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        candidate = payment_entity.get("id")
+        if not candidate:
+            for p in link.get("payments", []) or []:
+                if isinstance(p, dict) and p.get("id"):
+                    candidate = p["id"]
+                    break
+        if candidate and isinstance(candidate, str):
+            checkout.psp_payment_id = candidate
+
     current = checkout.state
     if current in (OrderState.PAID, OrderState.RELEASED, OrderState.REFUNDED):
         return  # terminal absorbing
@@ -1127,6 +1142,73 @@ def run_reconciliation_sweeper(
     return reconciliation_sweep(config, session)
 
 
+# Q-032b: bounds for the pre-release PSP reconcile inside the 30s loop.
+# Small by design: this is a safety net for lost webhooks, not the INV-7
+# sweeper (which covers 10m–7d old rows). Failures never block the release
+# path — a PSP outage must not freeze hold expiry.
+PRE_RELEASE_RECONCILE_MAX_PER_TICK = 5
+
+
+def reconcile_held_before_release(
+    config: Settings,
+    session: Session,
+    *,
+    warn_window_seconds: int = 120,
+    mock_razorpay: Any | None = None,
+) -> dict[str, int]:
+    """Q-032b: poll the PSP for HELD checkouts nearing expiry and apply the
+    PSP truth before the hold-release tick runs, so a paid-but-webhook-lost
+    order is captured instead of released. Returns {checked, reconciled}.
+    Never raises: per-checkout PSP errors are swallowed (the release path
+    below still runs and the next tick retries)."""
+    now = datetime.now(UTC).replace(tzinfo=None)
+    warn_cutoff = datetime.now(UTC).replace(tzinfo=None)
+    try:
+        from datetime import timedelta as _td
+
+        warn_cutoff = now + _td(seconds=warn_window_seconds)
+    except Exception:
+        warn_cutoff = now
+
+    candidates = session.exec(
+        select(Checkout).where(
+            Checkout.state == OrderState.HELD,
+            Checkout.expires_at <= warn_cutoff,
+            Checkout.expires_at > now,
+            Checkout.psp_payment_link_id.is_not(None),  # type: ignore[union-attr]
+        )
+    ).all()[:PRE_RELEASE_RECONCILE_MAX_PER_TICK]
+
+    checked = 0
+    reconciled = 0
+    for checkout in candidates:
+        checked += 1
+        try:
+            link_id = checkout.psp_payment_link_id
+            assert link_id is not None
+            link = fetch_payment_link(config, link_id, mock_razorpay=mock_razorpay)
+        except Exception:
+            continue
+        try:
+            status = str(link.get("status", "")).lower()
+            if status == "paid":
+                _apply_payment_link_paid(
+                    session,
+                    "payment_link.paid",
+                    {"payload": {"payment_link": {"entity": link}}},
+                )
+                reconciled += 1
+            elif status in ("cancelled", "expired"):
+                _apply_payment_link_cancelled(
+                    session,
+                    {"payload": {"payment_link": {"entity": link}}},
+                )
+                reconciled += 1
+        except Exception:
+            continue
+    return {"checked": checked, "reconciled": reconciled}
+
+
 def hold_release_worker_tick(config: Settings, session: Session) -> int:
     """INV-8 / S5.5: Hold release worker tick (call every 30s).
     Auto-releases expired HELD checkouts.
@@ -1166,6 +1248,7 @@ def hold_release_worker_tick_with_notifications(
                     "checkout_id": checkout.id,
                     "chat_user_id": checkout.chat_user_id,
                     "state": checkout.state.value,
+                    "discord_message_id": checkout.discord_message_id,
                 }
             )
     return notified

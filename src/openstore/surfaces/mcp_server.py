@@ -481,6 +481,57 @@ def cancel_order(
         )
 
 
+def set_order_message(
+    config: Settings,
+    session: Any,
+    checkout_id: str,
+    chat_platform: str,
+    chat_user_id: str,
+    discord_message_id: str,
+    token_scopes: list[str],
+) -> MCPToolResult:
+    """MCP tool: set_order_message (S16 / Q-032a). Records the Discord message
+    carrying the pay embed so the webhook worker / hold loop can edit it in
+    place. Same ownership check as cancel_order (chat_platform + chat_user_id
+    must match); never overwrites an existing id (first writer wins)."""
+    try:
+        _require_scope(token_scopes, "checkout:initiate")
+        from sqlmodel import select
+
+        from openstore.models import Checkout
+
+        checkout = session.exec(select(Checkout).where(Checkout.id == checkout_id)).first()
+        if checkout is None:
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "checkout.not_found",
+                    "message": f"Checkout {checkout_id} not found",
+                },
+            )
+        if checkout.chat_platform != chat_platform or checkout.chat_user_id != chat_user_id:
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "checkout.not_owned",
+                    "message": "This checkout does not belong to the calling identity",
+                },
+            )
+        if not checkout.discord_message_id:
+            checkout.discord_message_id = str(discord_message_id)
+            session.add(checkout)
+            session.commit()
+        return MCPToolResult(success=True, data={"checkout_id": checkout_id})
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
 def get_audit_log(
     config: Settings,
     session: Any,
@@ -813,6 +864,67 @@ def resolve_policy(
         )
 
 
+def create_cart_handoff(
+    config: Settings,
+    session: Any,
+    merchant_id: str,
+    chat_platform: str,
+    chat_user_id: str,
+    chat_channel_id: str,
+    request_text: str,
+    cart: list[dict[str, Any]],
+    cart_hash: str,
+    policy_id: str,
+    token_scopes: list[str],
+    resume_url: str | None = None,
+) -> MCPToolResult:
+    """MCP tool: create_cart_handoff (S16 / Q-033). Parks a pending cart for a
+    per-cart passkey tap: verifies the cart hash server-side (R0.8), mints a
+    kind=CART handoff carrying {cart_id, cart, cart_hash, policy_id}, and
+    returns the token + cart_id so the caller can render
+    /intent/studio?token=.... Caller commits (create_handoff only flushes)."""
+    _require_scope(token_scopes, "catalog:read")
+    try:
+        import secrets as _secrets
+
+        from openstore.agents.buyer_agent import compute_cart_hash as _cart_hash
+        from openstore.core.handoff import create_handoff
+        from openstore.models import HandoffKind
+
+        if _cart_hash(cart) != cart_hash:
+            return MCPToolResult(
+                success=False,
+                error={"reason_code": "assertion_required", "message": "cart hash mismatch"},
+            )
+        cart_id = f"cart_{_secrets.token_hex(8)}"
+        handoff = create_handoff(
+            session,
+            kind=HandoffKind.CART,
+            merchant_id=merchant_id,
+            chat_platform=chat_platform,
+            chat_user_id=chat_user_id,
+            chat_channel_id=chat_channel_id,
+            request_text=request_text,
+            resume_url=resume_url,
+            cart_payload={
+                "cart_id": cart_id,
+                "cart": cart,
+                "cart_hash": cart_hash,
+                "policy_id": policy_id,
+            },
+        )
+        session.commit()
+        return MCPToolResult(success=True, data={"token": handoff.token, "cart_id": cart_id})
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
 def create_policy_handoff(
     config: Settings,
     session: Any,
@@ -880,8 +992,10 @@ TOOL_NAMES = frozenset(
         "get_campaign",
         "resolve_policy",
         "create_policy_handoff",
+        "create_cart_handoff",
         "list_orders",
         "cancel_order",
+        "set_order_message",
     }
 )
 
@@ -1057,6 +1171,21 @@ def handle_mcp_request(
             token_scopes=token_scopes,
             resume_url=arguments.get("resume_url"),
         )
+    elif tool_name == "create_cart_handoff":
+        result = create_cart_handoff(
+            config=config,
+            session=session,
+            merchant_id=arguments.get("merchant_id", ""),
+            chat_platform=arguments.get("chat_platform", ""),
+            chat_user_id=arguments.get("chat_user_id", ""),
+            chat_channel_id=arguments.get("chat_channel_id", ""),
+            request_text=arguments.get("request_text", ""),
+            cart=arguments.get("cart", []),
+            cart_hash=arguments.get("cart_hash", ""),
+            policy_id=arguments.get("policy_id", ""),
+            token_scopes=token_scopes,
+            resume_url=arguments.get("resume_url"),
+        )
     elif tool_name == "list_orders":
         result = list_orders(
             config=config,
@@ -1074,6 +1203,16 @@ def handle_mcp_request(
             checkout_id=arguments.get("checkout_id", ""),
             chat_platform=arguments.get("chat_platform", ""),
             chat_user_id=arguments.get("chat_user_id", ""),
+            token_scopes=token_scopes,
+        )
+    elif tool_name == "set_order_message":
+        result = set_order_message(
+            config=config,
+            session=session,
+            checkout_id=arguments.get("checkout_id", ""),
+            chat_platform=arguments.get("chat_platform", "discord"),
+            chat_user_id=arguments.get("chat_user_id", ""),
+            discord_message_id=str(arguments.get("discord_message_id", "")),
             token_scopes=token_scopes,
         )
     else:

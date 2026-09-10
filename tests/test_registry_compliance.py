@@ -101,7 +101,29 @@ def test_registry_reason_codes_complete():
         # pre-existing and unregistered); checkout.not_owned is new.
         "checkout.not_found",
         "checkout.not_owned",
+        "checkout.invalid_state",
+        "checkout.invalid_cancel_token",
+        "policy.not_found",
         "psp.invalid_state",
+        "psp.checkout_not_found",
+        "psp.no_payment_link",
+        "psp.no_payment",
+        "psp.no_payment_id",
+        "psp.create_failed",
+        "psp.cancel_failed",
+        "psp.refund_failed",
+        "psp.amount_invalid",
+        "psp.currency_mismatch",
+        "psp.live_key_forbidden",
+        "psp.duplicate_unrecoverable",
+        "webhook.unknown_event",
+        "webhook.missing_reference_id",
+        "webhook.invalid_transition",
+        "webhook.invalid_payload",
+        "webhook.amount_mismatch",
+        "webhook.currency_mismatch",
+        "auth.unknown_tool",
+        "internal_error",
         # cancel_order's _require_scope("checkout:initiate") call raises this —
         # already used by create_cart/update_cart/checkout_initiate/checkout_confirm,
         # also unregistered until now.
@@ -135,8 +157,10 @@ def test_registry_mcp_tools_complete():
         "get_campaign",
         "resolve_policy",
         "create_policy_handoff",
+        "create_cart_handoff",
         "list_orders",
         "cancel_order",
+        "set_order_message",
     }
 
     actual = set(registry["mcp_tools"])

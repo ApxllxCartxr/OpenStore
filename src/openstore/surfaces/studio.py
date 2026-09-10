@@ -11,6 +11,8 @@
 #   GET  /internal/policy/blast-radius          (per signed-in operator)
 #   POST /intent/amendment/<amendment_id>/approve  (S11 Phase 4 / Q-017, Q-020)
 #   POST /intent/amendment/<amendment_id>/reject   (S11 Phase 4 / Q-017, Q-020)
+#   POST /intent/cart/<cart_id>/approve  (S16 / Q-033: per-cart passkey tap → AAL2)
+#   POST /intent/cart/<cart_id>/reject   (S16 / Q-033)
 #
 # Amendment approval (S11 Phase 4) needs no separate "begin assertion" route:
 # the WebAuthn challenge (bound to {"mode":"amendment","amendment_id":...})
@@ -149,6 +151,20 @@ class AmendmentDecision(BaseModel):
     path); the assertion fields are required for approve (R0.5: NO
     self-approval, a fresh WebAuthn assertion is mandatory) and absent for
     reject."""
+
+    token: str
+    credential_id: str | None = None
+    client_data_json: str | None = None
+    authenticator_data: str | None = None
+    signature: str | None = None
+    challenge: str | None = None
+
+
+class CartDecision(BaseModel):
+    """S16 (Q-033): body for POST /intent/cart/<id>/approve and /reject.
+    Mirrors AmendmentDecision: `token` resolves identity, assertion fields are
+    required for approve (fresh per-cart WebAuthn assertion bound to the cart
+    hash) and absent for reject."""
 
     token: str
     credential_id: str | None = None
@@ -509,6 +525,113 @@ async def _approve_amendment(
         session.close()
 
 
+async def _approve_cart(
+    config: Settings,
+    session_factory: Callable[[], Session],
+    handoff: Handoff,
+    token: str,
+) -> dict[str, Any]:
+    """S16 (Q-033): the cart approval assertion just verified against the
+    cart-bound challenge. Create the checkout with assertion_verified=True so
+    the compile grades AAL2, attach chat identity + request_text for the PoAI
+    bundle (e8/e9), create the payment link, DM the buyer, and consume the
+    handoff exactly once regardless of outcome."""
+    session = session_factory()
+    try:
+        payload = handoff.cart_payload or {}
+        cart = payload.get("cart", [])
+        cart_hash = payload.get("cart_hash", "")
+        policy_id = payload.get("policy_id", "")
+        # Recompute the hash server-side (R0.8) — never trust the stored copy
+        # against a mutated cart.
+        if compute_cart_hash(cart) != cart_hash:
+            consume_handoff(session, token)
+            session.commit()
+            return {"applied": False, "reason_code": "assertion_required"}
+
+        policy = session.exec(
+            select(IntentPolicy).where(IntentPolicy.id == policy_id)
+        ).first()
+        if not policy:
+            consume_handoff(session, token)
+            session.commit()
+            return {"applied": False, "reason_code": "authority.policy_unsigned"}
+
+        trace_id = f"trace_cart_{token[:8]}"
+        client_id = f"discord:{handoff.chat_user_id}"
+
+        result = create_checkout_from_policy(
+            config=config,
+            session=session,
+            trace_id=trace_id,
+            client_id=client_id,
+            merchant_id=policy.merchant_id,
+            cart_items=cart,
+            cart_hash=cart_hash,
+            cart_version=1,
+            policy=policy,
+            assertion_verified=True,  # the cart approval assertion just verified
+            agent_plan={"cart_id": payload.get("cart_id")},
+        )
+
+        if not result.allowed:
+            consume_handoff(session, token, result_policy_id=policy.id)
+            session.commit()
+            await send_dm(
+                config,
+                handoff.chat_user_id,
+                "Cart approved, but the cart still doesn't fit — "
+                f"{_friendly_denial_reason(result.reason_code)}.",
+            )
+            return {
+                "applied": False,
+                "reason_code": result.reason_code,
+                "transcript": result.transcript,
+            }
+
+        checkout = session.exec(select(Checkout).where(Checkout.id == result.checkout_id)).first()
+        assert checkout is not None
+        checkout.chat_platform = handoff.chat_platform
+        checkout.chat_user_id = handoff.chat_user_id
+        checkout.chat_channel_id = handoff.chat_channel_id
+        checkout.request_text = handoff.request_text
+        session.add(checkout)
+        session.flush()
+
+        checkout = create_payment_link(
+            config=config,
+            session=session,
+            trace_id=trace_id,
+            client_id=client_id,
+            checkout_id=checkout.id,
+            amount_minor=checkout.amount_minor,
+            currency=checkout.currency,
+            customer={"name": f"Discord user {handoff.chat_user_id}"},
+        )
+
+        consume_handoff(session, token, result_policy_id=policy.id)
+        session.commit()
+
+        shop_result = {
+            "allowed": True,
+            "checkout_id": checkout.id,
+            "amount_minor": checkout.amount_minor,
+            "currency": checkout.currency,
+            "aal_level": result.aal_level,
+            "short_url": checkout.short_url,
+            "expires_at": checkout.expires_at.isoformat(),
+        }
+        await send_dm(
+            config,
+            handoff.chat_user_id,
+            "Cart approved. " + render_shop_result(shop_result),
+            embed=build_shop_result_embed(shop_result),
+        )
+        return {"applied": True, "shop_result": shop_result}
+    finally:
+        session.close()
+
+
 def policy_studio_router(
     config: Settings,
     *,
@@ -542,6 +665,26 @@ def policy_studio_router(
         html = html.replace("__ASSERTION_BEGIN_JSON__", _safe_json(begin))
         return HTMLResponse(html)
 
+    def _render_cart_page(handoff: Handoff, token: str, store: ChallengeStore) -> HTMLResponse:
+        """S16 (Q-033): render the per-cart approval page. Issues the WebAuthn
+        challenge inline bound to {"mode": "cart", "cart_hash": ...} so the
+        resulting assertion cannot be replayed onto a different cart."""
+        payload = handoff.cart_payload or {}
+        cart_id = payload.get("cart_id", "")
+        cart = payload.get("cart", [])
+        cart_hash = payload.get("cart_hash", "")
+        buyer = buyer_handle(handoff)
+        begin = begin_assertion(
+            config, buyer, binding={"mode": "cart", "cart_hash": cart_hash}, store=store
+        )
+        begin["binding"] = {"mode": "cart", "cart_hash": cart_hash}
+        html = (TEMPLATES / "cart_studio.html").read_text(encoding="utf-8")
+        html = html.replace("__CART_ID__", _safe_json(cart_id))
+        html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
+        html = html.replace("__CART_JSON__", _safe_json(cart))
+        html = html.replace("__ASSERTION_BEGIN_JSON__", _safe_json(begin))
+        return HTMLResponse(html)
+
     # ------------------------------------------------------------------ page
     @router.get("/intent/studio", response_class=HTMLResponse)
     async def studio_page(
@@ -552,6 +695,8 @@ def policy_studio_router(
             handoff = _resolve_handoff(make_session, token)
             if handoff.kind == HandoffKind.AMENDMENT:
                 return _render_amendment_page(handoff, token, store)
+            if handoff.kind == HandoffKind.CART:
+                return _render_cart_page(handoff, token, store)
             user_id = buyer_handle(handoff)
         else:
             user_id = _operator(x_operator_id, operator=None).user_id
@@ -931,6 +1076,101 @@ def policy_studio_router(
             session.close()
 
         await send_dm(config, handoff.chat_user_id, "Amendment rejected, order not placed.")
+        return {"applied": False, "state": "REJECTED"}
+
+    # ------------------------------------------------------------ cart ceremony (S16 / Q-033)
+    @router.post("/intent/cart/{cart_id}/approve")
+    async def cart_approve(cart_id: str, body: CartDecision) -> dict[str, Any]:
+        handoff = _resolve_handoff(make_session, body.token)
+        if handoff.kind != HandoffKind.CART:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "not a cart handoff",
+                },
+            )
+        payload = handoff.cart_payload or {}
+        if payload.get("cart_id") != cart_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "cart_id mismatch",
+                },
+            )
+        if not (
+            body.credential_id
+            and body.client_data_json
+            and body.authenticator_data
+            and body.signature
+            and body.challenge
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "reason_code": "assertion_required",
+                    "message": "cart approval requires a WebAuthn assertion",
+                },
+            )
+
+        buyer = buyer_handle(handoff)
+        vsession = make_session()
+        try:
+            complete_assertion(
+                vsession,
+                config,
+                buyer,
+                body.credential_id,
+                body.client_data_json,
+                body.authenticator_data,
+                body.signature,
+                body.challenge,
+                binding={"mode": "cart", "cart_hash": payload.get("cart_hash", "")},
+                store=store,
+            )
+            vsession.commit()
+        except WebAuthnError as e:
+            vsession.rollback()
+            _record_webauthn_failure(vsession, buyer, body.credential_id, e, "cart")
+            vsession.commit()
+            raise HTTPException(
+                status_code=401, detail={"reason_code": e.reason_code, "message": e.message}
+            )
+        finally:
+            vsession.close()
+
+        return await _approve_cart(config, make_session, handoff, body.token)
+
+    @router.post("/intent/cart/{cart_id}/reject")
+    async def cart_reject(cart_id: str, body: CartDecision) -> dict[str, Any]:
+        handoff = _resolve_handoff(make_session, body.token)
+        if handoff.kind != HandoffKind.CART:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "not a cart handoff",
+                },
+            )
+        payload = handoff.cart_payload or {}
+        if payload.get("cart_id") != cart_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "reason_code": "authority.handoff_not_found",
+                    "message": "cart_id mismatch",
+                },
+            )
+
+        session = make_session()
+        try:
+            consume_handoff(session, body.token)
+            session.commit()
+        finally:
+            session.close()
+
+        await send_dm(config, handoff.chat_user_id, "Cart rejected, order not placed.")
         return {"applied": False, "state": "REJECTED"}
 
     return router

@@ -826,10 +826,19 @@
   silently weaken the authority model to make a UX problem disappear, which is the exact
   inversion R0.9 exists to prevent.
 - Blocked since: 2026-09-05T00:00:00Z
-- RESOLUTION: none yet. Option (a) is the right shape and every piece it needs already
-  exists, but it is a closed-set change plus a migration plus adversarial tests — a stage,
-  not a tail-end addition. Recorded so the gap between the README's AAL ladder and what the
-  chat flow can actually reach is written down rather than assumed.
+- RESOLUTION (2026-09-10): Option (a), operator-authorised (full-production
+  build, S16). `HandoffKind.CART` added (migration `0009_cart_handoff`, PG
+  `ALTER TYPE ... ADD VALUE`, SQLite no-op) with `handoffs.cart_payload`
+  (`{cart_id, cart, cart_hash, policy_id}`). New ceremony mirrors the
+  amendment path: `GET /intent/studio?token=` renders `cart_studio.html` with
+  an inline `{"mode": "cart", "cart_hash"}` challenge;
+  `POST /intent/cart/<cart_id>/approve` verifies the assertion against that
+  binding (replay onto a different cart fails `assertion_required`) then
+  creates the checkout with `assertion_verified=True` via the existing
+  `create_checkout_from_policy` path; `/reject` consumes without creating.
+  New MCP tool `create_cart_handoff` (scope `catalog:read`) for federated
+  buyers. Routes added to REGISTRY alongside the implementation. AAL grades
+  by amount (small cart → AAL3), strictly above the old chat ceiling.
 
 ## Q-034 | stage: 14 | date: 2026-09-05T00:00:00Z
 - What is ambiguous: the merchant has no conversational surface at all — only CLI, Studio
@@ -847,3 +856,38 @@
   never let anyone approve, reject, pause, or otherwise change anything. Access control was
   a live option; the user explicitly chose no restriction, matching BuyerBot's existing lack
   of gating, over building an allow-list.
+
+## Q-035 | stage: 16 | date: 2026-09-10T00:00:00Z
+- What is ambiguous: `RazorpayError`/`CommerceError`/`OAuthError` reason codes raised
+  across `psp/razorpay_driver.py` and `core/api.py` were never registered in
+  REGISTRY.json (`psp.checkout_not_found`, `psp.*`, `webhook.*`, unprefixed
+  `policy_not_found`/`checkout_not_found`/`invalid_state`/`invalid_cancel_token`,
+  OAuth `invalid_client`/`invalid_grant`/`invalid_token`/`insufficient_scope`).
+  Same class as Q-028 (`campaign.*`): `scripts/registry_diff.py` only scans
+  `CampaignValidationError`, so the gap is invisible to the build gate.
+  OAuth `invalid_client`/`invalid_grant`/`invalid_token` are RFC 6749 protocol
+  error names in the HTTP `error` field (not REGISTRY reason_codes) and stay
+  unregistered by design; `insufficient_scope` (bare, oauth.py:409) is unified
+  to the registered `auth.insufficient_scope`.
+- Options considered: (a) register every raised literal as-is (legitimises
+  unprefixed legacy names); (b) normalise to namespaced closed sets now, before
+  any external client exists — `CommerceError` unprefixed codes move into
+  `checkout.*`/`policy.*`, PSP codes into `psp.*`/`webhook.*`/`checkout.*`,
+  bare `insufficient_scope` becomes `auth.insufficient_scope`; (c) leave the
+  drift documented only — FORBIDDEN (R0.2).
+- Blocked since: 2026-09-10T00:00:00Z
+- RESOLUTION (2026-09-10): Option (b), operator-authorised (full-production
+  build, money path open). Normalise now. `scripts/registry_diff.py` is widened
+  to scan all reason-code-carrying exceptions (`CampaignValidationError`,
+  `RazorpayError`, `CommerceError`, `HandoffError`, `OAuthError` for
+  `auth.*`-prefixed codes only, `WebAuthnError` for registered codes only).
+  New REGISTRY `reason_codes`: `policy.not_found`, `checkout.invalid_state`,
+  `checkout.invalid_cancel_token`, `psp.checkout_not_found`,
+  `psp.no_payment_link`, `psp.no_payment`, `psp.no_payment_id`,
+  `psp.create_failed`, `psp.cancel_failed`, `psp.refund_failed`,
+  `psp.amount_invalid`, `psp.currency_mismatch`, `psp.live_key_forbidden`,
+  `psp.duplicate_unrecoverable`, `webhook.unknown_event`,
+  `webhook.missing_reference_id`, `webhook.invalid_transition`.
+  `psp.checkout_not_found` is kept distinct from `checkout.not_found` (PSP
+  driver vs API lookup — different failure families sharing a name stem,
+  mirrors the Q-016 authority-namespace note).

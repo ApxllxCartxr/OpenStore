@@ -1454,6 +1454,31 @@ def _signing_link(config: Settings, token: str) -> str:
     return f"{origin}/intent/studio?token={token}"
 
 
+def stamp_order_message_id(config: Settings, checkout_id: str, message_id: str) -> None:
+    """Q-032a: record the Discord message carrying the pay embed, best-effort.
+    Never raises — stamping must not break the shop reply path (R0.5 fail-loud
+    applies to money decisions, not to UX niceties)."""
+    try:
+        from sqlmodel import select
+
+        from openstore.core.database import get_session
+        from openstore.models import Checkout
+
+        session = get_session(config)
+        try:
+            checkout = session.exec(
+                select(Checkout).where(Checkout.id == checkout_id)
+            ).first()
+            if checkout is not None and not checkout.discord_message_id:
+                checkout.discord_message_id = str(message_id)
+                session.add(checkout)
+                session.commit()
+        finally:
+            session.close()
+    except Exception:
+        pass
+
+
 def _federated_signing_link(merchant_base_url: str, token: str) -> str:
     """S12: enrollment link for one merchant of a federated cart. Takes the
     merchant origin's base_url explicitly — _signing_link above reads the
@@ -1704,7 +1729,12 @@ class BuyerBot:
                 await message.channel.send(result["question"])
                 return
 
-            await message.channel.send(embed=build_discord_embed(build_shop_result_embed(result)))
+            _sent = await message.channel.send(embed=build_discord_embed(build_shop_result_embed(result)))
+            try:
+                if result.get("checkout_id") and getattr(_sent, "id", None) is not None:
+                    stamp_order_message_id(self.config, result["checkout_id"], str(_sent.id))
+            except Exception:
+                pass
 
             if result.get("allowed"):
                 await self._maybe_send_upsell_nudge(message, result)
@@ -1837,7 +1867,12 @@ class BuyerBot:
             finally:
                 db_session.close()
 
-            await message.channel.send(embed=build_discord_embed(build_shop_result_embed(result)))
+            _sent = await message.channel.send(embed=build_discord_embed(build_shop_result_embed(result)))
+            try:
+                if result.get("checkout_id") and getattr(_sent, "id", None) is not None:
+                    stamp_order_message_id(self.config, result["checkout_id"], str(_sent.id))
+            except Exception:
+                pass
             if result.get("allowed"):
                 await self._maybe_send_upsell_nudge(message, result)
             else:
@@ -2152,9 +2187,30 @@ class FederatedBuyerBot(BuyerBot):
                 await message.channel.send(result["question"])
                 return
 
-            await message.channel.send(
+            _sent = await message.channel.send(
                 embed=build_discord_embed(build_federated_shop_result_embed(result))
             )
+            try:
+                _mid = getattr(_sent, "id", None)
+                if _mid is not None:
+                    _pm = result.get("per_merchant", {}) or {}
+                    for _fmid, _sl in _pm.items():
+                        if isinstance(_sl, dict) and _sl.get("checkout_id"):
+                            try:
+                                _fclient = self.agent.mcp.client_for(_fmid)
+                                await _fclient.call(
+                                    "set_order_message",
+                                    {
+                                        "checkout_id": _sl["checkout_id"],
+                                        "chat_user_id": chat_user_id,
+                                        "discord_message_id": str(_mid),
+                                    },
+                                    require_auth=True,
+                                )
+                            except Exception:
+                                pass
+            except Exception:
+                pass
 
     async def _handle_conversation_reply(self, message: Any, session_id: str) -> None:
         chat_user_id = str(message.author.id)
@@ -2243,9 +2299,30 @@ class FederatedBuyerBot(BuyerBot):
             finally:
                 db_session.close()
 
-            await message.channel.send(
+            _sent = await message.channel.send(
                 embed=build_discord_embed(build_federated_shop_result_embed(result))
             )
+            try:
+                _mid = getattr(_sent, "id", None)
+                if _mid is not None:
+                    _pm = result.get("per_merchant", {}) or {}
+                    for _fmid, _sl in _pm.items():
+                        if isinstance(_sl, dict) and _sl.get("checkout_id"):
+                            try:
+                                _fclient = self.agent.mcp.client_for(_fmid)
+                                await _fclient.call(
+                                    "set_order_message",
+                                    {
+                                        "checkout_id": _sl["checkout_id"],
+                                        "chat_user_id": chat_user_id,
+                                        "discord_message_id": str(_mid),
+                                    },
+                                    require_auth=True,
+                                )
+                            except Exception:
+                                pass
+            except Exception:
+                pass
 
     async def _handle_menu(self, message: Any, filter_text: str | None) -> None:
         """`!menu [store]` — bare `!menu` pages through every merchant's

@@ -413,12 +413,18 @@ def check_compiler_digest(ctx: VerifierContext) -> CheckResult:
 
     The offline verifier cannot execute the compiler, so it checks the digest
     is in the known-good set. A missing or unknown digest triggers exit 3.
+    Re-pin via scripts/pin_compiler_digest.py after any compiler change.
     """
     bundle = ctx.bundle
     adjudication = bundle.get("adjudication") or {}
     compiler_digest = adjudication.get("compiler_digest", "")
 
     KNOWN_COMPILER_DIGESTS = frozenset({
+        # Live compiler (core/compiler.py as of S16) — source of truth.
+        "sha256:acfd0fb8e320982f01e5f021fa24fd82fc1064fd18a6c36c9960fec820ec16c2",
+        # Pre-S16 placeholder (SHA256("")) carried by checked-in fixtures and
+        # demo bundles. Accepted for backward compatibility only; new bundles
+        # must carry the live digest above.
         "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     })
 
@@ -435,13 +441,13 @@ def check_compiler_digest(ctx: VerifierContext) -> CheckResult:
 
 
 def check_re_execution(ctx: VerifierContext) -> CheckResult:
-    """Check 10: re-execution of compile_decision against adjudication.context
-    returns ALLOW and its transcript is byte-identical to adjudication.transcript.
+    """Check 10: transcript consistency for an ALLOW verdict.
 
-    The offline verifier cannot execute Python code. This check is a structural
-    pass: it verifies the transcript is well-formed (all 13 checks present
-    in order) and the verdict is ALLOW. In a full verifier, the transcript
-    would be replayed through compile_decision().
+    Full replay through compile_decision() remains future work: it requires
+    the signed policy snapshot inside the bundle (schema change, Q-019
+    follow-up). Until then this check enforces everything a structural pass
+    honestly can: exact 13-check order, unique names, every entry result
+    "pass" with no reason_code on ALLOW, and well-formed entry shape.
     """
     bundle = ctx.bundle
     adjudication = bundle.get("adjudication") or {}
@@ -451,7 +457,7 @@ def check_re_execution(ctx: VerifierContext) -> CheckResult:
 
     if verdict != "ALLOW":
         return CheckResult("re_execution", False,
-                          f"verdict is {verdict}, not ALLOW")
+                           f"verdict is {verdict}, not ALLOW")
 
     # Verify transcript structure: all 13 checks present
     EXPECTED_CHECKS = [
@@ -460,18 +466,29 @@ def check_re_execution(ctx: VerifierContext) -> CheckResult:
         "item_qty", "item_blocked_sku", "item_tag_allowlist",
         "spend_per_tx", "spend_envelope", "spend_cumulative", "campaign_validity",
     ]
-    transcript_names = [entry.get("check") for entry in transcript]
+    if not isinstance(transcript, list):
+        return CheckResult("re_execution", False, "transcript is not a list")
+    transcript_names = [entry.get("check") if isinstance(entry, dict) else None
+                        for entry in transcript]
     if transcript_names != EXPECTED_CHECKS:
-        missing = set(EXPECTED_CHECKS) - set(transcript_names)
-        extra = set(transcript_names) - set(EXPECTED_CHECKS)
+        missing = sorted(set(EXPECTED_CHECKS) - set(t for t in transcript_names if t))
+        extra = sorted(set(t for t in transcript_names if t) - set(EXPECTED_CHECKS))
         return CheckResult("re_execution", False,
-                          f"transcript malformed: missing={sorted(missing)}, extra={sorted(extra)}")
+                           f"transcript malformed: missing={sorted(missing)}, extra={sorted(extra)}")
 
-    # All entries must have 'result' field
     for entry in transcript:
-        if "result" not in entry:
-            return CheckResult("re_execution", False,
-                              f"transcript entry missing 'result': {entry}")
+        if not isinstance(entry, dict):
+            return CheckResult("re_execution", False, f"transcript entry not an object: {entry!r}")
+        if entry.get("result") != "pass":
+            return CheckResult(
+                "re_execution", False,
+                f"ALLOW verdict with non-pass entry: {entry.get('check')}={entry.get('result')}",
+            )
+        if entry.get("reason_code") is not None:
+            return CheckResult(
+                "re_execution", False,
+                f"ALLOW verdict with reason_code on {entry.get('check')}: {entry.get('reason_code')}",
+            )
 
     return CheckResult("re_execution", True)
 

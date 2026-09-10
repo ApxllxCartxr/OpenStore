@@ -94,11 +94,19 @@ class BuyerSettings(BaseSettings):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> BuyerSettings:
+        import os
+
         load_dotenv()
         with open(path) as f:
             data = yaml.safe_load(f) or {}
         data = _interpolate_env(data)
-        return cls.model_validate(data)
+        settings = cls.model_validate(data)
+        db_url = os.environ.get("DATABASE__URL")
+        if db_url is not None:
+            if not db_url.strip():
+                raise ValueError("DATABASE__URL is set but empty")
+            settings.database.url = db_url
+        return settings
 
 
 def load_buyer_config(path: str | Path, *, verify_origins: bool = True) -> BuyerSettings:

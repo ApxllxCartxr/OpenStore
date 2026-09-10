@@ -26,6 +26,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # second pytest.main() call in the same process (e.g. mutmut's stats vs.
     # clean-run passes) reuses stale state and hits stale-id collisions.
     _database_module._engine = None
+    _database_module._engine_url = None
 
 
 @pytest.fixture(autouse=True)

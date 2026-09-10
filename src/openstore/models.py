@@ -55,13 +55,15 @@ class WebhookStatus(str, enum.Enum):
 
 
 class HandoffKind(str, enum.Enum):
-    """Closed set (Q-014): which out-of-band ceremony a handoff is parking a
-    chat conversation for. Not tracked in REGISTRY.json/test_enum_exhaustiveness
-    (that sentinel only pins order/campaign/ledger enums) — enforced here via
-    the SQLEnum column, which rejects any other value at the DB layer."""
+    """Closed set (Q-014, Q-033): which out-of-band ceremony a handoff is
+    parking a chat conversation for. Not tracked in
+    REGISTRY.json/test_enum_exhaustiveness (that sentinel only pins
+    order/campaign/ledger enums) — enforced here via the SQLEnum column,
+    which rejects any other value at the DB layer."""
 
     POLICY = "policy"
     AMENDMENT = "amendment"
+    CART = "cart"
 
 
 class LedgerEntry(SQLModel, table=True):
@@ -131,6 +133,12 @@ class Checkout(SQLModel, table=True):
     chat_platform: str | None = Field(default=None, max_length=32)
     chat_user_id: str | None = Field(default=None, max_length=64, index=True)
     chat_channel_id: str | None = Field(default=None, max_length=64)
+    # Q-032a: the Discord message id carrying the "Pay here" embed, so the
+    # webhook worker / hold loop can edit it in place ("Pay here" ->
+    # "Payment received") instead of leaving a stale pay link. Nullable:
+    # non-chat and pre-migration checkouts never set it; editing is always
+    # best-effort (the DM remains the source of truth).
+    discord_message_id: str | None = Field(default=None, max_length=64)
 
     # Cart snapshot for INV-1
     cart_snapshot: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
@@ -406,6 +414,14 @@ class Handoff(SQLModel, table=True):
     # Carries no authority: see surfaces/buyer_internal.py for why a forged
     # or replayed POST to this URL gains an attacker nothing.
     resume_url: str | None = Field(default=None, max_length=1024)
+
+    # S16 (Q-033): for kind=CART handoffs, the pending cart awaiting a
+    # per-cart passkey tap: {"cart_id", "cart", "cart_hash", "policy_id"}.
+    # Null for kind=POLICY/AMENDMENT handoffs (which use result_policy_id /
+    # amendment_draft respectively).
+    cart_payload: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
 
     __table_args__ = (Index("ix_handoff_chat_user", "chat_platform", "chat_user_id"),)
 

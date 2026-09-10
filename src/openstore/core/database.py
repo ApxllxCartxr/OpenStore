@@ -15,10 +15,27 @@ from openstore.config import Settings
 from openstore.models import Checkout, LedgerEntry, LedgerEntryType, OrderState
 
 _engine: Engine | None = None
+_engine_url: str | None = None
 
 # SID-2/SID-3: tracks whether the schema exists (via alembic migration on the
 # serve path, or create_all in tests/tooling). health readiness keys off this.
 _schema_ready: bool = False
+
+
+def reset_engines() -> None:
+    """Dispose all cached engines (tests + process shutdown).
+
+    Legacy tests reset ``_engine = None`` directly; that path still works via
+    the URL check in get_engine. New code should call this helper.
+    """
+    global _engine, _engine_url
+    if _engine is not None:
+        try:
+            _engine.dispose()
+        except Exception:
+            pass
+    _engine = None
+    _engine_url = None
 
 
 def mark_schema_ready() -> None:
@@ -31,29 +48,59 @@ def schema_ready(config: Settings) -> bool:
     return _schema_ready
 
 
+def _is_postgres(url: str) -> bool:
+    return url.startswith("postgresql") or url.startswith("postgres")
+
+
 def get_engine(config: Settings) -> Engine:
-    """Get or create database engine."""
-    global _engine
-    if _engine is None:
-        # SQLite with BEGIN IMMEDIATE for INV-11 (TOCTOU protection)
-        connect_args = {"check_same_thread": False}
-        if config.database.url.startswith("sqlite"):
-            # Use StaticPool for SQLite in-memory/testing
+    """Get or create database engine.
+
+    Single-merchant processes hold one engine at a time; when the URL changes
+    the old engine is disposed first (prevents cross-DB leakage between
+    merchant configs sharing a process in tests). Multi-DB components
+    (MerchantBot) build their own engines and must not use this cache.
+    """
+    global _engine, _engine_url
+    url = config.database.url
+    if _engine is None or _engine_url != url:
+        if _engine is not None:
+            try:
+                _engine.dispose()
+            except Exception:
+                pass
+            _engine = None
+        if url.startswith("sqlite"):
+            # SQLite with BEGIN IMMEDIATE for INV-11 (TOCTOU protection).
+            # StaticPool preserves the historical in-memory test behaviour.
+            connect_args = {"check_same_thread": False}
             _engine = create_engine(
-                config.database.url,
+                url,
                 connect_args=connect_args,
                 poolclass=StaticPool,
                 echo=False,
             )
+            # Enable WAL mode for better concurrency (SQLite only).
+            with _engine.connect() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.execute(text("PRAGMA busy_timeout=5000"))
+                conn.commit()
+        elif _is_postgres(url):
+            from sqlalchemy.pool import QueuePool
+
+            _engine = create_engine(
+                url,
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+                echo=False,
+            )
         else:
-            _engine = create_engine(config.database.url, echo=False)
+            _engine = create_engine(url, echo=False)
+        _engine_url = url
 
-        # Enable WAL mode for better concurrency
-        with _engine.connect() as conn:
-            conn.execute(text("PRAGMA journal_mode=WAL"))
-            conn.execute(text("PRAGMA busy_timeout=5000"))
-            conn.commit()
-
+    assert _engine is not None
     return _engine
 
 
@@ -103,7 +150,9 @@ def session_scope(config: Settings) -> Generator[Session, None, None]:
     """
     Context manager for database session with automatic commit/rollback.
 
-    INV-11: Uses BEGIN IMMEDIATE for spend-cap TOCTOU protection.
+    INV-11: SQLite uses BEGIN IMMEDIATE for spend-cap TOCTOU protection.
+    Postgres relies on row-level SELECT ... FOR UPDATE via lock_policy_row()
+    inside the transaction instead of a whole-DB lock.
     """
     session = get_session(config)
     try:
@@ -125,13 +174,13 @@ def immediate_session(config: Settings) -> Generator[Session, None, None]:
     Explicit IMMEDIATE transaction for spend-cap operations (INV-11).
 
     Use this for any operation that checks and updates spend caps.
+    On Postgres callers should additionally lock the policy row with
+    lock_policy_row() after entering this block.
     """
     session = get_session(config)
     try:
         if config.database.url.startswith("sqlite"):
             session.execute(text("BEGIN IMMEDIATE"))
-        else:
-            session.begin()
         yield session
         session.commit()
     except Exception:
@@ -139,6 +188,21 @@ def immediate_session(config: Settings) -> Generator[Session, None, None]:
         raise
     finally:
         session.close()
+
+
+def lock_policy_row(session: Session, config: Settings, policy_id: str) -> None:
+    """Row-level spend-cap lock for Postgres (INV-11).
+
+    SQLite serialises via BEGIN IMMEDIATE; Postgres must lock only the policy
+    row so concurrent checkouts on different policies do not block each other.
+    No-op row read on SQLite (lock already held by the IMMEDIATE transaction).
+    """
+    from openstore.models import IntentPolicy
+
+    q = select(IntentPolicy).where(IntentPolicy.id == policy_id)
+    if _is_postgres(config.database.url):
+        q = q.with_for_update()
+    session.exec(q).first()
 
 
 def check_spend_cap(

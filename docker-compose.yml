@@ -1,0 +1,85 @@
+# OpenStore production stack: Postgres + two merchants + buyer + merchant-bot.
+# Every merchant gets DATABASE__URL pointing at the same Postgres server with
+# its own database (single-tenant per sidecar process, DECISION-015).
+#
+# Required env (see .env.example): RAZORPAY_KEY_ID (rzp_test_*), RAZORPAY_KEY_SECRET,
+# RAZORPAY_WEBHOOK_SECRET, DISCORD_BOT_TOKEN, BUYER_DISCORD_BOT_TOKEN,
+# MERCHANT_BOT_TOKEN, POSTGRES_PASSWORD.
+#
+# Boot: docker compose up --build -d
+# Health: curl localhost:8000/health/ready && curl localhost:8001/health/ready
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: openstore
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: openstore_gelateria
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openstore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gelateria:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE__URL: postgresql+psycopg://openstore:${POSTGRES_PASSWORD}@db:5432/openstore_gelateria
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:?set RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:?set RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-token}
+    command: ["uv", "run", "openstore", "serve", "configs/gelateria.yaml", "--port", "8000"]
+
+  chai:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE__URL: postgresql+psycopg://openstore:${POSTGRES_PASSWORD}@db:5432/openstore_chai
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:?set RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:?set RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-token}
+    command: ["uv", "run", "openstore", "serve", "configs/chai.yaml", "--port", "8000"]
+
+  buyer:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - gelateria
+      - chai
+    environment:
+      BUYER_DISCORD_BOT_TOKEN: ${BUYER_DISCORD_BOT_TOKEN:-}
+    command: ["uv", "run", "openstore-buyer", "configs/buyer.yaml"]
+    profiles: ["agents"]
+
+  merchant-bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - gelateria
+      - chai
+    environment:
+      MERCHANT_BOT_TOKEN: ${MERCHANT_BOT_TOKEN:-}
+      DATABASE__URL: postgresql+psycopg://openstore:${POSTGRES_PASSWORD}@db:5432/openstore_gelateria
+    command: ["uv", "run", "openstore", "merchant-bot", "configs/gelateria.yaml", "configs/chai.yaml"]
+    profiles: ["agents"]
+
+volumes:
+  pgdata:

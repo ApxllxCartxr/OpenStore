@@ -117,7 +117,7 @@ def handle_razorpay_payment_captured(session: Session, payload: dict[str, Any]) 
     """
     payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
     if not payment:
-        raise WebhookError("webhook_invalid_payload", "Missing payment entity in payload")
+        raise WebhookError("webhook.invalid_payload", "Missing payment entity in payload")
 
     payment_id = payment.get("id")
     order_id = payment.get("order_id")
@@ -130,7 +130,7 @@ def handle_razorpay_payment_captured(session: Session, payload: dict[str, Any]) 
         return
 
     if not all([payment_id, order_id, amount]):
-        raise WebhookError("webhook_invalid_payload", "Missing required payment fields")
+        raise WebhookError("webhook.invalid_payload", "Missing required payment fields")
 
     # Find checkout by psp_order_id
     checkout = session.exec(
@@ -139,7 +139,7 @@ def handle_razorpay_payment_captured(session: Session, payload: dict[str, Any]) 
 
     if not checkout:
         # Order not found - log but don't fail (may be race condition)
-        raise WebhookError("checkout_not_found", f"No checkout found for order_id: {order_id}")
+        raise WebhookError("checkout.not_found", f"No checkout found for order_id: {order_id}")
 
     if checkout.state != OrderState.HELD:
         # Already processed or wrong state - idempotent: just return
@@ -148,14 +148,14 @@ def handle_razorpay_payment_captured(session: Session, payload: dict[str, Any]) 
     # Verify amount matches
     if checkout.amount_minor != amount:
         raise WebhookError(
-            "webhook_amount_mismatch",
+            "webhook.amount_mismatch",
             f"Payment amount {amount} != checkout amount {checkout.amount_minor}"
         )
 
     # Verify currency
     if checkout.currency != currency:
         raise WebhookError(
-            "webhook_currency_mismatch",
+            "webhook.currency_mismatch",
             f"Payment currency {currency} != checkout currency {checkout.currency}"
         )
 
@@ -188,21 +188,21 @@ def handle_razorpay_payment_failed(session: Session, payload: dict[str, Any]) ->
     """
     payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
     if not payment:
-        raise WebhookError("webhook_invalid_payload", "Missing payment entity in payload")
+        raise WebhookError("webhook.invalid_payload", "Missing payment entity in payload")
 
     order_id = payment.get("order_id")
     amount = payment.get("amount")
     currency = payment.get("currency", "INR")
 
     if not all([order_id, amount]):
-        raise WebhookError("webhook_invalid_payload", "Missing required payment fields")
+        raise WebhookError("webhook.invalid_payload", "Missing required payment fields")
 
     checkout = session.exec(
         select(Checkout).where(Checkout.psp_order_id == order_id)
     ).first()
 
     if not checkout:
-        raise WebhookError("checkout_not_found", f"No checkout found for order_id: {order_id}")
+        raise WebhookError("checkout.not_found", f"No checkout found for order_id: {order_id}")
 
     if checkout.state not in (OrderState.CREATED, OrderState.HELD):
         return  # Already processed

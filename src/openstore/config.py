@@ -129,7 +129,17 @@ class Settings(BaseSettings):
         with open(path) as f:
             data = yaml.safe_load(f) or {}
         data = _interpolate_env(data)
-        return cls.model_validate(data)
+        settings = cls.model_validate(data)
+        # Production override: model_validate does not consult the environment
+        # (only the Settings() constructor does), so the nested-delimiter env
+        # var would otherwise be silently ignored and the container would
+        # migrate/boot against the YAML's SQLite default. Fail loud on empty.
+        db_url = os.environ.get("DATABASE__URL")
+        if db_url is not None:
+            if not db_url.strip():
+                raise ValueError("DATABASE__URL is set but empty")
+            settings.database.url = db_url
+        return settings
 
 
 def merchant_id(config: Settings) -> str:

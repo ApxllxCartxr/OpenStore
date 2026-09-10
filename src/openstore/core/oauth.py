@@ -406,7 +406,9 @@ def validate_access_token(
             token_scopes = set(token_record.scopes)
             required = set(required_scopes)
             if not required.issubset(token_scopes):
-                raise OAuthError("insufficient_scope", "Token missing required scopes", 403)
+                raise OAuthError(
+                    "auth.insufficient_scope", "Token missing required scopes", 403
+                )
 
         return token_record
 

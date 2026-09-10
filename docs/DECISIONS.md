@@ -373,3 +373,31 @@
   (no stall, live coverage exclusion, cooldown block + expiry), the outcome math (including the
   None-vs-zero distinction), that the autonomous path never reaches ACTIVE, and that the
   draft prompt actually carries past outcomes.
+
+## DECISION-035 | date: 2026-09-10T00:00:00Z | stage: 16
+- Per-cart passkey ceremony from chat (Q-033 RESOLUTION). kind=CART handoff +
+  cart_payload, cart_studio.html, approve/reject routes, create_cart_handoff
+  MCP tool. The WebAuthn cart binding already existed (webauthn_rp
+  _binding_matches + api.create_checkout); this stage adds the chat ceremony
+  around it rather than new crypto. Approval drives the same
+  create_checkout_from_policy + create_payment_link path as amendments, with
+  assertion_verified=True and server-side cart-hash recompute (R0.8).
+- Production DB layer: get_engine is URL-keyed (dispose on URL change),
+  QueuePool + pool_pre_ping for Postgres, PRAGMAs SQLite-only,
+  lock_policy_row() row-level INV-11 lock for PG. Alembic 0001..0009 verified
+  on Postgres 16. psycopg[binary] + prometheus-client added as dependencies.
+- Identifier hygiene (Q-035): CommerceError/WebhookError/RazorpayError codes
+  normalised to namespaced closed sets; registry_diff scans all
+  reason-code-carrying exceptions (OAuth protocol errors and WebAuthn
+  audit-only failure_types excluded by prefix gate); webhook handler persists
+  psp_payment_id best-effort (Q-027 primary path live-ready, fixture-safe).
+- Q-032 both halves: pre-release PSP reconcile in the hold loop (bounded,
+  never blocks release) + discord_message_id stamp/edit plumbing (column +
+  migration 0010, set_order_message MCP tool with ownership check, best-effort
+  try_edit_dm in webhook worker and hold loop; DMs remain source of truth).
+- Deploy: Dockerfile + compose (PG + 2 merchants + buyer + merchant-bot
+  profiles), DEPLOY.md runbook, DATABASE__URL fix (from_yaml used
+  model_validate which ignores env — containers migrated SQLite while
+  believing PG; now honoured with fail-loud empty check, regression-tested).
+  Proven: fresh compose brings both merchants to 0010/PostgresqlImpl with
+  /health/ready green.

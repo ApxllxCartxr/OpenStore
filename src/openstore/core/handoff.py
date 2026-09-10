@@ -66,6 +66,7 @@ def create_handoff(
     ttl_seconds: int = HANDOFF_TTL_SECONDS,
     amendment_draft: dict[str, Any] | None = None,
     resume_url: str | None = None,
+    cart_payload: dict[str, Any] | None = None,
 ) -> Handoff:
     """Create a new single-use handoff. Never reuses a token (secrets.token_urlsafe
     mirrors the existing cancel_token capability pattern).
@@ -91,6 +92,7 @@ def create_handoff(
         expires_at=now + timedelta(seconds=ttl_seconds),
         amendment_draft=amendment_draft,
         resume_url=resume_url,
+        cart_payload=cart_payload,
     )
     session.add(handoff)
     session.flush()
