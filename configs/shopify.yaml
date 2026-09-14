@@ -1,0 +1,53 @@
+# OpenStore configuration — Shopify-backed pilot (Stage 18 / DECISION-037)
+#
+# The SAME Gelateria Milano merchant as configs/gelateria.yaml, but the
+# catalog source is the Shopify dev store instead of configs/catalog.yaml.
+# Run this INSTEAD OF gelateria.yaml (same merchant_id, separate DB):
+#
+#   uv run openstore serve configs/shopify.yaml --port 8002
+#
+# Requires SHOPIFY_STORE_DOMAIN / SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET
+# in .env (see the shopify-dev-store wizard). Unknown keys hard-fail (R0.3).
+
+merchant:
+  name: "Gelateria Milano"
+  currency: "INR"
+
+# Read-only catalog source. When present, load_catalog never reads the YAML
+# file (catalog_path below is inert). The app version behind these credentials
+# should carry read_products alone — least privilege for a key that only GETs.
+shopify:
+  store_domain: "${SHOPIFY_STORE_DOMAIN}"
+  client_id: "${SHOPIFY_CLIENT_ID}"
+  client_secret: "${SHOPIFY_CLIENT_SECRET}"
+
+razorpay:
+  key_id: "${RAZORPAY_KEY_ID}"
+  key_secret: "${RAZORPAY_KEY_SECRET}"
+  webhook_secret: "${RAZORPAY_WEBHOOK_SECRET}"
+
+discord:
+  bot_token: "${DISCORD_BOT_TOKEN}"
+  buyer_trace_channel_id: 1542108166043471945   # buyer-agent-webhooks
+  merchant_trace_channel_id: 1542108116894748712 # merchant-bot-hooks
+  money_trace_channel_id: 1542108062255419503    # merchant-server-hooks
+  alerts_channel_id: 1542114553305899069         # audit-logs
+  # Same reason as the demo merchants: the federated buyer is its own process.
+  buyer_bot_enabled: false
+
+webauthn:
+  rp_id: "localhost"
+  rp_name: "OpenStore Demo"
+  origin: "http://localhost:8002"
+
+database:
+  url: "sqlite:///data/shopify_openstore.db"
+
+llm:
+  model: "gpt-4o-mini"
+  temperature: 0.2
+
+campaign:
+  min_bps: 500
+  max_bps: 3000
+  max_active: 5

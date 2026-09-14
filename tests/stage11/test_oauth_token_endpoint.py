@@ -109,21 +109,31 @@ class TestTokenEndpoint:
             "/agent/mcp",
             headers={"Authorization": f"Bearer {access_token}"},
             json={
-                "tool": "create_cart",
-                "arguments": {
-                    "merchant_id": "merchant",
-                    "items": [],
-                    "policy_id": "nonexistent-policy",
-                    "cart_hash": "hash",
-                    "cart_version": 1,
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_cart",
+                    "arguments": {
+                        "merchant_id": "merchant",
+                        "items": [],
+                        "policy_id": "nonexistent-policy",
+                        "cart_hash": "hash",
+                        "cart_version": 1,
+                    },
                 },
             },
         )
         assert r.status_code == 200
-        data = r.json()
+        body = r.json()
         # Whatever business-logic outcome, the cart:write scope must have been
-        # accepted — never rejected as insufficient_scope or invalid_token.
-        error = data.get("error", {})
+        # accepted — never rejected as insufficient_scope or invalid_token, and
+        # never a protocol-level error.
+        assert "error" not in body
+        import json as _json
+
+        tool = _json.loads(body["result"]["content"][0]["text"])
+        error = tool.get("error", {})
         assert error.get("reason_code") not in ("auth.insufficient_scope", "invalid_token")
 
     def test_wrong_secret_rejected(self, client, registered_client):

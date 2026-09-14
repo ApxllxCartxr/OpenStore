@@ -24,7 +24,15 @@ _CATALOG_BY_PATH: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 def load_catalog(config: Settings) -> list[dict[str, Any]]:
     """Load the catalog named by config.catalog_path, cached per path and
-    invalidated when the file's mtime changes."""
+    invalidated when the file's mtime changes.
+
+    When config.shopify is set (DECISION-037), the Shopify store is the
+    source instead and the YAML file is never read."""
+    if getattr(config, "shopify", None) is not None:
+        from openstore.surfaces.shopify_catalog import load_shopify_catalog
+
+        return load_shopify_catalog(config)
+
     global CATALOG_CACHE
 
     catalog_path = getattr(config, "catalog_path", None)

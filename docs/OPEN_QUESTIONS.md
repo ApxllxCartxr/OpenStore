@@ -891,3 +891,66 @@
   `psp.checkout_not_found` is kept distinct from `checkout.not_found` (PSP
   driver vs API lookup — different failure families sharing a name stem,
   mirrors the Q-016 authority-namespace note).
+
+## Q-036 | stage: 17 | date: 2026-09-14T00:00:00Z
+- What is ambiguous: `POST /agent/mcp` (`server.py`) speaks a bespoke envelope
+  (`{"tool","arguments"}`) while the manifest advertises MCP `2025-06-18`
+  (`surfaces/wellknown.py`). The MCP spec (verified 2026-09-14:
+  modelcontextprotocol.io/specification/2025-06-18) requires JSON-RPC 2.0 with
+  an `initialize` handshake, `tools/list` (+ `inputSchema` per tool) and
+  `tools/call`, numeric envelope error codes, and `id` never null. No stage
+  spec covers the transport cutover; PRD S6.3 pins the tool *semantics* (kept
+  byte-identical underneath) but not the envelope. R0.2: the method names and
+  the protocol-version string are new identifiers.
+- Options considered: (a) hard cutover to the JSON-RPC wire path, legacy
+  shape answered `400`/`-32600`, own `HttpMCPClient` migrated in the same
+  commit; (b) dual-serve legacy + wire behind a compat shim; (c) leave the
+  bespoke shape (rejected — the manifest would keep promising what stock
+  clients cannot speak, the DECISION-026 failure mode).
+- Blocked since: 2026-09-14T00:00:00Z
+- RESOLUTION (2026-09-14): Option (a), operator-authorised (flagship
+  reprioritisation: MCP first, hard cutover). Pin `protocolVersion`
+  `2025-06-18`; methods `initialize`, `notifications/initialized`,
+  `tools/list`, `tools/call`, `ping`. Envelope errors use JSON-RPC numeric
+  codes only (`-32700`/`-32600`/`-32601`/`-32602`/`-32001` auth) — no new
+  REGISTRY `reason_codes`; business rejections keep their closed-set codes
+  inside `tools/call` `isError` content. `InProcessMCPClient` keeps internal
+  dispatch (not a protocol surface). `handle_mcp_request` stays the tool
+  execution core; the wire handler wraps it and maps escaping
+   `CommerceError` (scope gates outside per-tool `try`) to `isError` content
+   instead of the current unhandled 500.
+
+## Q-037 | stage: 18 | date: 2026-09-14T00:00:00Z
+- What is ambiguous: First real-catalog adapter (Shopify, read-only). Live
+  probe of the operator's dev store (2026-09-14) forced four decisions the PRD
+  (YAML-only catalog) never contemplates: (i) 18/19 sample variants carry
+  `sku: null` — the normalized item shape requires a merchant-authored `sku`
+  key the compiler and PoAI attestations join on; (ii) shop currency is USD
+  while DECISION-015 fixes the sidecar to INR-only; (iii) Admin tokens expire
+  in 86399s, so no static token can be stored; (iv) REST pagination is
+  unbounded (`Link: rel=next`). Also new identifiers: `shopify:` config block
+  + `store_domain`/`client_id`/`client_secret` keys, `SHOPIFY_*` env names,
+  `surfaces/shopify_catalog.py` module. REGISTRY.json needs no change
+  (registry_diff scans reason codes only; no new code is raised — all
+  failures are RuntimeError/ValueError fail-loud, the pre-existing adapter
+  convention).
+- Options considered:
+  (i) SKU-less variants: (a) skip loudly with a count, fail loud only when
+  zero usable variants remain; (b) synthesize keys from variant GIDs —
+  rejected, compiler allowlists and attestations must join on
+  merchant-authored keys; (c) fail the whole sync on the first missing SKU —
+  rejected, one untidy variant would nuke the catalog.
+  (ii) Currency: (a) fail loud on any shop currency != merchant currency (no
+  conversion — converting money invents money); (b) convert — FORBIDDEN.
+  (iii) Tokens: mint at runtime via client-credentials grant, cache to
+  expiry-60s, persist only ID/secret in `.env` (never the token).
+  (iv) Pagination: follow `Link rel=next`, cap 40 pages (~10k products), fail
+  loud past the cap.
+- Blocked since: 2026-09-14T00:00:00Z
+- RESOLUTION (2026-09-14): Options (i-a), (ii-a), (iii), (iv),
+  operator-authorised (live probe ran in-session). `load_catalog` branches to
+  the Shopify source iff `config.shopify` is set, otherwise YAML byte-identical
+  to today. TTL cache 60s keyed by domain, separate from the YAML path+mtime
+  cache. Scope posture: token response must carry `read_products`
+  (`write_products` implies it and is tolerated, but the recommended version
+  is read-only — least privilege for a credential that only ever GETs).

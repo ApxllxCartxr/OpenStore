@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -112,20 +113,27 @@ class InProcessMCPClient:
 
 
 class HttpMCPClient:
-    """An MCP client for ONE merchant reachable over HTTP (S12).
+    """An MCP client for ONE merchant reachable over HTTP (S12, wire: S17).
 
-    Same call/return shape as InProcessMCPClient so the two are interchangeable
-    at the buyer agent boundary. require_auth is explicit at each call site
-    (never inferred from the tool name) so search — which needs no scope,
-    surfaces/mcp_server.py:32 — never touches /oauth/token or sends a header.
+    Speaks the JSON-RPC 2.0 wire path on /agent/mcp (DECISION-036): a lazy
+    `initialize` handshake once per client, then `tools/call` per tool.
+    Same call/return shape as InProcessMCPClient ({success,data,error}) so the
+    two stay interchangeable at the buyer agent boundary. require_auth is
+    explicit at each call site (never inferred from the tool name) so search —
+    which needs no scope — never touches /oauth/token or sends a header.
     R0.10: this client only ever holds an OAuth bearer token, never PSP/signing
     material.
     """
+
+    # Pinned per Q-036: must match surfaces/mcp_server.MCP_PROTOCOL_VERSION.
+    PROTOCOL_VERSION = "2025-06-18"
 
     def __init__(self, merchant: MerchantOrigin, *, timeout_seconds: float = 8.0) -> None:
         self.merchant = merchant
         self._timeout_seconds = timeout_seconds
         self._access_token: str | None = None
+        self._rpc_id = 0
+        self._initialized = False
 
     async def _ensure_token(self) -> None:
         """Obtain (once) an OAuth bearer token via client_credentials and cache it.
@@ -153,24 +161,113 @@ class HttpMCPClient:
             )
         self._access_token = token
 
+    def _next_id(self) -> int:
+        self._rpc_id += 1
+        return self._rpc_id
+
+    async def _rpc(
+        self, method: str, params: dict[str, Any] | None, *, auth: bool
+    ) -> Any:
+        """One JSON-RPC request; returns the result payload (fail loud)."""
+        headers: dict[str, str] = {}
+        if auth:
+            await self._ensure_token()
+            headers["Authorization"] = f"Bearer {self._access_token}"
+        envelope: dict[str, Any] = {
+            "jsonrpc": "2.0",
+            "id": self._next_id(),
+            "method": method,
+        }
+        if params is not None:
+            envelope["params"] = params
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            resp = await client.post(
+                f"{self.merchant.base_url}/agent/mcp",
+                json=envelope,
+                headers=headers,
+            )
+        if resp.status_code == 401:
+            raise RuntimeError(
+                f"MCP {method} for merchant {self.merchant.merchant_id!r} "
+                "rejected: invalid bearer token"
+            )
+        resp.raise_for_status()
+        body = resp.json()
+        if not isinstance(body, dict) or "error" in body:
+            err = body.get("error", {}) if isinstance(body, dict) else {}
+            raise RuntimeError(
+                f"MCP {method} for merchant {self.merchant.merchant_id!r} "
+                f"protocol error {err.get('code')}: {err.get('message')}"
+            )
+        return body.get("result", {})
+
+    async def _ensure_initialized(self, *, auth: bool) -> None:
+        """Run the MCP initialize handshake once per client (no-op after)."""
+        if self._initialized:
+            return
+        result = await self._rpc(
+            "initialize",
+            {
+                "protocolVersion": self.PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "openstore-buyer", "version": "0.1.0"},
+            },
+            auth=auth,
+        )
+        server_version = result.get("protocolVersion")
+        if server_version != self.PROTOCOL_VERSION:
+            raise RuntimeError(
+                f"MCP initialize for merchant {self.merchant.merchant_id!r}: "
+                f"server speaks {server_version!r}, client speaks {self.PROTOCOL_VERSION!r}"
+            )
+        headers: dict[str, str] = {}
+        if auth:
+            await self._ensure_token()
+            headers["Authorization"] = f"Bearer {self._access_token}"
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            resp = await client.post(
+                f"{self.merchant.base_url}/agent/mcp",
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                headers=headers,
+            )
+        if resp.status_code not in (200, 202):
+            raise RuntimeError(
+                f"MCP notifications/initialized for merchant "
+                f"{self.merchant.merchant_id!r} returned {resp.status_code}"
+            )
+        self._initialized = True
+
     async def call(
         self, tool_name: str, arguments: dict[str, Any], *, require_auth: bool
     ) -> dict[str, Any]:
         """Dispatch one MCP tool call over HTTP to this merchant's /agent/mcp."""
-        headers: dict[str, str] = {}
-        if require_auth:
-            await self._ensure_token()
-            headers["Authorization"] = f"Bearer {self._access_token}"
-
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-            resp = await client.post(
-                f"{self.merchant.base_url}/agent/mcp",
-                json={"tool": tool_name, "arguments": arguments},
-                headers=headers,
+        await self._ensure_initialized(auth=require_auth)
+        result = await self._rpc(
+            "tools/call",
+            {"name": tool_name, "arguments": arguments},
+            auth=require_auth,
+        )
+        content = result.get("content", [])
+        if not content or content[0].get("type") != "text":
+            # Fail loud (R0.5): a tools/call result without text content means
+            # a broken origin, not an empty answer.
+            raise RuntimeError(
+                f"MCP tools/call {tool_name!r} for merchant "
+                f"{self.merchant.merchant_id!r} returned malformed content"
             )
-        resp.raise_for_status()
-        result: dict[str, Any] = resp.json()
-        return result
+        try:
+            tool_result = json.loads(content[0]["text"])
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"MCP tools/call {tool_name!r} for merchant "
+                f"{self.merchant.merchant_id!r} returned invalid JSON content: {e}"
+            ) from e
+        if not isinstance(tool_result, dict) or "success" not in tool_result:
+            raise RuntimeError(
+                f"MCP tools/call {tool_name!r} for merchant "
+                f"{self.merchant.merchant_id!r} returned a malformed tool payload"
+            )
+        return tool_result
 
     async def search_products(
         self, query: str, tags: list[str] | None = None, limit: int = 10

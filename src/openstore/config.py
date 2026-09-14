@@ -97,6 +97,20 @@ class CampaignSettings(BaseModel):
     growth_check_interval_seconds: int = 3600
 
 
+class ShopifyConfig(BaseModel):
+    """Read-only Shopify catalog source (Q-037/DECISION-037).
+
+    When set, load_catalog reads this store instead of the YAML file. Only
+    ever GETs (the recommended app version carries read_products alone);
+    Admin tokens are minted at runtime from these credentials and never
+    persisted — see surfaces/shopify_catalog.py.
+    """
+
+    store_domain: str
+    client_id: str
+    client_secret: str
+
+
 class Settings(BaseSettings):
     # No env_file here on purpose. from_yaml() already calls load_dotenv() and
     # resolves ${VAR} itself, so a dotenv settings source is redundant — and
@@ -117,6 +131,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     campaign: CampaignSettings = Field(default_factory=CampaignSettings)
     catalog_path: str | None = None
+    shopify: ShopifyConfig | None = None
     evidence_retention_days: int = 540
     # SID-1: public origin (scheme+host) the sidecar is reachable at, used for
     # manifests and CORS/RP binding. None => same-origin reverse proxy (derive

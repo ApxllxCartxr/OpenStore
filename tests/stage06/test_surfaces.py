@@ -143,25 +143,39 @@ class TestOAuthAuthorizationServer:
 
 
 class TestMCPTools:
-    def test_unknown_tool_returns_error(self, client):
-        r = client.post("/agent/mcp", json={"tool": "unknown_tool_xxx", "arguments": {}})
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is False
-        assert "unknown_tool" in data["error"]["reason_code"]
-
-    def test_list_campaigns_empty(self, client):
-        r = client.post(
+    @staticmethod
+    def _call(client, name, arguments=None, req_id=1):
+        return client.post(
             "/agent/mcp",
             json={
-                "tool": "list_campaigns",
-                "arguments": {"merchant_id": "test"},
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments or {}},
             },
         )
+
+    @staticmethod
+    def _tool(body):
+        assert body["jsonrpc"] == "2.0"
+        result = body["result"]
+        return result, json.loads(result["content"][0]["text"])
+
+    def test_unknown_tool_returns_error(self, client):
+        r = self._call(client, "unknown_tool_xxx")
         assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        assert data["data"]["count"] == 0
+        result, tool = self._tool(r.json())
+        assert result["isError"] is True
+        assert tool["success"] is False
+        assert "unknown_tool" in tool["error"]["reason_code"]
+
+    def test_list_campaigns_empty(self, client):
+        r = self._call(client, "list_campaigns", {"merchant_id": "test"})
+        assert r.status_code == 200
+        result, tool = self._tool(r.json())
+        assert result["isError"] is False
+        assert tool["success"] is True
+        assert tool["data"]["count"] == 0
 
 
 class TestCatalogFeed:

@@ -142,10 +142,27 @@ same command; migrations are idempotent and the DB survives restarts. To wipe
 and start over: delete the three files under `data/`, restart the servers
 (migrations recreate schema from scratch), then repeat steps 5–6.
 
+## Shopify-backed pilot (Stage 18)
+
+The same Gelateria merchant, but the catalog comes from a real Shopify dev
+store instead of YAML. Run it **instead of** `:8000`, never alongside (same
+merchant_id, separate DB):
+
+```bash
+uv run openstore serve configs/shopify.yaml --port 8002
+```
+
+Needs `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`
+in `.env` (one-time `bash /tmp/opencode/shopify-dev-store.sh` wizard). The
+store currency must equal the merchant currency (`INR`) — any other currency
+fails boot-loud on first catalog read, by design (converting money invents
+money). Variants without SKUs are skipped loudly; a store with zero usable
+variants refuses to serve a catalog at all.
+
 ## Running the test suite
 
 ```bash
-uv run pytest -q                        # 626+ tests
+uv run pytest -q                        # 681 tests
 uv run mypy src/
 uv run ruff check src/ tests/
 uv run python scripts/registry_diff.py  # must print nothing, exit 0

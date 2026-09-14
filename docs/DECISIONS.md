@@ -401,3 +401,37 @@
   believing PG; now honoured with fail-loud empty check, regression-tested).
   Proven: fresh compose brings both merchants to 0010/PostgresqlImpl with
   /health/ready green.
+
+## DECISION-036 | date: 2026-09-14T00:00:00Z | stage: 17
+- MCP wire conformance, hard cutover (mirrors Q-036 RESOLUTION).
+- `POST /agent/mcp` speaks JSON-RPC 2.0 only: `initialize` (version
+  negotiation, pinned `2025-06-18`), `notifications/initialized` (202, no
+  body), `tools/list` (all 20 names + generated `inputSchema`), `tools/call`
+  (`{content:[{type:text,text}],isError}`; business failures ride `isError`
+  content with their closed-set reason codes, never envelope errors).
+  Legacy `{"tool","arguments"}` bodies are answered `400`/`-32600`, never
+  executed. Auth mechanism unchanged (Bearer → scopes); invalid bearer is
+  `401`/`-32001` carrying the OAuth error in `data`.
+- `HttpMCPClient` migrates to the wire path in the same commit (lazy
+  `initialize` once per client, then `tools/call`; callers keep their
+  `(tool, arguments[, require_auth])` Python signatures, `buyer_agent.py`
+  untouched). `InProcessMCPClient` keeps internal dispatch.
+- The manifest already advertised `2025-06-18`, so no manifest change; the
+  promise is now true. UCP MCP *binding names* (`search_catalog` et al.)
+  remain future work — wire conformance first, vocabulary aliases later.
+
+## DECISION-037 | date: 2026-09-14T00:00:00Z | stage: 18
+- Shopify read-only catalog adapter (mirrors Q-037 RESOLUTION).
+- New `surfaces/shopify_catalog.py`: runtime client-credentials token mint
+  (cached to expiry-60s, never persisted), REST `products.json` pagination
+  (250/page, 40-page cap), per-variant normalization to the exact YAML item
+  shape (`sku`, `name`, `unit_minor` paise-exact via Decimal, sorted `tags`,
+  `related_skus: []`, text `description`). Fail-loud rules: non-INR shop
+  currency, missing-SKU variants skipped with a count (zero usable → hard
+  error), non-exact cent prices, missing `read_products`, HTTP non-200.
+- `Settings.shopify` (optional block) is the only branch signal;
+  `load_catalog` is otherwise untouched. `configs/shopify.yaml` runs the
+  same Gelateria merchant against Shopify instead of YAML (own SQLite file;
+  `buyer_bot_enabled: false` so it never double-logins beside the demo
+  merchants). Write-back (inventory-levels, order webhooks), GST/shipping/
+  COD, and multi-currency stay explicitly out of scope.

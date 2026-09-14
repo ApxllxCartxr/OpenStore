@@ -125,19 +125,36 @@ class TestInstallContract:
     def test_mcp_endpoint_exists(self, fresh_client: TestClient):
         r = fresh_client.post(
             "/agent/mcp",
-            json={"tool": "search_products", "arguments": {"query": "vanilla"}},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "search_products", "arguments": {"query": "vanilla"}},
+            },
         )
         assert r.status_code == 200
-        d = r.json()
-        assert d["success"] is True
+        result = r.json()["result"]
+        assert result["isError"] is False
+        import json as _json
+
+        assert _json.loads(result["content"][0]["text"])["success"] is True
 
     def test_mcp_unknown_tool_is_error(self, fresh_client: TestClient):
         r = fresh_client.post(
             "/agent/mcp",
-            json={"tool": "unknown_tool", "arguments": {}},
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "unknown_tool", "arguments": {}},
+            },
         )
         assert r.status_code == 200
-        d = r.json()
+        result = r.json()["result"]
+        assert result["isError"] is True
+        import json as _json
+
+        d = _json.loads(result["content"][0]["text"])
         assert d["success"] is False
         assert "unknown_tool" in d["error"]["reason_code"]
 

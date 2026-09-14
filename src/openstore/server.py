@@ -509,14 +509,29 @@ def create_app(config: Settings) -> FastAPI:
             private_key_pem=get_catalog_signing_key(merchant_id(config)),
         )
 
-    # MCP endpoint (S6.3)
+    # MCP endpoint — JSON-RPC 2.0 wire protocol only (DECISION-036, hard
+    # cutover). The legacy {"tool","arguments"} shape is answered -32600 and
+    # never executed. Auth mechanism unchanged: Bearer → scopes, per-tool
+    # gates inside handle_mcp_request; an invalid bearer is 401/-32001.
     @app.post("/agent/mcp")
-    async def agent_mcp(request: Request) -> dict[str, Any]:
+    async def agent_mcp(request: Request) -> Any:
+        from fastapi.responses import JSONResponse, Response
+
         from openstore.core.database import get_session
         from openstore.core.oauth import OAuthError, validate_access_token
-        from openstore.surfaces.mcp_server import handle_mcp_request
+        from openstore.surfaces.mcp_server import handle_mcp_wire_request
 
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": "Parse error: invalid JSON"},
+                },
+            )
         auth_header = request.headers.get("authorization", "")
         token_scopes: list[str] = []
         client_id = "anonymous"
@@ -530,28 +545,39 @@ def create_app(config: Settings) -> FastAPI:
                 client_id = token_record.client_id
             except OAuthError as e:
                 session.close()
-                return {"error": e.error, "message": e.description}
+                wire_id = body.get("id") if isinstance(body, dict) else None
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "jsonrpc": "2.0",
+                        "id": wire_id,
+                        "error": {
+                            "code": -32001,
+                            "message": "Unauthorized: invalid bearer token",
+                            "data": {"error": e.error, "message": e.description},
+                        },
+                    },
+                )
             finally:
                 session.close()
-
-        tool_name = body.get("tool", "")
-        arguments = body.get("arguments", {})
 
         from openstore.core.database import session_scope
 
         # session_scope commits on success / rolls back on error (INV-11) — a
         # plain get_session()+close() silently drops every write this call makes.
         with session_scope(config) as session:
-            result = handle_mcp_request(
+            status, resp = handle_mcp_wire_request(
                 config=config,
                 session=session,
-                tool_name=tool_name,
-                arguments=arguments,
+                body=body,
                 token_scopes=token_scopes,
-                trace_id=None,
                 client_id=client_id,
             )
-        return result
+        if resp is None:
+            return Response(status_code=202)
+        if status != 200:
+            return JSONResponse(status_code=status, content=resp)
+        return resp
 
     # ACP endpoint (stub). DECISION-026: the route stays registered, but it is no
     # longer advertised in the agent-commerce manifest — claiming a protocol the

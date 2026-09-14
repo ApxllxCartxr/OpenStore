@@ -1,11 +1,16 @@
-# OpenStore surfaces — MCP server (16 tools, closed set per PRD §6 / REGISTRY.json)
+# OpenStore surfaces — MCP server (20 tools, closed set per PRD §6 / REGISTRY.json)
 # Per PRD S6.3 — thin adapters over core/api.py + WebAuthn RP.
+# Transport: JSON-RPC 2.0 wire protocol, MCP 2025-06-18 (DECISION-036, hard
+# cutover). POST /agent/mcp accepts ONLY the wire envelope; the legacy
+# {"tool","arguments"} shape is answered -32600 and never executed.
 
 from __future__ import annotations
 
+import json
 import secrets
 from typing import Any
 
+from openstore import __version__ as _server_version
 from openstore.config import Settings
 from openstore.config import merchant_id as _merchant_id
 from openstore.core.api import CommerceError
@@ -1010,9 +1015,13 @@ def handle_mcp_request(
     client_id: str | None = None,
 ) -> dict[str, Any]:
     """
-    Handle an MCP JSON-RPC request.
-    Returns the tool result dict. Tools are dispatched from TOOL_NAMES (closed set).
-    Unknown tool name → CommerceError with auth.unknown_tool.
+    Execute one MCP tool (transport-agnostic core).
+
+    Dispatched from TOOL_NAMES (closed set). Unknown tool name returns a
+    failure payload with auth.unknown_tool (a *business* rejection carried in
+    tools/call isError content — never a JSON-RPC envelope error).
+    Scope gates raise CommerceError to the caller: the wire handler maps them
+    to isError content; InProcessMCPClient lets them propagate (R0.5).
     """
     if tool_name not in TOOL_NAMES:
         return {
@@ -1229,3 +1238,382 @@ def handle_mcp_request(
         "data": result.data,
         "error": result.error,
     }
+
+
+# ---------------------------------------------------------------------------
+# MCP wire protocol (JSON-RPC 2.0, MCP 2025-06-18) — DECISION-036.
+# Hard cutover: POST /agent/mcp accepts ONLY this envelope. handle_mcp_request
+# above stays the tool-execution core (tool semantics unchanged, R0.9); the
+# wire handler below maps the lifecycle methods onto it.
+# ---------------------------------------------------------------------------
+
+MCP_PROTOCOL_VERSION = "2025-06-18"
+MCP_SERVER_NAME = "openstore"
+
+
+def _obj(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    return {"type": "object", "properties": properties, "required": required}
+
+
+_STR = {"type": "string"}
+_INT = {"type": "integer"}
+_OBJ = {"type": "object"}
+_ARR_STR = {"type": "array", "items": {"type": "string"}}
+
+TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
+    "search_products": {
+        "description": "Search the merchant catalog by name/description and tags.",
+        "inputSchema": _obj(
+            {"query": _STR, "tags": _ARR_STR, "limit": _INT},
+            [],
+        ),
+    },
+    "get_product": {
+        "description": "Fetch one catalog item by SKU.",
+        "inputSchema": _obj({"sku": _STR}, ["sku"]),
+    },
+    "create_cart": {
+        "description": "Compile a cart against the signed policy; returns ALLOW/DENY plus checkout_id.",
+        "inputSchema": _obj(
+            {
+                "merchant_id": _STR,
+                "items": {"type": "array", "items": _OBJ},
+                "policy_id": _STR,
+                "cart_hash": _STR,
+                "cart_version": _INT,
+                "webauthn_assertion": _OBJ,
+            },
+            ["merchant_id", "items", "policy_id", "cart_hash"],
+        ),
+    },
+    "update_cart": {
+        "description": "Replace a HELD checkout's cart (cancels the old hold, creates a new one).",
+        "inputSchema": _obj(
+            {
+                "merchant_id": _STR,
+                "checkout_id": _STR,
+                "items": {"type": "array", "items": _OBJ},
+                "policy_id": _STR,
+                "cart_hash": _STR,
+                "cart_version": _INT,
+                "webauthn_assertion": _OBJ,
+            },
+            ["merchant_id", "checkout_id", "items", "policy_id", "cart_hash"],
+        ),
+    },
+    "checkout_initiate": {
+        "description": "Create the Razorpay payment link for a compiled checkout.",
+        "inputSchema": _obj(
+            {
+                "checkout_id": _STR,
+                "chat_platform": _STR,
+                "chat_user_id": _STR,
+                "chat_channel_id": _STR,
+                "request_text": _STR,
+            },
+            ["checkout_id"],
+        ),
+    },
+    "checkout_confirm": {
+        "description": "Confirm a checkout after its payment link is paid.",
+        "inputSchema": _obj(
+            {"checkout_id": _STR, "webauthn_assertion": _OBJ},
+            ["checkout_id"],
+        ),
+    },
+    "get_order": {
+        "description": "Read the current state of one checkout.",
+        "inputSchema": _obj({"checkout_id": _STR}, ["checkout_id"]),
+    },
+    "get_audit_log": {
+        "description": "Read audit log entries, optionally filtered by checkout.",
+        "inputSchema": _obj({"checkout_id": _STR, "limit": _INT}, []),
+    },
+    "webauthn_register_begin": {
+        "description": "Start a WebAuthn registration ceremony for a user handle.",
+        "inputSchema": _obj({"user_id": _STR}, ["user_id"]),
+    },
+    "webauthn_register_complete": {
+        "description": "Complete a WebAuthn registration ceremony.",
+        "inputSchema": _obj({"user_id": _STR, "credential": _OBJ}, ["user_id", "credential"]),
+    },
+    "webauthn_begin_assertion": {
+        "description": "Start a WebAuthn assertion ceremony, optionally bound to a cart/campaign/amendment.",
+        "inputSchema": _obj({"user_id": _STR, "challenge_binding": _OBJ}, ["user_id"]),
+    },
+    "webauthn_complete_assertion": {
+        "description": "Complete a WebAuthn assertion ceremony.",
+        "inputSchema": _obj(
+            {"user_id": _STR, "credential_id": _STR, "assertion": _OBJ},
+            ["user_id", "credential_id", "assertion"],
+        ),
+    },
+    "list_campaigns": {
+        "description": "List ACTIVE, in-window campaigns for this merchant.",
+        "inputSchema": _obj({}, []),
+    },
+    "get_campaign": {
+        "description": "Fetch one campaign by ID.",
+        "inputSchema": _obj({"campaign_id": _STR}, ["campaign_id"]),
+    },
+    "resolve_policy": {
+        "description": "Resolve the active signed policy for a user handle.",
+        "inputSchema": _obj({"user_id": _STR}, ["user_id"]),
+    },
+    "create_policy_handoff": {
+        "description": "Mint a signing link for a buyer with no active policy.",
+        "inputSchema": _obj(
+            {
+                "merchant_id": _STR,
+                "chat_platform": _STR,
+                "chat_user_id": _STR,
+                "chat_channel_id": _STR,
+                "request_text": _STR,
+                "resume_url": _STR,
+            },
+            ["merchant_id", "chat_platform", "chat_user_id", "chat_channel_id", "request_text"],
+        ),
+    },
+    "create_cart_handoff": {
+        "description": "Park a pending cart for a per-cart passkey tap.",
+        "inputSchema": _obj(
+            {
+                "merchant_id": _STR,
+                "chat_platform": _STR,
+                "chat_user_id": _STR,
+                "chat_channel_id": _STR,
+                "request_text": _STR,
+                "cart": {"type": "array", "items": _OBJ},
+                "cart_hash": _STR,
+                "policy_id": _STR,
+                "resume_url": _STR,
+            },
+            [
+                "merchant_id",
+                "chat_platform",
+                "chat_user_id",
+                "chat_channel_id",
+                "request_text",
+                "cart",
+                "cart_hash",
+                "policy_id",
+            ],
+        ),
+    },
+    "list_orders": {
+        "description": "List recent checkouts for one chat identity, newest first.",
+        "inputSchema": _obj(
+            {"chat_platform": _STR, "chat_user_id": _STR, "limit": _INT},
+            ["chat_platform", "chat_user_id"],
+        ),
+    },
+    "cancel_order": {
+        "description": "Cancel one checkout owned by the calling chat identity.",
+        "inputSchema": _obj(
+            {"checkout_id": _STR, "chat_platform": _STR, "chat_user_id": _STR},
+            ["checkout_id", "chat_platform", "chat_user_id"],
+        ),
+    },
+    "set_order_message": {
+        "description": "Record the chat message carrying a pay embed (first writer wins).",
+        "inputSchema": _obj(
+            {
+                "checkout_id": _STR,
+                "chat_platform": _STR,
+                "chat_user_id": _STR,
+                "discord_message_id": _STR,
+            },
+            ["checkout_id", "chat_platform", "chat_user_id", "discord_message_id"],
+        ),
+    },
+}
+
+if set(TOOL_SCHEMAS) != set(TOOL_NAMES):
+    raise RuntimeError(
+        "TOOL_SCHEMAS drifted from TOOL_NAMES: "
+        f"missing={sorted(set(TOOL_NAMES) - set(TOOL_SCHEMAS))} "
+        f"extra={sorted(set(TOOL_SCHEMAS) - set(TOOL_NAMES))}"
+    )
+
+
+def _wire_ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+
+def _wire_err(
+    req_id: Any, code: int, message: str, data: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    err: dict[str, Any] = {"code": code, "message": message}
+    if data is not None:
+        err["data"] = data
+    return {"jsonrpc": "2.0", "id": req_id, "error": err}
+
+
+def _tool_text_envelope(tool_result: dict[str, Any]) -> dict[str, Any]:
+    """Map the {success,data,error} tool payload onto MCP content.
+
+    Business rejections (DENY, unknown tool, scope gates) ride isError
+    content with their closed-set reason codes — never envelope errors."""
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(tool_result, sort_keys=True),
+            }
+        ],
+        "isError": not tool_result.get("success", False),
+    }
+
+
+def handle_mcp_wire_request(
+    config: Settings,
+    session: Any,
+    body: Any,
+    token_scopes: list[str],
+    client_id: str | None = None,
+) -> tuple[int, dict[str, Any] | None]:
+    """Handle one POST /agent/mcp body. Returns (http_status, response).
+
+    A None response means a JSON-RPC notification (no id): the caller answers
+    HTTP 202 with an empty body. The legacy {"tool","arguments"} shape is
+    rejected -32600 and never executed (DECISION-036 hard cutover).
+    """
+    if isinstance(body, list):
+        return 400, _wire_err(None, -32600, "Invalid Request: batch requests are not supported")
+    if not isinstance(body, dict):
+        return 400, _wire_err(None, -32600, "Invalid Request: body must be a JSON-RPC object")
+    if body.get("jsonrpc") != "2.0":
+        legacy_id = body.get("id")
+        return (
+            400,
+            _wire_err(
+                legacy_id,
+                -32600,
+                "Invalid Request: MCP wire protocol required "
+                "(JSON-RPC 2.0 with method initialize/tools/list/tools/call)",
+            ),
+        )
+
+    method = body.get("method")
+    req_id = body.get("id")
+    is_notification = "id" not in body
+    if req_id is not None and (isinstance(req_id, bool) or not isinstance(req_id, str | int)):
+        return 400, _wire_err(None, -32600, "Invalid Request: id must be a string or integer")
+
+    params = body.get("params", {})
+    if not isinstance(params, dict):
+        if is_notification:
+            return 202, None
+        return 200, _wire_err(req_id, -32602, "Invalid params: params must be an object")
+
+    if not isinstance(method, str):
+        if is_notification:
+            return 202, None
+        return 200, _wire_err(req_id, -32600, "Invalid Request: method must be a string")
+
+    if method == "initialize":
+        if is_notification:
+            return 202, None
+        return 200, _wire_ok(
+            req_id,
+            {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": MCP_SERVER_NAME, "version": _server_version},
+            },
+        )
+
+    if method == "ping":
+        if is_notification:
+            return 202, None
+        return 200, _wire_ok(req_id, {})
+
+    if method.startswith("notifications/"):
+        return 202, None
+
+    if method == "tools/list":
+        if is_notification:
+            return 202, None
+        return 200, _wire_ok(
+            req_id,
+            {
+                "tools": [
+                    {
+                        "name": name,
+                        "description": TOOL_SCHEMAS[name]["description"],
+                        "inputSchema": TOOL_SCHEMAS[name]["inputSchema"],
+                    }
+                    for name in sorted(TOOL_NAMES)
+                ],
+            },
+        )
+
+    if method == "tools/call":
+        name = params.get("name")
+        arguments = params.get("arguments", {})
+        if not isinstance(name, str) or not isinstance(arguments, dict):
+            if is_notification:
+                return 202, None
+            return (
+                200,
+                _wire_err(
+                    req_id,
+                    -32602,
+                    "Invalid params: tools/call requires {name: string, arguments: object}",
+                ),
+            )
+        schema = TOOL_SCHEMAS.get(name)
+        if schema is not None:
+            missing = [
+                field
+                for field in schema["inputSchema"].get("required", [])
+                if field not in arguments
+            ]
+            if missing:
+                if is_notification:
+                    return 202, None
+                return (
+                    200,
+                    _wire_err(
+                        req_id,
+                        -32602,
+                        f"Invalid params: missing required fields for {name}: "
+                        + ", ".join(sorted(missing)),
+                    ),
+                )
+        try:
+            tool_result = handle_mcp_request(
+                config=config,
+                session=session,
+                tool_name=name,
+                arguments=arguments,
+                token_scopes=token_scopes,
+                trace_id=None,
+                client_id=client_id or "anonymous",
+            )
+        except CommerceError as e:
+            # Scope gates sit outside the per-tool try blocks by design (fail
+            # loud, R0.5) — on the wire they become isError content, not a 500.
+            tool_result = {
+                "success": False,
+                "error": {"reason_code": e.reason_code, "message": e.message},
+            }
+        except Exception as e:
+            if is_notification:
+                return 202, None
+            return (
+                500,
+                _wire_err(
+                    req_id,
+                    -32603,
+                    "Internal error: tool execution failed",
+                    {"message": str(e)},
+                ),
+            )
+        if is_notification:
+            return 202, None
+        return 200, _wire_ok(req_id, _tool_text_envelope(tool_result))
+
+    if is_notification:
+        return 202, None
+    return 200, _wire_err(req_id, -32601, f"Method not found: {method}")
