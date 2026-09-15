@@ -602,12 +602,14 @@ class BuyerAgent:
         returning the SAME field shape (allowed_tags/tag_mode/blocked_skus/
         max_spend_per_tx_minor/policy_hash, plus policy_id since federated
         carts have no policy_id handed down by the caller) so
-        apply_cart_delta needs no change.
+        apply_cart_delta needs no change, plus exposure_minor (S23: the
+        merchant-computed spend exposure, advisory planning input for the
+        consolidated budget guardrail — never enforcement).
 
-        Returns {"policy_fields": {...}} on success, {"unsigned": True} when
-        this buyer has no active policy at that merchant yet
-        (authority.policy_unsigned — the caller triggers enrollment), or
-        {"error": reason_code} for any other MCP failure."""
+        Returns {"policy_fields": {...}, "exposure_minor": int} on success,
+        {"unsigned": True} when this buyer has no active policy at that
+        merchant yet (authority.policy_unsigned — the caller triggers
+        enrollment), or {"error": reason_code} for any other MCP failure."""
         client = self.mcp.client_for(merchant_id)
         result = await client.call("resolve_policy", {"user_id": user_id}, require_auth=True)
         if result.get("success"):
@@ -620,7 +622,8 @@ class BuyerAgent:
                     "blocked_skus": data.get("blocked_skus"),
                     "max_spend_per_tx_minor": data.get("max_spend_per_tx_minor"),
                     "policy_hash": data.get("policy_hash"),
-                }
+                },
+                "exposure_minor": data.get("exposure_minor"),
             }
         reason_code = result.get("error", {}).get("reason_code")
         if reason_code == "authority.policy_unsigned":
@@ -844,6 +847,84 @@ class BuyerAgent:
             "expires_at": data.get("expires_at"),
         }
 
+    async def _check_consolidated_budget(
+        self,
+        by_merchant: dict[str, list[dict[str, Any]]],
+        per_merchant: dict[str, dict[str, Any]],
+        user_id: str,
+        trace_id: str,
+    ) -> dict[str, Any] | None:
+        """S23 (Q-043): consolidated budget guardrail — planning-time only.
+
+        Sums, across every merchant in this cart, the merchant-reported
+        spend exposure (fresh resolve_policy round, computed server-side by
+        compute_policy_exposure) plus this cart's pending total (the merchant
+        compiler's own effective_amount_minor from Phase 1 — zero buyer-side
+        arithmetic, R0.8), and blocks the whole commit when the projection
+        exceeds the operator-declared federation_total_cap_minor.
+
+        Returns None when the projection fits or the knob is unset.
+        Otherwise a buyer.* rejection shaped like the other
+        _submit_federated_cart failures. Malformed merchant data blocks with
+        buyer.exposure_unavailable (R0.5: a merchant that can't report a
+        number must not silently pass — and assuming 0 would understate
+        spend, the dangerous direction). Residuals per DECISION-038:
+        read-then-act races and untrusted merchant input bound the guarantee;
+        per-merchant hard caps hold regardless."""
+        cap = getattr(self.config, "federation_total_cap_minor", None)
+        if cap is None:
+            return None
+        exposures = await asyncio.gather(
+            *(self._resolve_remote_policy(mid, user_id) for mid in by_merchant),
+            return_exceptions=True,
+        )
+        breakdown: dict[str, dict[str, int]] = {}
+        for mid, outcome in zip(by_merchant.keys(), exposures, strict=True):
+            if (
+                isinstance(outcome, BaseException)
+                or not isinstance(outcome, dict)
+                or outcome.get("error")
+                or outcome.get("unsigned")
+            ):
+                return {
+                    "allowed": False,
+                    "reason_code": "buyer.exposure_unavailable",
+                    "trace_id": trace_id,
+                    "merchant_id": mid,
+                }
+            exposure = outcome.get("exposure_minor")
+            pending = per_merchant[mid].get("effective_amount_minor")
+            if (
+                isinstance(exposure, bool)
+                or not isinstance(exposure, int)
+                or exposure < 0
+                or isinstance(pending, bool)
+                or not isinstance(pending, int)
+                or pending < 0
+            ):
+                return {
+                    "allowed": False,
+                    "reason_code": "buyer.exposure_unavailable",
+                    "trace_id": trace_id,
+                    "merchant_id": mid,
+                }
+            breakdown[mid] = {
+                "exposure_minor": exposure,
+                "pending_minor": pending,
+                "total_minor": exposure + pending,
+            }
+        projected = sum(v["total_minor"] for v in breakdown.values())
+        if projected > cap:
+            return {
+                "allowed": False,
+                "reason_code": "buyer.budget_exceeded",
+                "trace_id": trace_id,
+                "declared_total_minor": cap,
+                "projected_total_minor": projected,
+                "per_merchant": breakdown,
+            }
+        return None
+
     async def _submit_federated_cart(
         self,
         cart: list[dict[str, Any]],
@@ -982,6 +1063,16 @@ class BuyerAgent:
                 "per_merchant": per_merchant,
             }
 
+        # S23 (Q-043): consolidated budget guardrail — fresh exposures plus
+        # merchant-computed pendings against one declared total. Breach (or
+        # malformed merchant data) blocks the whole commit; Phase 2 runs only
+        # on an explicit fit.
+        budget_block = await self._check_consolidated_budget(
+            by_merchant, per_merchant, user_id, trace_id
+        )
+        if budget_block is not None:
+            return budget_block
+
         # Phase 2 — commit every merchant in parallel. Reached only because
         # every slice above validated.
         checkout_results = await asyncio.gather(
@@ -1089,6 +1180,8 @@ _FRIENDLY_DENIAL_REASONS: dict[str, str] = {
     "buyer.checkout_initiate_failed": "something went wrong starting your checkout",
     "buyer.cart_denied": "that order didn't fit within your current spending policy",
     "buyer.federation_partial_failure": "part of this order couldn't be placed across every store",
+    "buyer.budget_exceeded": "this order goes over your total budget across stores",
+    "buyer.exposure_unavailable": "I couldn't verify spending room across every store",
     "assertion_required": "I need a fresh authorization from you for this specific order",
 }
 _DEFAULT_DENIAL_REASON = "that didn't fit within your current spending policy"

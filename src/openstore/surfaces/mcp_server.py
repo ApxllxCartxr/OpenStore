@@ -991,9 +991,16 @@ def resolve_policy(
     MCP instead of importing core/handoff.py directly). Returns exactly the 5
     fields buyer_agent._load_policy_fields reads, plus policy_id. No active
     signed policy → authority.policy_unsigned (R0.5), the same closed-set
-    reason_code require_active_policy already raises."""
+    reason_code require_active_policy already raises.
+
+    S23 (Q-043): also answers exposure_minor — the policy's computed
+    economic exposure (settled + in-flight, compute_policy_exposure,
+    server-side R0.8) so a federated buyer can budget across merchants
+    before committing. Advisory to the buyer only; merchant-side caps are
+    enforced by the compiler regardless."""
     _require_scope(token_scopes, "catalog:read")
     try:
+        from openstore.core.database import compute_policy_exposure
         from openstore.core.handoff import HandoffError, require_active_policy
 
         policy = require_active_policy(session, user_id)
@@ -1006,6 +1013,7 @@ def resolve_policy(
                 "blocked_skus": policy.blocked_skus,
                 "max_spend_per_tx_minor": policy.max_spend_per_tx_minor,
                 "policy_hash": policy.policy_hash,
+                "exposure_minor": compute_policy_exposure(session, policy.id),
             },
         )
     except HandoffError as e:

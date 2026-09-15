@@ -23,6 +23,13 @@ llm:
   model: "gpt-4o-mini"
   temperature: 0.2
 
+# S23 (Q-043): consolidated budget guardrail — one total, in paise, bounding
+# a federated checkout across ALL merchants below (per-policy exposures +
+# pending cart totals, checked after every merchant validates and before any
+# payment link is created). Unset (default) disables it: each merchant's own
+# signed caps still hold. Example: 500000 = ₹5,000 total.
+# federation_total_cap_minor: 500000
+
 merchants:
   - name: "Gelateria Milano"
     base_url: "http://localhost:8000"

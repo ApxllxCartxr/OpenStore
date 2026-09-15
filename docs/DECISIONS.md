@@ -495,3 +495,13 @@
   never exposed). Cart lines stamped server-side; no campaigns this slice.
 - `catalog.sku_not_found` registered (already raised in-tree). Resume guard:
   `_consume_and_resume` auto-resumes discord-platform handoffs only.
+
+## DECISION-043 | date: 2026-09-15T00:00:00Z | stage: 23
+- Cross-merchant consolidated budget guardrail (mirrors Q-043 RESOLUTION;
+  completes the DECISION-038 deferral).
+- Knob: `BuyerSettings.federation_total_cap_minor` (unset = off).
+  `resolve_policy` answers `exposure_minor` (computed server-side, no new
+  tool/scope). Check runs post-Phase-1, pre-Phase-2 on fresh exposures +
+  merchant-reported `effective_amount_minor`; breach or malformed input
+  blocks everything (`buyer.budget_exceeded` /
+  `buyer.exposure_unavailable`, buyer-local codes).

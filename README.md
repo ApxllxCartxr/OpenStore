@@ -409,7 +409,7 @@ uv run openstore merchant-bot configs/gelateria.yaml configs/chai.yaml
 ### Running the checks
 
 ```bash
-uv run pytest -q                        # 727 tests
+uv run pytest -q                        # 741 tests
 uv run mypy src/                        # 51 source files, clean
 uv run ruff check src/ tests/
 uv run python scripts/registry_diff.py  # must print nothing, exit 0
@@ -461,7 +461,7 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 
 ## What's real / what's next
 
-Built by one person with an AI agent across twenty-two stages. The honest ledger:
+Built by one person with an AI agent across twenty-three stages. The honest ledger:
 
 **Real and tested:**
 - ✅ The full money path — compiler, ledger, idempotency, hold/cancel, webhooks, reconciliation
@@ -500,7 +500,7 @@ Built by one person with an AI agent across twenty-two stages. The honest ledger
   the wire bytes byte-for-byte (initialize, all 22 tool schemas, UCP catalog
   shapes incl. miss semantics, error envelopes, both discovery manifests), so
   a stranger can replay and verify instead of trusting the manifest.
-- ✅ Red-team and sentinel suites green — **727 tests**, `mypy` and `ruff` clean
+- ✅ Red-team and sentinel suites green — **741 tests**, `mypy` and `ruff` clean
 - ✅ **Chat-native purchase flow** — a live `discord.Client` runs in the server's
   lifespan; a buyer DMs the bot, gets a `handoffs`-table signing link if no policy exists,
   auto-resumes the errand on signature, gets the Razorpay pay link and hold/cancel status
@@ -513,6 +513,9 @@ Built by one person with an AI agent across twenty-two stages. The honest ledger
   origins over HTTP MCP, builds one cart tagged per line with `merchant_id`, and creates
   separate per-merchant checkouts in two phases. Each merchant holds its own signed policy;
   there is no signing hub, so there is no shared budget to double-spend (DECISION-022).
+  An optional operator-declared total (`federation_total_cap_minor`) adds a planning-time
+  guardrail: fresh per-policy exposures plus merchant-computed pendings are summed before
+  any payment link is created, and the whole commit blocks on breach (Stage 23).
 - ✅ **The growth half** — conversational buyer seams, deterministic cross-sell,
   order status and cancellation over federated merchants, the merchant reporting bot, and the
   autonomous growth loop: stall detection → unprompted draft → passkey approval → signed offer

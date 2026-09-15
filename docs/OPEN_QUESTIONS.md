@@ -1141,3 +1141,46 @@
   implementation (Q-008 sequencing). Ungated like `/chat` (readiness gate
   only — `is_gated` is about readiness, not auth). No new scopes, tools,
   HandoffKind values, binding modes, or migrations.
+
+## Q-043 | stage: 23 | date: 2026-09-15T00:00:00Z
+- What is ambiguous: Cross-merchant consolidated budget guardrail
+  (DECISION-038 accepted it as a planning-time guardrail and deferred it
+  until after the webchat slice — done in Stage 22). No stage spec names it.
+  Sub-questions: (i) where the operator-declared total lives; (ii) how the
+  remote buyer learns per-policy exposure (new MCP tool vs extending
+  `resolve_policy`); (iii) insertion point and exposure freshness;
+  (iv) whose arithmetic the pending totals use (R0.8: never trust
+  agent-supplied totals); (v) breach semantics (block vs warn) and the
+  malformed-exposure case; (vi) whether new identifiers trip R0.2.
+- Options considered:
+  (i) `BuyerSettings.federation_total_cap_minor: int | None = None`
+  (deterministic config; unset = guardrail off, zero behavior change) over
+  LLM-parsed per-errand budgets — rejected, flaky input to a money-adjacent
+  decision.
+  (ii) Extend `resolve_policy` response data with `exposure_minor`
+  (no new tool/scope/route; response data keys are not REGISTRY-governed and
+  federated clients already hold `catalog:read`).
+  (iii) Insert post-Phase-1-allowed, pre-Phase-2 in
+  `_submit_federated_cart`, with a fresh parallel `resolve_policy` round
+  (negotiation rounds stale pre-phase-1 values; one cheap round buys a
+  tighter race bound).
+  (iv) Pending per merchant = the merchant compiler's own
+  `effective_amount_minor` from the Phase-1 `create_cart` data
+  (post-discount, server-computed — zero buyer-side arithmetic); must be
+  `int >= 0`.
+  (v) Breach blocks EVERYTHING (no partial commit — the same rule as
+  never-commit-A-while-B-might-deny), reason `buyer.budget_exceeded` with a
+  per-merchant breakdown; malformed exposure blocks with
+  `buyer.exposure_unavailable`. Both codes are buyer-process-local
+  (precedent: `buyer.federation_partial_failure`) — no REGISTRY impact.
+  (vi) No registry-level identifiers: config key, two `buyer.*` codes, one
+  response data field. Single-merchant carts take the identical path — no
+  special case.
+- Blocked since: 2026-09-15T00:00:00Z
+- RESOLUTION (2026-09-15): All of the above, operator-authorised (slice
+  approved 2026-09-15). Residuals restated, not reopened: read-then-act
+  races (overshoot bounded by in-flight holds), merchant-reported exposure
+  is untrusted (a lying merchant can only understate its own slice of the
+  buyer's budget — per-merchant hard caps and other merchants unaffected),
+  INR-only. Hard cross-merchant enforcement still needs shared spend state
+  (DECISION-007, unsolved).

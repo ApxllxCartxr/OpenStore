@@ -12,7 +12,7 @@ from typing import cast
 import httpx
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from openstore.config import DatabaseConfig, DiscordConfig, LLMSettings, Settings, _interpolate_env
@@ -64,6 +64,22 @@ class BuyerSettings(BaseSettings):
     )
     llm: LLMSettings = Field(default_factory=LLMSettings)
     merchants: list[MerchantOrigin]
+
+    # S23 (Q-043): consolidated budget guardrail — the operator-declared
+    # total, in paise, bounding one federated checkout across ALL merchants
+    # (per-policy exposures + this cart's pending totals, checked after Phase
+    # 1 validates and before any Phase 2 commit). None (default) disables the
+    # guardrail entirely: each merchant's own signed caps still hold, there is
+    # simply no cross-merchant total. Must be a positive integer when set —
+    # validated in __post_init__ style below (fail loud, R0.5).
+    federation_total_cap_minor: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_budget_cap(self) -> BuyerSettings:
+        cap = self.federation_total_cap_minor
+        if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0):
+            raise ValueError("federation_total_cap_minor must be a positive integer or unset")
+        return self
 
     # S12 step 8: this buyer process's own internal HTTP surface
     # (surfaces/buyer_internal.py), which receives a merchant's best-effort
