@@ -409,7 +409,7 @@ uv run openstore merchant-bot configs/gelateria.yaml configs/chai.yaml
 ### Running the checks
 
 ```bash
-uv run pytest -q                        # 697 tests
+uv run pytest -q                        # 711 tests
 uv run mypy src/                        # 51 source files, clean
 uv run ruff check src/ tests/
 uv run python scripts/registry_diff.py  # must print nothing, exit 0
@@ -461,7 +461,7 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 
 ## What's real / what's next
 
-Built by one person with an AI agent across twenty stages. The honest ledger:
+Built by one person with an AI agent across twenty-one stages. The honest ledger:
 
 **Real and tested:**
 - ✅ The full money path — compiler, ledger, idempotency, hold/cancel, webhooks, reconciliation
@@ -491,7 +491,11 @@ Built by one person with an AI agent across twenty stages. The honest ledger:
   federated buyer was migrated to the wire path in the same commit, so the
   subprocess federation suite exercises it end to end. Point MCP Inspector at
   `/agent/mcp` — it lists and calls.
-- ✅ Red-team and sentinel suites green — **697 tests**, `mypy` and `ruff` clean
+- ✅ **Conformance fixtures (Stage 21)** — `tests/GOLDEN/conformance/` pins
+  the wire bytes byte-for-byte (initialize, all 22 tool schemas, UCP catalog
+  shapes incl. miss semantics, error envelopes, both discovery manifests), so
+  a stranger can replay and verify instead of trusting the manifest.
+- ✅ Red-team and sentinel suites green — **711 tests**, `mypy` and `ruff` clean
 - ✅ **Chat-native purchase flow** — a live `discord.Client` runs in the server's
   lifespan; a buyer DMs the bot, gets a `handoffs`-table signing link if no policy exists,
   auto-resumes the errand on signature, gets the Razorpay pay link and hold/cancel status

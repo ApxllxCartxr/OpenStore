@@ -1,0 +1,33 @@
+{
+  "description": "Legacy {sku} shape keeps working, superset response.",
+  "expect_body": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"data\": {\"item\": {\"description\": \"Piedmont hazelnuts, dark roast.\", \"name\": \"Roasted Hazelnut 500ml\", \"offers\": [], \"related_skus\": [], \"sku\": \"GEL-HAZ-500\", \"tags\": [\"vegan\"], \"unit_minor\": 23000}, \"product\": {\"description\": {\"plain\": \"Piedmont hazelnuts, dark roast.\"}, \"id\": \"GEL-HAZ-500\", \"price_range\": {\"max\": {\"amount\": 23000, \"currency\": \"INR\"}, \"min\": {\"amount\": 23000, \"currency\": \"INR\"}}, \"title\": \"Roasted Hazelnut 500ml\", \"variants\": [{\"availability\": {\"available\": true}, \"id\": \"GEL-HAZ-500\", \"price\": {\"amount\": 23000, \"currency\": \"INR\"}, \"sku\": \"GEL-HAZ-500\", \"tags\": [\"vegan\"], \"title\": \"Roasted Hazelnut 500ml\"}]}, \"ucp\": {\"capabilities\": {\"dev.ucp.shopping.catalog.lookup\": [{\"version\": \"2026-08-25\"}]}, \"version\": \"2026-08-25\"}}, \"error\": {}, \"success\": true}",
+          "type": "text"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "expect_status": 200,
+  "name": "mcp_get_product_legacy",
+  "request": {
+    "body": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "sku": "GEL-HAZ-500"
+        },
+        "name": "get_product"
+      }
+    },
+    "method": "POST",
+    "path": "/agent/mcp"
+  }
+}

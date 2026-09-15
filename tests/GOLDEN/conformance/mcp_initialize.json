@@ -1,0 +1,38 @@
+{
+  "description": "MCP 2025-06-18 \u00a7initialize: exact version negotiation.",
+  "expect_body": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "capabilities": {
+        "tools": {
+          "listChanged": false
+        }
+      },
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "openstore",
+        "version": "0.1.0"
+      }
+    }
+  },
+  "expect_status": 200,
+  "name": "mcp_initialize",
+  "request": {
+    "body": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "initialize",
+      "params": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "conformance",
+          "version": "0"
+        },
+        "protocolVersion": "2025-06-18"
+      }
+    },
+    "method": "POST",
+    "path": "/agent/mcp"
+  }
+}

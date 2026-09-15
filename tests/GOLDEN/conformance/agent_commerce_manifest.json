@@ -1,0 +1,71 @@
+{
+  "description": "Agent-commerce discovery manifest (mcp+ucp protocols, no acp).",
+  "expect_body": {
+    "a2a_agent_card": "http://testserver/.well-known/agent-card.json",
+    "auth": {
+      "authorization_server": "http://testserver/.well-known/oauth-authorization-server",
+      "scopes_supported": [
+        "catalog:read",
+        "cart:write",
+        "checkout:initiate",
+        "checkout:confirm"
+      ],
+      "type": "oauth2"
+    },
+    "campaigns": {
+      "feed_endpoint": "http://testserver/agent/campaigns",
+      "signed_feed": "http://testserver/.well-known/agent-campaigns.json"
+    },
+    "catalog_endpoint": "http://testserver/agent/catalog",
+    "evidence": {
+      "bundle_endpoint": "/orders/{checkout_id}/evidence",
+      "jwks": "http://testserver/.well-known/poai-jwks.json",
+      "poai_version": "0.1"
+    },
+    "mcp_endpoint": "http://testserver/agent/mcp",
+    "merchant": {
+      "id": "gelateria-milano",
+      "name": "Gelateria Milano"
+    },
+    "policy": {
+      "currency": "INR",
+      "default_per_tx_cap_minor": 50000,
+      "max_unconfirmed_spend_minor": 0,
+      "requires_human_approval": true
+    },
+    "protocols": [
+      {
+        "auth": [
+          "oauth2_bearer"
+        ],
+        "authority_schemes": [
+          "native_webauthn"
+        ],
+        "endpoint": "http://testserver/agent/mcp",
+        "name": "mcp",
+        "spec_excerpt": "/protocols/mcp/spec-excerpt",
+        "version": "2025-06-18"
+      },
+      {
+        "auth": [
+          "oauth2_bearer"
+        ],
+        "authority_schemes": [
+          "native_webauthn"
+        ],
+        "endpoint": "http://testserver/.well-known/ucp",
+        "name": "ucp",
+        "version": "2026-01-11"
+      }
+    ],
+    "storefront": "http://testserver/",
+    "version": "0.2"
+  },
+  "expect_status": 200,
+  "name": "agent_commerce_manifest",
+  "request": {
+    "body": null,
+    "method": "GET",
+    "path": "/.well-known/agent-commerce.json"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "description": "DECISION-036 hard cutover: legacy shape is 400/-32600.",
+  "expect_body": {
+    "error": {
+      "code": -32600,
+      "message": "Invalid Request: MCP wire protocol required (JSON-RPC 2.0 with method initialize/tools/list/tools/call)"
+    },
+    "id": null,
+    "jsonrpc": "2.0"
+  },
+  "expect_status": 400,
+  "name": "mcp_legacy_shape_rejected",
+  "request": {
+    "body": {
+      "arguments": {
+        "query": "x"
+      },
+      "tool": "search_products"
+    },
+    "method": "POST",
+    "path": "/agent/mcp"
+  }
+}

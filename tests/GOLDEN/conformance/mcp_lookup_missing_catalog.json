@@ -1,0 +1,32 @@
+{
+  "description": "Missing required catalog arg is envelope -32602.",
+  "expect_body": {
+    "error": {
+      "code": -32602,
+      "message": "Invalid params: missing required fields for lookup_catalog: catalog"
+    },
+    "id": 1,
+    "jsonrpc": "2.0"
+  },
+  "expect_status": 200,
+  "name": "mcp_lookup_missing_catalog",
+  "request": {
+    "body": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "meta": {
+            "ucp-agent": {
+              "profile": "https://platform.example/profiles/test.json"
+            }
+          }
+        },
+        "name": "lookup_catalog"
+      }
+    },
+    "method": "POST",
+    "path": "/agent/mcp"
+  }
+}

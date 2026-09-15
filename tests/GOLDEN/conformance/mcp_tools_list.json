@@ -1,0 +1,533 @@
+{
+  "description": "MCP 2025-06-18 tools/list: all 22 tools with inputSchema.",
+  "expect_body": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "tools": [
+        {
+          "description": "Cancel one checkout owned by the calling chat identity.",
+          "inputSchema": {
+            "properties": {
+              "chat_platform": {
+                "type": "string"
+              },
+              "chat_user_id": {
+                "type": "string"
+              },
+              "checkout_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "checkout_id",
+              "chat_platform",
+              "chat_user_id"
+            ],
+            "type": "object"
+          },
+          "name": "cancel_order"
+        },
+        {
+          "description": "Confirm a checkout after its payment link is paid.",
+          "inputSchema": {
+            "properties": {
+              "checkout_id": {
+                "type": "string"
+              },
+              "webauthn_assertion": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "checkout_id"
+            ],
+            "type": "object"
+          },
+          "name": "checkout_confirm"
+        },
+        {
+          "description": "Create the Razorpay payment link for a compiled checkout.",
+          "inputSchema": {
+            "properties": {
+              "chat_channel_id": {
+                "type": "string"
+              },
+              "chat_platform": {
+                "type": "string"
+              },
+              "chat_user_id": {
+                "type": "string"
+              },
+              "checkout_id": {
+                "type": "string"
+              },
+              "request_text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "checkout_id"
+            ],
+            "type": "object"
+          },
+          "name": "checkout_initiate"
+        },
+        {
+          "description": "Compile a cart against the signed policy; returns ALLOW/DENY plus checkout_id.",
+          "inputSchema": {
+            "properties": {
+              "cart_hash": {
+                "type": "string"
+              },
+              "cart_version": {
+                "type": "integer"
+              },
+              "items": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "merchant_id": {
+                "type": "string"
+              },
+              "policy_id": {
+                "type": "string"
+              },
+              "webauthn_assertion": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "merchant_id",
+              "items",
+              "policy_id",
+              "cart_hash"
+            ],
+            "type": "object"
+          },
+          "name": "create_cart"
+        },
+        {
+          "description": "Park a pending cart for a per-cart passkey tap.",
+          "inputSchema": {
+            "properties": {
+              "cart": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "cart_hash": {
+                "type": "string"
+              },
+              "chat_channel_id": {
+                "type": "string"
+              },
+              "chat_platform": {
+                "type": "string"
+              },
+              "chat_user_id": {
+                "type": "string"
+              },
+              "merchant_id": {
+                "type": "string"
+              },
+              "policy_id": {
+                "type": "string"
+              },
+              "request_text": {
+                "type": "string"
+              },
+              "resume_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "merchant_id",
+              "chat_platform",
+              "chat_user_id",
+              "chat_channel_id",
+              "request_text",
+              "cart",
+              "cart_hash",
+              "policy_id"
+            ],
+            "type": "object"
+          },
+          "name": "create_cart_handoff"
+        },
+        {
+          "description": "Mint a signing link for a buyer with no active policy.",
+          "inputSchema": {
+            "properties": {
+              "chat_channel_id": {
+                "type": "string"
+              },
+              "chat_platform": {
+                "type": "string"
+              },
+              "chat_user_id": {
+                "type": "string"
+              },
+              "merchant_id": {
+                "type": "string"
+              },
+              "request_text": {
+                "type": "string"
+              },
+              "resume_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "merchant_id",
+              "chat_platform",
+              "chat_user_id",
+              "chat_channel_id",
+              "request_text"
+            ],
+            "type": "object"
+          },
+          "name": "create_policy_handoff"
+        },
+        {
+          "description": "Read audit log entries, optionally filtered by checkout.",
+          "inputSchema": {
+            "properties": {
+              "checkout_id": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              }
+            },
+            "required": [],
+            "type": "object"
+          },
+          "name": "get_audit_log"
+        },
+        {
+          "description": "Fetch one campaign by ID.",
+          "inputSchema": {
+            "properties": {
+              "campaign_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "campaign_id"
+            ],
+            "type": "object"
+          },
+          "name": "get_campaign"
+        },
+        {
+          "description": "Read the current state of one checkout.",
+          "inputSchema": {
+            "properties": {
+              "checkout_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "checkout_id"
+            ],
+            "type": "object"
+          },
+          "name": "get_order"
+        },
+        {
+          "description": "Fetch one catalog item by SKU (legacy {sku}) or UCP identifier ({id} | {catalog: {id}}); answers {item, product, ucp}.",
+          "inputSchema": {
+            "properties": {
+              "catalog": {
+                "type": "object"
+              },
+              "id": {
+                "type": "string"
+              },
+              "meta": {
+                "type": "object"
+              },
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "type": "object"
+          },
+          "name": "get_product"
+        },
+        {
+          "description": "List ACTIVE, in-window campaigns for this merchant.",
+          "inputSchema": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "name": "list_campaigns"
+        },
+        {
+          "description": "List recent checkouts for one chat identity, newest first.",
+          "inputSchema": {
+            "properties": {
+              "chat_platform": {
+                "type": "string"
+              },
+              "chat_user_id": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "chat_platform",
+              "chat_user_id"
+            ],
+            "type": "object"
+          },
+          "name": "list_orders"
+        },
+        {
+          "description": "UCP catalog batch lookup by identifier (SKU); misses answer success + not_found messages, never isError.",
+          "inputSchema": {
+            "properties": {
+              "catalog": {
+                "type": "object"
+              },
+              "meta": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "catalog"
+            ],
+            "type": "object"
+          },
+          "name": "lookup_catalog"
+        },
+        {
+          "description": "Resolve the active signed policy for a user handle.",
+          "inputSchema": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id"
+            ],
+            "type": "object"
+          },
+          "name": "resolve_policy"
+        },
+        {
+          "description": "UCP catalog search alias over the merchant catalog; accepts {meta, catalog: {query, pagination}} or the flat {query, tags, limit} shape.",
+          "inputSchema": {
+            "properties": {
+              "catalog": {
+                "type": "object"
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "meta": {
+                "type": "object"
+              },
+              "query": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [],
+            "type": "object"
+          },
+          "name": "search_catalog"
+        },
+        {
+          "description": "Search the merchant catalog by name/description and tags.",
+          "inputSchema": {
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "query": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [],
+            "type": "object"
+          },
+          "name": "search_products"
+        },
+        {
+          "description": "Record the chat message carrying a pay embed (first writer wins).",
+          "inputSchema": {
+            "properties": {
+              "chat_platform": {
+                "type": "string"
+              },
+              "chat_user_id": {
+                "type": "string"
+              },
+              "checkout_id": {
+                "type": "string"
+              },
+              "discord_message_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "checkout_id",
+              "chat_platform",
+              "chat_user_id",
+              "discord_message_id"
+            ],
+            "type": "object"
+          },
+          "name": "set_order_message"
+        },
+        {
+          "description": "Replace a HELD checkout's cart (cancels the old hold, creates a new one).",
+          "inputSchema": {
+            "properties": {
+              "cart_hash": {
+                "type": "string"
+              },
+              "cart_version": {
+                "type": "integer"
+              },
+              "checkout_id": {
+                "type": "string"
+              },
+              "items": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "merchant_id": {
+                "type": "string"
+              },
+              "policy_id": {
+                "type": "string"
+              },
+              "webauthn_assertion": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "merchant_id",
+              "checkout_id",
+              "items",
+              "policy_id",
+              "cart_hash"
+            ],
+            "type": "object"
+          },
+          "name": "update_cart"
+        },
+        {
+          "description": "Start a WebAuthn assertion ceremony, optionally bound to a cart/campaign/amendment.",
+          "inputSchema": {
+            "properties": {
+              "challenge_binding": {
+                "type": "object"
+              },
+              "user_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id"
+            ],
+            "type": "object"
+          },
+          "name": "webauthn_begin_assertion"
+        },
+        {
+          "description": "Complete a WebAuthn assertion ceremony.",
+          "inputSchema": {
+            "properties": {
+              "assertion": {
+                "type": "object"
+              },
+              "credential_id": {
+                "type": "string"
+              },
+              "user_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "credential_id",
+              "assertion"
+            ],
+            "type": "object"
+          },
+          "name": "webauthn_complete_assertion"
+        },
+        {
+          "description": "Start a WebAuthn registration ceremony for a user handle.",
+          "inputSchema": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id"
+            ],
+            "type": "object"
+          },
+          "name": "webauthn_register_begin"
+        },
+        {
+          "description": "Complete a WebAuthn registration ceremony.",
+          "inputSchema": {
+            "properties": {
+              "credential": {
+                "type": "object"
+              },
+              "user_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "credential"
+            ],
+            "type": "object"
+          },
+          "name": "webauthn_register_complete"
+        }
+      ]
+    }
+  },
+  "expect_status": 200,
+  "name": "mcp_tools_list",
+  "request": {
+    "body": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/list"
+    },
+    "method": "POST",
+    "path": "/agent/mcp"
+  }
+}

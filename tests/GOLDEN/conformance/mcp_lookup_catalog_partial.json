@@ -1,0 +1,43 @@
+{
+  "description": "UCP catalog lookup binding: partial miss is success + not_found messages.",
+  "expect_body": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"data\": {\"messages\": [{\"code\": \"not_found\", \"content\": \"NOPE-001\", \"type\": \"info\"}], \"products\": [{\"description\": {\"plain\": \"Slow-churned, cashew-base vanilla.\"}, \"id\": \"GEL-VAN-500\", \"price_range\": {\"max\": {\"amount\": 21000, \"currency\": \"INR\"}, \"min\": {\"amount\": 21000, \"currency\": \"INR\"}}, \"title\": \"Madagascar Vanilla 500ml\", \"variants\": [{\"availability\": {\"available\": true}, \"id\": \"GEL-VAN-500\", \"price\": {\"amount\": 21000, \"currency\": \"INR\"}, \"sku\": \"GEL-VAN-500\", \"tags\": [\"dairy-free\", \"vegan\"], \"title\": \"Madagascar Vanilla 500ml\"}]}], \"ucp\": {\"capabilities\": {\"dev.ucp.shopping.catalog.lookup\": [{\"version\": \"2026-08-25\"}]}, \"version\": \"2026-08-25\"}}, \"error\": {}, \"success\": true}",
+          "type": "text"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "expect_status": 200,
+  "name": "mcp_lookup_catalog_partial",
+  "request": {
+    "body": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "catalog": {
+            "ids": [
+              "GEL-VAN-500",
+              "NOPE-001"
+            ]
+          },
+          "meta": {
+            "ucp-agent": {
+              "profile": "https://platform.example/profiles/test.json"
+            }
+          }
+        },
+        "name": "lookup_catalog"
+      }
+    },
+    "method": "POST",
+    "path": "/agent/mcp"
+  }
+}

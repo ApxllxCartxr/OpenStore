@@ -1024,3 +1024,39 @@
   (`[search_catalog]`) and `dev.ucp.shopping.catalog.lookup`
   (`[lookup_catalog, get_product]`); the stage-06 capability test is updated.
   The internal buyer keeps `search_products` (no client change).
+
+## Q-041 | stage: 21 | date: 2026-09-15T00:00:00Z
+- What is ambiguous: Third-party-verifiable conformance (the xpaysh
+  `conformance-fixtures` precedent: "a manifest is a promise" applies to wire
+  claims too). The repo pins crypto/compiler goldens in `tests/GOLDEN/` but
+  nothing pins the MCP wire bytes or the UCP discovery documents a stranger's
+  agent actually speaks to. No stage spec covers fixtures; PRD S6.3 pins tool
+  *semantics*, not a fixture policy. Decisions needed: (i) fixture scope and
+  equality rule; (ii) what origin the discovery goldens pin (manifest URLs
+  embed the request origin, so byte-exact goldens pin `http://testserver`);
+  (iii) `tools/list` pins all 22 schemas (large, deliberately brittle);
+  (iv) `serverInfo.version` pins the installed package version (breaks
+  deliberately on release bumps); (v) the manifest's UCP `version:
+  "2026-01-11"` (announcement version, DECISION-026) vs the `2026-08-25`
+  binding version inside tool envelopes — restate or change?
+- Options considered: (a) byte-exact canonical-JSON goldens under
+  `tests/GOLDEN/conformance/` for the deterministic surfaces (initialize,
+  tools/list, search/lookup/get_product incl. miss shapes, unknown-tool
+  isError, legacy-shape rejection, missing-catalog `-32602`, both discovery
+  manifests) over a fixed 2-item seeded catalog, plus structural
+  origin-parameterized assertions alongside (all manifest URLs start with the
+  request origin) so the portable claim survives outside `testserver`;
+  (b) subset-match fixtures only — rejected, weaker than the repo's golden
+  discipline and blind to envelope drift; (c) change the manifest version to
+  `2026-08-25` — rejected, out of scope: the manifest version predates this
+  slice (DECISION-026) and no spec requires them to match; recorded here as
+  known, not changed.
+- Blocked since: 2026-09-15T00:00:00Z
+- RESOLUTION (2026-09-15): Option (a), operator-authorised (slice picked
+  2026-09-15). No new identifiers of any kind: no routes, tools, codes,
+  scopes, or migrations — test files + fixture files only, so REGISTRY.json
+  is untouched. Fixture updates on future tool/version changes follow golden
+  discipline (the vector is right only after human review; code drift breaks
+  the build deliberately). Deviations from upstream specs asserted by these
+  fixtures are exactly the Q-040 set (`meta` optional, no batch cap, SKU as
+  identifier, text-content envelope) — restated, not reopened.

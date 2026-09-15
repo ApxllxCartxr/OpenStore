@@ -1,0 +1,89 @@
+{
+  "description": "UCP discovery manifest.",
+  "expect_body": {
+    "auth": {
+      "authorization_server": "http://testserver/.well-known/oauth-authorization-server",
+      "scopes_supported": [
+        "catalog:read",
+        "cart:write",
+        "checkout:initiate",
+        "checkout:confirm"
+      ],
+      "type": "oauth2"
+    },
+    "authorization": {
+      "evidence": {
+        "bundle_endpoint": "/orders/{checkout_id}/evidence",
+        "jwks": "http://testserver/.well-known/poai-jwks.json",
+        "poai_version": "0.1"
+      },
+      "policy_manifest": "http://testserver/.well-known/agent-policy.json",
+      "scheme": "native_webauthn"
+    },
+    "business": {
+      "id": "gelateria-milano",
+      "name": "Gelateria Milano"
+    },
+    "payment_handlers": [
+      {
+        "currencies": [
+          "INR"
+        ],
+        "flow": "hosted_payment_link",
+        "id": "razorpay"
+      }
+    ],
+    "services": [
+      {
+        "capabilities": [
+          {
+            "id": "dev.ucp.shopping.checkout",
+            "operations": [
+              "create_cart",
+              "update_cart",
+              "checkout_initiate",
+              "checkout_confirm",
+              "get_order"
+            ]
+          },
+          {
+            "feed": "http://testserver/.well-known/agent-campaigns.json",
+            "id": "dev.ucp.shopping.discount",
+            "operations": [
+              "list_campaigns",
+              "get_campaign"
+            ]
+          },
+          {
+            "id": "dev.ucp.shopping.catalog.search",
+            "operations": [
+              "search_catalog"
+            ]
+          },
+          {
+            "id": "dev.ucp.shopping.catalog.lookup",
+            "operations": [
+              "lookup_catalog",
+              "get_product"
+            ]
+          }
+        ],
+        "id": "dev.ucp.shopping",
+        "transports": [
+          {
+            "endpoint": "http://testserver/agent/mcp",
+            "type": "mcp"
+          }
+        ]
+      }
+    ],
+    "version": "2026-01-11"
+  },
+  "expect_status": 200,
+  "name": "ucp_manifest",
+  "request": {
+    "body": null,
+    "method": "GET",
+    "path": "/.well-known/ucp"
+  }
+}

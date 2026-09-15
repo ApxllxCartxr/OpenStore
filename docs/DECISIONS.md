@@ -449,6 +449,17 @@
   MCP field away (`resolve_policy` + `compute_policy_exposure`,
   `core/database.py:273) when its turn comes.
 
+## DECISION-039 | date: 2026-09-14T00:00:00Z | stage: 19
+- Anonymous storefront-lite page (mirrors Q-039 RESOLUTION; flagship webchat
+  slice A, not the full buyer-in-browser — browser checkout needs a
+  browser-safe auth design first, deferred with its own future Q-entry).
+- `GET /chat` (REGISTRY-registered, ungated) serves zero-dependency
+  `surfaces/static/chat.html`: same-origin catalog browse + client-side
+  search, live signed-offer feed, deterministic related-SKU chips, evidence
+  viewer links, studio links. 503 from the gated feeds renders as an
+  explicit not-ready message (never a silent empty page). The Stage-1
+  `storefront.html` stub at `/` is left untouched.
+
 ## DECISION-040 | date: 2026-09-15T00:00:00Z | stage: 20
 - UCP MCP catalog binding aliases (mirrors Q-040 RESOLUTION; the README-named
   next interop slice after wire conformance).
@@ -464,13 +475,12 @@
   identifier. Manifest gains `dev.ucp.shopping.catalog.search` /
   `.catalog.lookup`; tool count 20 -> 22.
 
-## DECISION-039 | date: 2026-09-14T00:00:00Z | stage: 19
-- Anonymous storefront-lite page (mirrors Q-039 RESOLUTION; flagship webchat
-  slice A, not the full buyer-in-browser — browser checkout needs a
-  browser-safe auth design first, deferred with its own future Q-entry).
-- `GET /chat` (REGISTRY-registered, ungated) serves zero-dependency
-  `surfaces/static/chat.html`: same-origin catalog browse + client-side
-  search, live signed-offer feed, deterministic related-SKU chips, evidence
-  viewer links, studio links. 503 from the gated feeds renders as an
-  explicit not-ready message (never a silent empty page). The Stage-1
-  `storefront.html` stub at `/` is left untouched.
+## DECISION-041 | date: 2026-09-15T00:00:00Z | stage: 21
+- Third-party-verifiable conformance fixtures (mirrors Q-041 RESOLUTION).
+- Byte-exact canonical-JSON goldens under `tests/GOLDEN/conformance/` for
+  the deterministic wire surfaces (initialize, tools/list, catalog tools
+  incl. miss shapes, error envelopes, both discovery manifests) over a fixed
+  2-item seeded catalog, plus origin-parameterized structural assertions so
+  the claim travels beyond `http://testserver`. No new identifiers;
+  REGISTRY.json untouched. Manifest UCP version `2026-01-11` recorded as
+  known, not changed.
