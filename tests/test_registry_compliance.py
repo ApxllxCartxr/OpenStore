@@ -143,6 +143,8 @@ def test_registry_mcp_tools_complete():
     expected = {
         "search_products",
         "get_product",
+        "search_catalog",
+        "lookup_catalog",
         "create_cart",
         "update_cart",
         "checkout_initiate",

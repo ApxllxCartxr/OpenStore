@@ -108,11 +108,11 @@ class TestInitialize:
 
 
 class TestToolsList:
-    def test_lists_all_twenty_tools_with_schemas(self, client):
+    def test_lists_all_twenty_two_tools_with_schemas(self, client):
         r = _rpc(client, "tools/list")
         assert r.status_code == 200
         tools = r.json()["result"]["tools"]
-        assert len(tools) == 20
+        assert len(tools) == 22
         names = [t["name"] for t in tools]
         assert names == sorted(names)
         assert set(names) == set(TOOL_NAMES)
@@ -150,12 +150,14 @@ class TestToolsCall:
         assert tool["success"] is False
         assert tool["error"]["reason_code"] == "auth.unknown_tool"
 
-    def test_missing_required_field_is_invalid_params(self, client):
+    def test_missing_identifier_is_business_error(self, client):
+        # Q-040: get_product accepts {sku} | {id} | {catalog: {id}}, so {}
+        # passes envelope validation and answers isError, not -32602.
         r = _rpc(client, "tools/call", {"name": "get_product", "arguments": {}})
         assert r.status_code == 200
-        body = r.json()
-        assert body["error"]["code"] == -32602
-        assert "sku" in body["error"]["message"]
+        result, tool = _tool_text(r.json())
+        assert result["isError"] is True
+        assert tool["error"]["reason_code"] == "catalog.sku_not_found"
 
     def test_scoped_tool_without_scope_is_business_error(self, client):
         """The scope gate raises CommerceError outside the per-tool try — the

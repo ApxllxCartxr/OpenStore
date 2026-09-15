@@ -11,7 +11,7 @@ uv run openstore init --merchant "Gelateria Milano" --currency INR
 uv run openstore serve gelateria.yaml
 ```
 
-Three commands, **no API keys required** — migrations run on first boot and the store comes up serving a discovery manifest, a UCP capability manifest, an agent-readable catalog, 20 MCP commerce tools over JSON-RPC wire-conformant `initialize`/`tools/list`/`tools/call`, checkout, hold/cancel, a signed campaign feed, and a cryptographic evidence trail for every rupee that moves. Add Razorpay test-mode keys when you want money to actually move.
+Three commands, **no API keys required** — migrations run on first boot and the store comes up serving a discovery manifest, a UCP capability manifest, an agent-readable catalog, 22 MCP commerce tools over JSON-RPC wire-conformant `initialize`/`tools/list`/`tools/call`, checkout, hold/cancel, a signed campaign feed, and a cryptographic evidence trail for every rupee that moves. Add Razorpay test-mode keys when you want money to actually move.
 
 **Jump to:** [Why this exists](#why-this-exists) · [What it does](#what-it-does) · [Trust contract](#the-trust-contract) · [Growth](#growth-the-revenue-half) · [Demo](#the-demo) · [How it works](#how-it-works) · [Receipt](#the-receipt-proof-of-authorized-intent-poai) · [Friction audit](#friction-audit--is-it-friction-free) · [Real stores](#how-far-from-a-real-merchant-store) · [Any agent](#how-far-from-any-agent-on-the-internet) · [Getting started](#getting-started) · [What's real / what's next](#whats-real--whats-next)
 
@@ -51,7 +51,7 @@ Where it overlaps, it interoperates rather than competes. The sidecar serves MCP
 
 Three jobs, one sidecar:
 
-1. **Makes any merchant transactable by an AI buyer, end to end** — discovery manifest, agent-readable catalog with signed attestations, 20 MCP tools (JSON-RPC wire-conformant, so stock clients like MCP Inspector work), deterministic checkout, hold/cancel, Razorpay payment links, webhooks with reconciliation.
+1. **Makes any merchant transactable by an AI buyer, end to end** — discovery manifest, agent-readable catalog with signed attestations, 22 MCP tools (JSON-RPC wire-conformant, so stock clients like MCP Inspector work), deterministic checkout, hold/cancel, Razorpay payment links, webhooks with reconciliation.
 2. **Grows the merchant's revenue, not just processes sales** — aggregate analytics, human-gated campaign orchestration, deterministic cross-sell, a read-only merchant bot, and an autonomous growth loop that drafts (never activates) campaigns for stalled SKUs.
 3. **Leaves behind a receipt no one can dispute** — every completed order assembles a 9-section PoAI evidence bundle a third party can verify offline with nothing but a browser.
 
@@ -123,7 +123,7 @@ The full recording script, beat by beat, is in [`docs/DEMO_SCRIPT.md`](docs/DEMO
 ```
 ACT 0  uv run openstore init && uv run openstore serve
        → a store that didn't exist 60 seconds ago is serving
-         /.well-known/agent-commerce.json, /.well-known/ucp, a catalog feed, and 20 MCP tools
+         /.well-known/agent-commerce.json, /.well-known/ucp, a catalog feed, and 22 MCP tools
 
 ACT 1  Human signs an IntentPolicy with a passkey:
        "₹2,000/month · ≤₹500 per order · Gelateria only · vegan items only"
@@ -167,7 +167,7 @@ flowchart TB
 
     subgraph L3["Layer 3 — Execution Server (deterministic, holds keys)"]
         direction TB
-        MCP["MCP server · 20 tools"] --> API["Commerce Core API"]
+        MCP["MCP server · 22 tools"] --> API["Commerce Core API"]
         WK["/.well-known/* manifests"] --> API
         Studio["Policy Studio · Campaign Studio"] --> API
         API --> Compiler["Intent Compiler<br/>check 0 + checks 1–12"]
@@ -294,7 +294,7 @@ No. Honestly, not yet. The money path is overbuilt on purpose; everything around
 | **Merchant (onboarding)** | `init` + `serve`, migrations on boot, studios served, no keys needed to explore | Needs public HTTPS origin, Postgres for prod, Razorpay + Discord + LLM secrets, WebAuthn `rp_id`/origin binding (SID-5 fails boot loud on mismatch). No hosted SaaS — you run the sidecar. |
 | **Merchant (catalog)** | YAML works in 60 seconds; Shopify read-only sync works against a real dev store; compiler/agents never touch the source directly | Real inventory also lives in WooCommerce / Postgres / Tally — those adapters don't exist yet. No stock sync, no order write-back, no GST invoice, no Shiprocket/Delhivery, no COD, no returns/RTO loop. |
 | **Buyer (customer)** | Talk in Discord, tap a passkey, pay a Razorpay link, cancel with one token — or browse anonymously on mobile at `/chat` | Full buyer-in-browser checkout needs a browser-safe auth design first (deferred). No WhatsApp, no Google AI Mode surface. Payment leaves the conversation (hosted link, out-of-band). Passkeys need HTTPS + a compatible device. |
-| **Agent builder** | Manifests + OAuth `client_credentials` + 20 tools with `inputSchema` discovery + signed offer feed | UCP REST binding, AP2 wire mandates, and open enrollment (DCR) are still ahead — see below. |
+| **Agent builder** | Manifests + OAuth `client_credentials` + 22 tools with `inputSchema` discovery + signed offer feed | UCP REST binding, AP2 wire mandates, and open enrollment (DCR) are still ahead — see below. |
 | **Operator** | Docker Compose + Postgres, `/health/live` + `/health/ready`, Prometheus metrics, runbook | One process + one DB per merchant. 100 merchants = 100 processes — no orchestrator yet. Live-mode traffic untested; sustained load, key rotation, and backup-restore are runbook text, not drilled practice. |
 
 None of this is hidden. The next two sections put distances on the two questions that matter.
@@ -329,20 +329,20 @@ Discoverable today, interoperable with work. The distinction matters: a third-pa
 
 - `/.well-known/agent-commerce.json` (endpoints, OAuth scopes, evidence + campaign feeds), `/.well-known/ucp` (2 real capabilities), `/.well-known/agent-campaigns.json` (signed offers), `/agent/catalog` (attested items + live offers), `/.well-known/poai-jwks.json` (verification keys).
 - OAuth 2.1 `client_credentials` at `/oauth/token` with ES256, scope-gated tools (`catalog:read`, `cart:write`, `checkout:initiate`, `checkout:confirm`).
-- 20 tools behind one JSON-RPC 2.0 endpoint: `initialize` handshake (pinned `2025-06-18`), `tools/list` with per-tool `inputSchema`, `tools/call` with `isError` content carrying the closed-set reason codes. Point MCP Inspector at `/agent/mcp` — it works.
+- 22 tools behind one JSON-RPC 2.0 endpoint: `initialize` handshake (pinned `2025-06-18`), `tools/list` with per-tool `inputSchema`, `tools/call` with `isError` content carrying the closed-set reason codes. Point MCP Inspector at `/agent/mcp` — it works.
 
 **What stops at "any agent":**
 
 | Gap | Why it blocks | Distance |
 |---|---|---|
 | UCP REST binding | Google/Merchant Center agents expect `POST /checkout-sessions`, `PUT /checkout-sessions/{id}`, `/complete`, `UCP-Agent` header, `continue_url` handoff, payment-handler negotiation, SLOs (p50 ≤1s, 95% availability, TLS 1.3). None of that exists yet. | 6–10 weeks + Merchant Center feed work + conformance suite. This is the price of showing up inside AI Mode / Gemini. |
-| UCP MCP binding names | UCP's MCP catalog tools are `search_catalog` / `lookup_catalog` / `get_product` with `meta.ucp-agent` + `ucp` response envelopes. OpenStore uses `search_products` with a bespoke shape. | Small once wire conformance lands: alias + envelope. |
+| UCP MCP binding names | ✅ Landed (Stage 20): `search_catalog` / `lookup_catalog` aliases with `meta.ucp-agent` tolerance + `ucp` response envelopes, SKU as the canonical identifier, advertised in `/.well-known/ucp`. Legacy `search_products` kept for the internal buyer. | Done. |
 | AP2 adapter | IntentPolicy ≈ Intent Mandate and per-cart assertion ≈ Cart Mandate *structurally*, but there are no VDCs, no merchant-signed Checkout JWT, no Payment Mandate / Credential Provider / MPP receipt flow, no Trusted Surface spec. An AP2 wallet can't verify anything here. | Future work: adapter that mints/verifies real mandates alongside PoAI, not instead of it. |
 | Open enrollment | Today's third-party path is `federation-register-buyer` run by the merchant operator + secrets pasted into `.env`. No dynamic client registration (RFC 7591), and `/oauth/authorize` is advertised but unimplemented — only `client_credentials` works. | 2–3 weeks for DCR + authorize-code loop; plus abuse/rate-limit thinking before opening it to the world. |
 | Payment-handler tokens | OpenStore pays via hosted Razorpay link (human clicks out-of-band, agent never holds credentials — good security, broken agentic loop). UCP/Google expect tokenized instruments (Google Pay etc.) posted into the checkout session. | Tied to UCP REST binding above; also a product call about how much delegation the trust model allows. |
 | Fulfillment | No shipping address/options, no `fulfillment` capability, no order tracking. UCP checkout requires them. | With REST binding; needs the merchant's real shipping config, not stub data. |
 
-Next interop slice after this one: UCP MCP binding aliases (`search_catalog` / `lookup_catalog` envelopes) — small once the wire path exists, since the handlers are already underneath.
+Next interop slice after this one: UCP REST `/checkout-sessions` binding — the price of showing up inside AI Mode / Gemini (see row above).
 
 ---
 
@@ -409,7 +409,7 @@ uv run openstore merchant-bot configs/gelateria.yaml configs/chai.yaml
 ### Running the checks
 
 ```bash
-uv run pytest -q                        # 684 tests
+uv run pytest -q                        # 697 tests
 uv run mypy src/                        # 51 source files, clean
 uv run ruff check src/ tests/
 uv run python scripts/registry_diff.py  # must print nothing, exit 0
@@ -461,13 +461,13 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 
 ## What's real / what's next
 
-Built by one person with an AI agent across nineteen stages. The honest ledger:
+Built by one person with an AI agent across twenty stages. The honest ledger:
 
 **Real and tested:**
 - ✅ The full money path — compiler, ledger, idempotency, hold/cancel, webhooks, reconciliation
 - ✅ WebAuthn ceremonies, OAuth with signature-pinned validation, per-merchant signing keys
 - ✅ PoAI bundles + offline verifier + tamper detection, with golden fixtures and two bundles in-repo
-- ✅ 20 MCP tools, discovery manifests, catalog attestations, campaign pipeline
+- ✅ 22 MCP tools, discovery manifests, catalog attestations, campaign pipeline
 - ✅ **Shopify read-only catalog (Stage 18)** — `surfaces/shopify_catalog.py` mints
   Admin tokens at runtime (never persisted), pages `products.json` (40-page cap),
   and normalizes variants to the exact YAML item shape the compiler already trusts.
@@ -479,6 +479,11 @@ Built by one person with an AI agent across nineteen stages. The honest ledger:
   live signed-offer feed, deterministic related-SKU chips, evidence viewer
   links, studio links. No payment input, no new scopes; gated feeds render
   their 503 as a not-ready message instead of a silent empty page.
+- ✅ **UCP catalog aliases (Stage 20)** — `search_catalog` / `lookup_catalog`
+  speak the UCP MCP binding (`meta.ucp-agent` tolerated, `ucp` envelope with
+  paise-exact INR prices, SKU as the identifier, misses as success +
+  `not_found` messages), advertised in `/.well-known/ucp`. `get_product`
+  answers all three identifier shapes.
 - ✅ **MCP wire conformance (Stage 17)** — `POST /agent/mcp` speaks JSON-RPC 2.0
   (`initialize` with version negotiation, `tools/list` with per-tool
   `inputSchema`, `tools/call` with `isError` content). The legacy
@@ -486,7 +491,7 @@ Built by one person with an AI agent across nineteen stages. The honest ledger:
   federated buyer was migrated to the wire path in the same commit, so the
   subprocess federation suite exercises it end to end. Point MCP Inspector at
   `/agent/mcp` — it lists and calls.
-- ✅ Red-team and sentinel suites green — **684 tests**, `mypy` and `ruff` clean
+- ✅ Red-team and sentinel suites green — **697 tests**, `mypy` and `ruff` clean
 - ✅ **Chat-native purchase flow** — a live `discord.Client` runs in the server's
   lifespan; a buyer DMs the bot, gets a `handoffs`-table signing link if no policy exists,
   auto-resumes the errand on signature, gets the Razorpay pay link and hold/cancel status

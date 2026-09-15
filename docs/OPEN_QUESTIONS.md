@@ -975,3 +975,52 @@
   evidence/studio links; no mutations, no new scopes, no new reason codes,
   so `registry_diff.py` is unaffected. Checkout stays on the buyer agent /
   studios; the page never takes payment input.
+
+## Q-040 | stage: 20 | date: 2026-09-15T00:00:00Z
+- What is ambiguous: UCP MCP catalog binding aliases (README "How far from any
+  agent": UCP's MCP catalog tools are `search_catalog` / `lookup_catalog` /
+  `get_product` with `meta.ucp-agent` + `ucp` response envelopes; OpenStore
+  uses `search_products` with a bespoke shape; DECISION-036 deferred vocabulary
+  aliases until after wire conformance). No stage spec covers the alias
+  cutover; PRD S6.3 pins tool semantics, not the UCP vocabulary. R0.2:
+  `search_catalog` / `lookup_catalog` are new identifiers (`mcp_tools`,
+  `TOOL_NAMES`, `TOOL_SCHEMAS`, dispatch, manifest operations). Verified
+  2026-09-15 against the UCP Catalog MCP binding
+  (ucp.dev/2026-08-25/specification/shopping/catalog/mcp/): tools
+  `search_catalog` (Search) / `lookup_catalog` + `get_product` (Lookup); every
+  request carries arguments `{meta: {ucp-agent: {profile}}, catalog: {...}}`;
+  responses carry a required `ucp` envelope (`{version, capabilities}`) plus
+  `products[]` (search/lookup) or `product` (get_product); lookup partial
+  success returns found products + info/`not_found` messages at transport
+  success level; implementations MAY support SKU as a secondary identifier;
+  SHOULD accept >= 10 ids per lookup, MAY enforce a max with `-32602`.
+- Options considered: (a) alias + envelope inside the existing text-content
+  wire path: `search_catalog` / `lookup_catalog` as thin adapters over
+  `search_catalog_items` / `get_catalog_item` (same handlers underneath, R0.9),
+  SKU as the canonical identifier, `meta` tolerated-and-ignored (anonymous
+  catalog reads predate UCP; failing closed on missing `meta` would break
+  existing clients), `context` / `filters` / `signals` / `attribution`
+  accepted-and-ignored (provisional signals per spec; enforcement stays at
+  checkout via R0.8), lookup misses answer success + `messages` (never
+  `isError`), no batch cap (SHOULD >= 10 trivially satisfied; MAY-cap
+  deferred), `ucp` envelope version `2026-08-25`, `get_product` extended to
+  `{sku}` | `{id}` | `{catalog: {id}}` with a superset response
+  `{item, product, ucp}`; (b) a separate `/ucp/mcp` endpoint — rejected, the
+  manifest advertises MCP transport at `/agent/mcp` and a second endpoint
+  splits the tool surface; (c) `structuredContent` responses — rejected, the
+  wire path (DECISION-036) standardised on text content + `isError` and every
+  client parses it; the UCP envelope rides inside the JSON text.
+- Blocked since: 2026-09-15T00:00:00Z
+- RESOLUTION (2026-09-15): Option (a), operator-authorised (slice picked
+  2026-09-15; wire conformance already landed). Add `search_catalog` +
+  `lookup_catalog` to REGISTRY `mcp_tools` alongside the implementation (Q-008
+  sequencing: together, never before). No new reason codes (misses are
+  messages, not rejections; malformed ids reuse `internal_error`), no new
+  routes/scopes. `search_catalog` inputSchema required `[]`;
+  `lookup_catalog` required `["catalog"]`. `get_product` inputSchema required
+  `[]` (was `["sku"]`) — `{}` now answers `isError` `catalog.sku_not_found`
+  instead of envelope `-32602`; the pinned stage-17 test is updated in the
+  same commit. The UCP manifest gains `dev.ucp.shopping.catalog.search`
+  (`[search_catalog]`) and `dev.ucp.shopping.catalog.lookup`
+  (`[lookup_catalog, get_product]`); the stage-06 capability test is updated.
+  The internal buyer keeps `search_products` (no client change).

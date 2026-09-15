@@ -118,14 +118,16 @@ def build_agent_commerce_manifest(config: Settings, origin: str) -> dict[str, An
 
 
 def build_ucp_manifest(config: Settings, origin: str) -> dict[str, Any]:
-    """UCP discovery manifest (DECISION-026).
+    """UCP discovery manifest (DECISION-026, extended DECISION-040).
 
     UCP (Google/Shopify, announced 2026-01-11) publishes business capabilities at
     a fixed well-known path so agents need no hardcoded integration. Its model
     maps almost 1:1 onto what this sidecar already serves, so this declares only
     capabilities that genuinely work — `dev.ucp.shopping.checkout` over the MCP
-    cart/checkout tools, and `dev.ucp.shopping.discount` over the signed campaign
-    feed. Fulfilment and order-management capabilities are deliberately absent:
+    cart/checkout tools, `dev.ucp.shopping.discount` over the signed campaign
+    feed, and (stage 20) `dev.ucp.shopping.catalog.search` /
+    `dev.ucp.shopping.catalog.lookup` over the MCP catalog aliases.
+    Fulfilment and order-management capabilities are deliberately absent:
     the sidecar does not implement them, and naming them would repeat exactly the
     mistake the removed ACP entry made.
     """
@@ -156,6 +158,14 @@ def build_ucp_manifest(config: Settings, origin: str) -> dict[str, Any]:
                         "id": "dev.ucp.shopping.discount",
                         "operations": ["list_campaigns", "get_campaign"],
                         "feed": f"{origin}/.well-known/agent-campaigns.json",
+                    },
+                    {
+                        "id": "dev.ucp.shopping.catalog.search",
+                        "operations": ["search_catalog"],
+                    },
+                    {
+                        "id": "dev.ucp.shopping.catalog.lookup",
+                        "operations": ["lookup_catalog", "get_product"],
                     },
                 ],
             }

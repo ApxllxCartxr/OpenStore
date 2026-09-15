@@ -86,7 +86,12 @@ class TestAgentCommerceManifest:
         service = data["services"][0]
         assert service["id"] == "dev.ucp.shopping"
         capability_ids = {c["id"] for c in service["capabilities"]}
-        assert capability_ids == {"dev.ucp.shopping.checkout", "dev.ucp.shopping.discount"}
+        assert capability_ids == {
+            "dev.ucp.shopping.checkout",
+            "dev.ucp.shopping.discount",
+            "dev.ucp.shopping.catalog.search",
+            "dev.ucp.shopping.catalog.lookup",
+        }
         # Fulfilment / order management are NOT implemented and must not appear.
         assert "dev.ucp.shopping.fulfillment" not in capability_ids
         # Every declared operation must be a real MCP tool (R0.2).

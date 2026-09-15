@@ -449,6 +449,21 @@
   MCP field away (`resolve_policy` + `compute_policy_exposure`,
   `core/database.py:273) when its turn comes.
 
+## DECISION-040 | date: 2026-09-15T00:00:00Z | stage: 20
+- UCP MCP catalog binding aliases (mirrors Q-040 RESOLUTION; the README-named
+  next interop slice after wire conformance).
+- New tools `search_catalog` / `lookup_catalog` (REGISTRY-registered, ungated
+  like the reads they alias) as thin adapters over `search_catalog_items` /
+  `get_catalog_item`; `get_product` accepts `{sku}` | `{id}` |
+  `{catalog: {id}}` and answers a superset `{item, product, ucp}`.
+- UCP shape per the verified 2026-08-25 binding: arguments
+  `{meta, catalog}`, `meta` tolerated-and-ignored, `context`/`filters`/
+  `signals`/`attribution` accepted-and-ignored (R0.8: enforcement at
+  checkout), lookup misses are success + `messages` (never `isError`), no
+  batch cap, `ucp` envelope version `2026-08-25`, SKU as the canonical
+  identifier. Manifest gains `dev.ucp.shopping.catalog.search` /
+  `.catalog.lookup`; tool count 20 -> 22.
+
 ## DECISION-039 | date: 2026-09-14T00:00:00Z | stage: 19
 - Anonymous storefront-lite page (mirrors Q-039 RESOLUTION; flagship webchat
   slice A, not the full buyer-in-browser — browser checkout needs a

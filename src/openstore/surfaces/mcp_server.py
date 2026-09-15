@@ -1,4 +1,4 @@
-# OpenStore surfaces — MCP server (20 tools, closed set per PRD §6 / REGISTRY.json)
+# OpenStore surfaces — MCP server (22 tools, closed set per PRD §6 / REGISTRY.json)
 # Per PRD S6.3 — thin adapters over core/api.py + WebAuthn RP.
 # Transport: JSON-RPC 2.0 wire protocol, MCP 2025-06-18 (DECISION-036, hard
 # cutover). POST /agent/mcp accepts ONLY the wire envelope; the legacy
@@ -71,7 +71,156 @@ def get_product(
                 success=False,
                 error={"reason_code": "catalog.sku_not_found", "message": f"SKU {sku} not found"},
             )
-        return MCPToolResult(success=True, data={"item": item})
+        return MCPToolResult(
+            success=True,
+            data={
+                "item": item,
+                "product": _to_ucp_product(item),
+                "ucp": _ucp_envelope("dev.ucp.shopping.catalog.lookup"),
+            },
+        )
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
+# ---------------------------------------------------------------------------
+# UCP MCP catalog binding aliases (Q-040 / DECISION-040, stage 20).
+# Verified 2026-09-15 against ucp.dev/2026-08-25/specification/shopping/
+# catalog/mcp/: tools search_catalog (Search) / lookup_catalog + get_product
+# (Lookup); arguments {meta: {ucp-agent: ...}, catalog: {...}}; responses
+# carry a required ucp envelope. Thin adapters only (R0.9): the handlers
+# underneath are the same search_catalog_items / get_catalog_item the legacy
+# search_products / get_product tools already trust. SKU is the canonical
+# identifier (a MAY-supported secondary identifier per the binding).
+# ---------------------------------------------------------------------------
+
+UCP_CATALOG_VERSION = "2026-08-25"
+
+
+def _ucp_envelope(capability: str) -> dict[str, Any]:
+    """Required UCP metadata block for catalog responses."""
+    return {
+        "version": UCP_CATALOG_VERSION,
+        "capabilities": {capability: [{"version": UCP_CATALOG_VERSION}]},
+    }
+
+
+def _to_ucp_product(item: dict[str, Any]) -> dict[str, Any]:
+    """Map one normalized catalog item onto a UCP product.
+
+    Money is paise-exact integers (DECISION-013); currency is INR-only
+    (DECISION-015). Fields with no source data (media, options, rating) are
+    omitted rather than invented (R0.3)."""
+    price = {"amount": int(item["unit_minor"]), "currency": "INR"}
+    return {
+        "id": item["sku"],
+        "title": item["name"],
+        "description": {"plain": item.get("description", "")},
+        "price_range": {"min": dict(price), "max": dict(price)},
+        "variants": [
+            {
+                "id": item["sku"],
+                "sku": item["sku"],
+                "title": item["name"],
+                "price": price,
+                "availability": {"available": True},
+                "tags": list(item.get("tags", [])),
+            }
+        ],
+    }
+
+
+def search_catalog(
+    config: Settings,
+    arguments: dict[str, Any],
+) -> MCPToolResult:
+    """MCP tool: search_catalog (UCP Search alias over search_products).
+
+    Accepts the UCP shape ({meta, catalog: {query, pagination: {limit}}}) and
+    the legacy flat shape ({query, tags, limit}); catalog.* wins on conflict.
+    meta / context / filters / signals / attribution are accepted-and-ignored
+    (Q-040): provisional buyer signals per the binding, never authoritative —
+    enforcement stays at checkout (R0.8)."""
+    try:
+        from openstore.surfaces.catalog import search_catalog_items
+
+        catalog = arguments.get("catalog")
+        catalog_obj = catalog if isinstance(catalog, dict) else {}
+        query = catalog_obj.get("query", arguments.get("query", ""))
+        pagination = catalog_obj.get("pagination")
+        pagination_obj = pagination if isinstance(pagination, dict) else {}
+        limit = pagination_obj.get("limit", arguments.get("limit", 20))
+        items = search_catalog_items(
+            config, query or "", tags=arguments.get("tags"), limit=limit
+        )
+        products = [_to_ucp_product(item) for item in items]
+        return MCPToolResult(
+            success=True,
+            data={
+                "ucp": _ucp_envelope("dev.ucp.shopping.catalog.search"),
+                "products": products,
+            },
+        )
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
+def lookup_catalog(
+    config: Settings,
+    arguments: dict[str, Any],
+) -> MCPToolResult:
+    """MCP tool: lookup_catalog (UCP Lookup batch over get_catalog_item).
+
+    Arguments {meta, catalog: {ids: [...]}}. Unknown ids are partial success
+    per the binding: found products plus info/not_found messages at transport
+    success level — never isError (a miss is a business outcome, not a
+    transport failure). No batch cap (Q-040)."""
+    try:
+        from openstore.surfaces.catalog import get_catalog_item
+
+        catalog = arguments.get("catalog")
+        catalog_obj = catalog if isinstance(catalog, dict) else {}
+        ids = catalog_obj.get("ids")
+        if not isinstance(ids, list):
+            return MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "internal_error",
+                    "message": "lookup_catalog requires catalog.ids: string[]",
+                },
+            )
+        products: list[dict[str, Any]] = []
+        messages: list[dict[str, Any]] = []
+        for raw_id in ids:
+            if not isinstance(raw_id, str):
+                messages.append(
+                    {"type": "info", "code": "not_found", "content": str(raw_id)}
+                )
+                continue
+            item = get_catalog_item(config, raw_id)
+            if item is None:
+                messages.append({"type": "info", "code": "not_found", "content": raw_id})
+                continue
+            products.append(_to_ucp_product(item))
+        data: dict[str, Any] = {
+            "ucp": _ucp_envelope("dev.ucp.shopping.catalog.lookup"),
+            "products": products,
+        }
+        if messages:
+            data["messages"] = messages
+        return MCPToolResult(success=True, data=data)
     except CommerceError as e:
         return MCPToolResult(
             success=False, error={"reason_code": e.reason_code, "message": e.message}
@@ -982,6 +1131,8 @@ def create_policy_handoff(
 TOOL_NAMES = frozenset(
     {
         "search_products",
+        "search_catalog",
+        "lookup_catalog",
         "get_product",
         "create_cart",
         "update_cart",
@@ -1042,8 +1193,26 @@ def handle_mcp_request(
             tags=arguments.get("tags"),
             limit=arguments.get("limit", 20),
         )
+    elif tool_name == "search_catalog":
+        result = search_catalog(config, arguments=arguments)
+    elif tool_name == "lookup_catalog":
+        result = lookup_catalog(config, arguments=arguments)
     elif tool_name == "get_product":
-        result = get_product(config, sku=arguments["sku"])
+        # Legacy {sku} plus UCP {id} / {catalog: {id}} (Q-040). Missing
+        # identifier is a business rejection, not an envelope error.
+        catalog_arg = arguments.get("catalog")
+        catalog_obj = catalog_arg if isinstance(catalog_arg, dict) else {}
+        sku = arguments.get("sku", arguments.get("id", catalog_obj.get("id")))
+        if not sku:
+            result = MCPToolResult(
+                success=False,
+                error={
+                    "reason_code": "catalog.sku_not_found",
+                    "message": "Missing product identifier (sku | id | catalog.id)",
+                },
+            )
+        else:
+            result = get_product(config, sku=sku)
     elif tool_name == "create_cart":
         result = create_cart(
             config=config,
@@ -1269,8 +1438,19 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         ),
     },
     "get_product": {
-        "description": "Fetch one catalog item by SKU.",
-        "inputSchema": _obj({"sku": _STR}, ["sku"]),
+        "description": "Fetch one catalog item by SKU (legacy {sku}) or UCP identifier ({id} | {catalog: {id}}); answers {item, product, ucp}.",
+        "inputSchema": _obj({"sku": _STR, "id": _STR, "catalog": _OBJ, "meta": _OBJ}, []),
+    },
+    "search_catalog": {
+        "description": "UCP catalog search alias over the merchant catalog; accepts {meta, catalog: {query, pagination}} or the flat {query, tags, limit} shape.",
+        "inputSchema": _obj(
+            {"meta": _OBJ, "catalog": _OBJ, "query": _STR, "tags": _ARR_STR, "limit": _INT},
+            [],
+        ),
+    },
+    "lookup_catalog": {
+        "description": "UCP catalog batch lookup by identifier (SKU); misses answer success + not_found messages, never isError.",
+        "inputSchema": _obj({"meta": _OBJ, "catalog": _OBJ}, ["catalog"]),
     },
     "create_cart": {
         "description": "Compile a cart against the signed policy; returns ALLOW/DENY plus checkout_id.",
