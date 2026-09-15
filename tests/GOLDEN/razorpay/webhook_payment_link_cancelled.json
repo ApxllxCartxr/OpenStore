@@ -1,0 +1,21 @@
+{
+  "description": "payment_link.cancelled webhook body",
+  "source": "Razorpay webhook (test-mode simulation)",
+  "payload": {
+    "event": "payment_link.cancelled",
+    "payload": {
+      "payment_link": {
+        "entity": {
+          "id": "plink_test_456",
+          "reference_id": "test_checkout_002",
+          "amount": 5000,
+          "currency": "INR",
+          "status": "cancelled",
+          "description": "Test cancelled link",
+          "created_at": 1234567890
+        }
+      }
+    },
+    "created_at": 1234567890
+  }
+}

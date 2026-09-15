@@ -1,0 +1,22 @@
+{
+  "description": "payment.failed webhook body",
+  "source": "Razorpay webhook (test-mode simulation)",
+  "payload": {
+    "event": "payment.failed",
+    "payload": {
+      "payment": {
+        "entity": {
+          "id": "pay_test_failed_123",
+          "order_id": "order_test_001",
+          "amount": 10000,
+          "currency": "INR",
+          "status": "failed",
+          "error_code": "BAD_REQUEST_ERROR",
+          "error_description": "Payment failed",
+          "created_at": 1234567890
+        }
+      }
+    },
+    "created_at": 1234567890
+  }
+}

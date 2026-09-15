@@ -1,0 +1,21 @@
+{
+  "description": "payment_link.paid webhook body",
+  "source": "Razorpay webhook (test-mode simulation)",
+  "payload": {
+    "event": "payment_link.paid",
+    "payload": {
+      "payment_link": {
+        "entity": {
+          "id": "plink_test_123",
+          "reference_id": "test_checkout_001",
+          "amount": 10000,
+          "currency": "INR",
+          "status": "paid",
+          "description": "Test payment link",
+          "created_at": 1234567890
+        }
+      }
+    },
+    "created_at": 1234567890
+  }
+}

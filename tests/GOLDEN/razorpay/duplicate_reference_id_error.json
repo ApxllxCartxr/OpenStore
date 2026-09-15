@@ -1,18 +1,52 @@
 {
-  "description": "Duplicate reference_id create error response",
-  "source": "Razorpay /v1/payment_links (POST) with duplicate reference_id",
-  "capture_date": "2026-08-30T00:00:00Z",
-  "error_code": "REFERENCE_ID_ALREADY_EXISTS",
-  "error_description": "A payment link with this reference_id already exists.",
-  "http_status": 400,
-  "body_shape": {
+  "description": "Duplicate reference_id create error",
+  "source": "https://api.razorpay.com/v1/payment_links (POST)",
+  "capture_date": "2026-09-15T05:35:32.500187+00:00",
+  "reference_id": "test_ref_1789450532",
+  "first_request_status": 200,
+  "first_request_body": {
+    "accept_partial": false,
+    "allow_full_payment": false,
+    "amount": 1000,
+    "amount_paid": 0,
+    "cancelled_at": 0,
+    "created_at": 1789450533,
+    "currency": "INR",
+    "customer": [],
+    "description": "Test payment link for constant capture",
+    "expire_by": 0,
+    "expired_at": 0,
+    "first_min_partial_amount": 0,
+    "id": "plink_TcCPLegO1weTNj",
+    "notes": null,
+    "notify": {
+      "email": false,
+      "sms": false,
+      "whatsapp": false
+    },
+    "payment_plan": false,
+    "payments": null,
+    "reference_id": "test_ref_1789450532",
+    "reminder_enable": false,
+    "reminders": [],
+    "short_url": "https://rzp.io/rzp/bBwe8JjN",
+    "status": "created",
+    "updated_at": 1789450533,
+    "upi_link": false,
+    "user_id": "",
+    "whatsapp_link": false
+  },
+  "second_request_status": 400,
+  "second_request_body": {
     "error": {
-      "code": "REFERENCE_ID_ALREADY_EXISTS",
-      "description": "A payment link with this reference_id already exists.",
-      "source": "business",
-      "step": "payment_initiation",
-      "reason": "duplicate_reference_id"
+      "code": "BAD_REQUEST_ERROR",
+      "description": "payment link with given reference_id: test_ref_1789450532 already exists. Please create a payment link with a different reference_id",
+      "metadata": [],
+      "reason": null,
+      "source": null,
+      "step": null
     }
   },
-  "note": "Driver must catch ONLY this pinned error code; never bare Exception."
+  "error_code": "BAD_REQUEST_ERROR",
+  "error_description": "payment link with given reference_id: test_ref_1789450532 already exists. Please create a payment link with a different reference_id"
 }
