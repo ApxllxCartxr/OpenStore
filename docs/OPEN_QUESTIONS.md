@@ -186,8 +186,9 @@
     NOT confirmed: cancel-already-paid 400 (script wrote its note-only
     placeholder — needs a real paid-link cancel) and all 4 webhook bodies
     (script writes synthetic placeholders — need comparison against a real
-    test-mode delivery). Captured files not yet transferred to this checkout;
-    tests/stage05 tail from the capture machine not yet seen. Steps 2–5 of
+    test-mode delivery). Captured files committed on this checkout and the
+    full suite re-verified green against them (711 passed); the commit message
+    placeholder was corrected to the capture date. Steps 2–5 of
     the protocol remain pending; production stays gated.
 
 ## Q-008 | stage: 10 | date: 2026-09-01T14:42:34Z
