@@ -177,6 +177,18 @@
   5) Update this RESOLUTION block with the capture date.
   Until then Stage 5 remains "provisional": no production code path may depend on
   unverified constants.
+  - PARTIAL CAPTURE (2026-09-15T05:35:32Z, networked machine): the script ran
+    clean. Live duplicate-reference rejection carries code BAD_REQUEST_ERROR
+    (description-text match, no usable code) — this confirms the marker-based
+    `is_duplicate_reference_error` driver path and retires any remaining doubt
+    about the Sept-10 fix; the legacy `REFERENCE_ID_ALREADY_EXISTS` string is
+    now confirmed never-sent-live (kept only so old mocks still recover).
+    NOT confirmed: cancel-already-paid 400 (script wrote its note-only
+    placeholder — needs a real paid-link cancel) and all 4 webhook bodies
+    (script writes synthetic placeholders — need comparison against a real
+    test-mode delivery). Captured files not yet transferred to this checkout;
+    tests/stage05 tail from the capture machine not yet seen. Steps 2–5 of
+    the protocol remain pending; production stays gated.
 
 ## Q-008 | stage: 10 | date: 2026-09-01T14:42:34Z
 - What is ambiguous: INV-9 — validate_access_token() (src/openstore/core/oauth.py) parses
