@@ -435,3 +435,27 @@
   `buyer_bot_enabled: false` so it never double-logins beside the demo
   merchants). Write-back (inventory-levels, order webhooks), GST/shipping/
   COD, and multi-currency stay explicitly out of scope.
+
+## DECISION-038 | date: 2026-09-14T00:00:00Z | stage: 18
+- Cross-merchant consolidated budget check (buyer agent sums per-policy
+  exposures + pending carts against a user-declared total before phase two)
+  is accepted as a planning-time guardrail and DEFERRED until after the
+  webchat slice + hiring artifacts. Rationale: it is defense in depth with a
+  bounded residual risk (overshoot ≤ in-flight holds under concurrency;
+  per-merchant hard caps hold regardless), not an enforcement guarantee —
+  read-then-act races, no atomic cross-merchant commit, and merchant-reported
+  exposure is untrusted input (R0.8 cuts both ways). Promoting it to hard
+  needs shared spend state (the unsolved DECISION-007 half). Plumbing is one
+  MCP field away (`resolve_policy` + `compute_policy_exposure`,
+  `core/database.py:273) when its turn comes.
+
+## DECISION-039 | date: 2026-09-14T00:00:00Z | stage: 19
+- Anonymous storefront-lite page (mirrors Q-039 RESOLUTION; flagship webchat
+  slice A, not the full buyer-in-browser — browser checkout needs a
+  browser-safe auth design first, deferred with its own future Q-entry).
+- `GET /chat` (REGISTRY-registered, ungated) serves zero-dependency
+  `surfaces/static/chat.html`: same-origin catalog browse + client-side
+  search, live signed-offer feed, deterministic related-SKU chips, evidence
+  viewer links, studio links. 503 from the gated feeds renders as an
+  explicit not-ready message (never a silent empty page). The Stage-1
+  `storefront.html` stub at `/` is left untouched.

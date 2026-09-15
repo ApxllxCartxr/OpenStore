@@ -610,6 +610,13 @@ def create_app(config: Settings) -> FastAPI:
     async def storefront() -> FileResponse:
         return FileResponse(Path(__file__).parent / "surfaces" / "static" / "storefront.html")
 
+    # Storefront-lite chat page (S19 / DECISION-039): anonymous discovery
+    # surface, deliberately ungated like / (the gated /agent/* feeds it reads
+    # render their own 503 as a not-ready message client-side).
+    @app.get("/chat")
+    async def chat() -> FileResponse:
+        return FileResponse(Path(__file__).parent / "surfaces" / "static" / "chat.html")
+
     # PSP endpoints: webhook + hold/cancel (S5.3, S5.5)
     from openstore.psp.router import psp_router
 

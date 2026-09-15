@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenStore — Shop</title>
+    <style>
+        :root { color-scheme: light; }
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0 1rem 4rem; color: #1a1a1a; }
+        header { position: sticky; top: 0; background: #fff; padding: 0.75rem 0; border-bottom: 1px solid #eee; z-index: 10; }
+        header h1 { font-size: 1.15rem; margin: 0 0 0.5rem; }
+        #chat-search { width: 100%; font-size: 1rem; padding: 0.6rem 0.75rem; border: 1px solid #ccc; border-radius: 8px; }
+        main { max-width: 640px; margin: 0 auto; }
+        .item { border: 1px solid #e3e3e3; border-radius: 10px; padding: 0.9rem; margin: 0.75rem 0; }
+        .item h3 { margin: 0 0 0.25rem; font-size: 1rem; }
+        .price { font-weight: 700; }
+        .tags { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
+        .tag { display: inline-block; background: #f1f1f1; border-radius: 4px; padding: 0 0.35rem; margin: 0 0.2rem 0.2rem 0; }
+        .offer { background: #f0f7ef; border: 1px solid #cfe3cd; border-radius: 6px; padding: 0.4rem 0.6rem; margin-top: 0.5rem; font-size: 0.85rem; }
+        .related { margin-top: 0.5rem; font-size: 0.85rem; color: #444; }
+        .related span { background: #eef4ff; border-radius: 4px; padding: 0 0.35rem; margin-right: 0.25rem; }
+        section > h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
+        #chat-offers .campaign { border: 1px solid #cfe3cd; border-radius: 8px; padding: 0.7rem; margin: 0.5rem 0; font-size: 0.9rem; }
+        .signed { color: #1c7a1c; font-size: 0.8rem; }
+        #chat-evidence { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+        #chat-evidence input { flex: 1; font-size: 1rem; padding: 0.55rem 0.7rem; border: 1px solid #ccc; border-radius: 8px; }
+        button, .btn { background: #0066cc; color: #fff; border: none; padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.95rem; cursor: pointer; text-decoration: none; display: inline-block; }
+        nav { margin-top: 2rem; font-size: 0.85rem; color: #555; }
+        nav a { color: #0066cc; margin-right: 0.9rem; }
+        .notice { background: #fff8e6; border: 1px solid #ecd88a; border-radius: 8px; padding: 0.7rem; margin: 0.75rem 0; font-size: 0.9rem; }
+        .muted { color: #777; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <h1 id="merchant-name">Loading store…</h1>
+        <input id="chat-search" type="search" placeholder="Search this store…" autocomplete="off">
+    </header>
+
+    <div id="chat-status"></div>
+
+    <section aria-label="Catalog">
+        <h2>Catalog</h2>
+        <div id="chat-catalog"><p class="muted">Loading catalog…</p></div>
+    </section>
+
+    <section aria-label="Offers">
+        <h2>Signed offers</h2>
+        <div id="chat-offers"><p class="muted">Loading offers…</p></div>
+    </section>
+
+    <section aria-label="Receipt check">
+        <h2>Check a receipt</h2>
+        <p class="muted">Paste an order ID to open its offline-verifiable evidence bundle.</p>
+        <div id="chat-evidence">
+            <input id="evidence-id" placeholder="Order ID (e.g. chk_…)" autocomplete="off">
+            <button id="evidence-go" type="button">View</button>
+        </div>
+    </section>
+
+    <nav aria-label="Merchant surfaces">
+        <a href="/intent/studio">Policy Studio</a>
+        <a href="/campaign/studio">Campaign Studio</a>
+        <a href="/admin/orders">Orders</a>
+        <a href="/.well-known/agent-commerce.json">Discovery</a>
+        <a href="/.well-known/ucp">UCP</a>
+    </nav>
+    <p class="muted">Browsing only — checkout runs through the buyer agent or Policy Studio. Prices in paise-exact minor units.</p>
+</main>
+
+<script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+
+    function esc(s) {
+        return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        }[c]));
+    }
+
+    function inr(minor) {
+        return "₹" + (Number(minor) / 100).toFixed(2);
+    }
+
+    function pct(bps) {
+        return "−" + (Number(bps) / 100).toFixed(1).replace(/\.0$/, "") + "%";
+    }
+
+    function notReady(box, reasonCodes) {
+        $(box).innerHTML = '<div class="notice" role="status">Store not ready yet' +
+            (reasonCodes && reasonCodes.length ? ": " + esc(reasonCodes.join(", ")) : "") +
+            ". Try again in a moment.</div>";
+    }
+
+    let catalog = [];
+    let bySku = {};
+
+    async function boot() {
+        try {
+            const m = await fetch("/.well-known/agent-commerce.json");
+            if (m.ok) {
+                const manifest = await m.json();
+                $("merchant-name").textContent = (manifest.merchant && manifest.merchant.name) || "Store";
+            }
+        } catch (e) { /* name stays generic */ }
+
+        let feed;
+        try {
+            const res = await fetch("/agent/catalog");
+            if (res.status === 503) {
+                const body = await res.json().catch(() => ({}));
+                notReady("chat-catalog", body.reason_codes);
+                $("merchant-name").textContent = "Store warming up…";
+                return;
+            }
+            feed = await res.json();
+        } catch (e) {
+            $("chat-catalog").innerHTML = '<div class="notice" role="alert">Could not reach the catalog.</div>';
+            return;
+        }
+        catalog = feed.items || [];
+        bySku = {};
+        for (const item of catalog) bySku[item.sku] = item;
+        renderCatalog("");
+        loadOffers();
+    }
+
+    function offerHtml(offer) {
+        const window = (offer.starts_at || offer.ends_at)
+            ? " <span class='muted'>" + esc(offer.starts_at || "") + " → " + esc(offer.ends_at || "") + "</span>"
+            : "";
+        return "<div class='offer'>" + esc(offer.title || "Offer") + " " + pct(offer.discount_bps || 0) + window + "</div>";
+    }
+
+    function itemHtml(item) {
+        const offers = (item.offers || []).map(offerHtml).join("");
+        const related = (item.related_skus || [])
+            .map((sku) => "<span>" + esc(bySku[sku] ? bySku[sku].name : sku) + "</span>")
+            .join("");
+        return "<article class='item'>" +
+            "<h3>" + esc(item.name) + "</h3>" +
+            "<div class='price'>" + esc(inr(item.unit_minor)) + "</div>" +
+            "<div class='tags'>" + (item.tags || []).map((t) => "<span class='tag'>" + esc(t) + "</span>").join("") + "</div>" +
+            offers +
+            (related ? "<div class='related'>Pairs well with: " + related + "</div>" : "") +
+            "</article>";
+    }
+
+    function renderCatalog(query) {
+        const q = query.trim().toLowerCase();
+        const items = !q ? catalog : catalog.filter((item) =>
+            (item.name || "").toLowerCase().includes(q) ||
+            (item.description || "").toLowerCase().includes(q) ||
+            (item.tags || []).some((t) => t.toLowerCase().includes(q)));
+        $("chat-catalog").innerHTML = items.length
+            ? items.map(itemHtml).join("")
+            : "<p class='muted'>No matches.</p>";
+    }
+
+    async function loadOffers() {
+        try {
+            const res = await fetch("/.well-known/agent-campaigns.json");
+            if (!res.ok) return;
+            const feed = await res.json();
+            const campaigns = feed.campaigns || [];
+            $("chat-offers").innerHTML = campaigns.length
+                ? campaigns.map((c) =>
+                    "<div class='campaign'><strong>" + esc(c.title) + "</strong> " + pct(c.discount_bps || 0) +
+                    (feed.merchant_signature ? " <span class='signed'>· merchant-signed</span>" : "") +
+                    "</div>").join("")
+                : "<p class='muted'>No live offers right now.</p>";
+        } catch (e) { /* offers stay in loading state */ }
+    }
+
+    $("chat-search").addEventListener("input", (e) => renderCatalog(e.target.value));
+    $("evidence-go").addEventListener("click", () => {
+        const id = $("evidence-id").value.trim();
+        if (id) location.href = "/orders/" + encodeURIComponent(id) + "/evidence/view";
+    });
+    $("evidence-id").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") $("evidence-go").click();
+    });
+
+    boot();
+</script>
+</body>
+</html>

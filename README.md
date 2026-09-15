@@ -293,7 +293,7 @@ No. Honestly, not yet. The money path is overbuilt on purpose; everything around
 |---|---|---|
 | **Merchant (onboarding)** | `init` + `serve`, migrations on boot, studios served, no keys needed to explore | Needs public HTTPS origin, Postgres for prod, Razorpay + Discord + LLM secrets, WebAuthn `rp_id`/origin binding (SID-5 fails boot loud on mismatch). No hosted SaaS — you run the sidecar. |
 | **Merchant (catalog)** | YAML works in 60 seconds; Shopify read-only sync works against a real dev store; compiler/agents never touch the source directly | Real inventory also lives in WooCommerce / Postgres / Tally — those adapters don't exist yet. No stock sync, no order write-back, no GST invoice, no Shiprocket/Delhivery, no COD, no returns/RTO loop. |
-| **Buyer (customer)** | Talk in Discord, tap a passkey, pay a Razorpay link, cancel with one token | Buyers don't live in Discord. No WhatsApp, no web chat, no Google AI Mode surface. Payment leaves the conversation (hosted link, out-of-band). Passkeys need HTTPS + a compatible device. |
+| **Buyer (customer)** | Talk in Discord, tap a passkey, pay a Razorpay link, cancel with one token — or browse anonymously on mobile at `/chat` | Full buyer-in-browser checkout needs a browser-safe auth design first (deferred). No WhatsApp, no Google AI Mode surface. Payment leaves the conversation (hosted link, out-of-band). Passkeys need HTTPS + a compatible device. |
 | **Agent builder** | Manifests + OAuth `client_credentials` + 20 tools with `inputSchema` discovery + signed offer feed | UCP REST binding, AP2 wire mandates, and open enrollment (DCR) are still ahead — see below. |
 | **Operator** | Docker Compose + Postgres, `/health/live` + `/health/ready`, Prometheus metrics, runbook | One process + one DB per merchant. 100 merchants = 100 processes — no orchestrator yet. Live-mode traffic untested; sustained load, key rotation, and backup-restore are runbook text, not drilled practice. |
 
@@ -409,7 +409,7 @@ uv run openstore merchant-bot configs/gelateria.yaml configs/chai.yaml
 ### Running the checks
 
 ```bash
-uv run pytest -q                        # 681 tests
+uv run pytest -q                        # 684 tests
 uv run mypy src/                        # 51 source files, clean
 uv run ruff check src/ tests/
 uv run python scripts/registry_diff.py  # must print nothing, exit 0
@@ -454,12 +454,14 @@ REGISTRY.json       # every closed set, machine-enforced both directions
 | [`docs/RUN.md`](docs/RUN.md) | how to boot the two-merchant demo |
 | [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) | the 6-minute walkthrough, beat by beat |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | production runbook: Compose, Postgres, health gates, live-key ceremony |
+| [`docs/TUNNEL.md`](docs/TUNNEL.md) | live-try runbook: tunnel-on-demand demo URL for interview weeks |
+| [`docs/FLAGSHIP.md`](docs/FLAGSHIP.md) | the one-page brief: problem, trust contract, proof, try-it |
 
 ---
 
 ## What's real / what's next
 
-Built by one person with an AI agent across eighteen stages. The honest ledger:
+Built by one person with an AI agent across nineteen stages. The honest ledger:
 
 **Real and tested:**
 - ✅ The full money path — compiler, ledger, idempotency, hold/cancel, webhooks, reconciliation
@@ -472,6 +474,11 @@ Built by one person with an AI agent across eighteen stages. The honest ledger:
   SKU-less variants are skipped loudly, non-INR stores fail closed, fractional
   cents fail loud. Proven live: 3 usable variants out of a sample-data dev store,
   same Gelateria merchant, own DB (`configs/shopify.yaml` on `:8002`).
+- ✅ **Anonymous storefront-lite (Stage 19)** — `GET /chat` serves a
+  zero-dependency mobile page: same-origin catalog browse + client-side search,
+  live signed-offer feed, deterministic related-SKU chips, evidence viewer
+  links, studio links. No payment input, no new scopes; gated feeds render
+  their 503 as a not-ready message instead of a silent empty page.
 - ✅ **MCP wire conformance (Stage 17)** — `POST /agent/mcp` speaks JSON-RPC 2.0
   (`initialize` with version negotiation, `tools/list` with per-tool
   `inputSchema`, `tools/call` with `isError` content). The legacy
@@ -479,7 +486,7 @@ Built by one person with an AI agent across eighteen stages. The honest ledger:
   federated buyer was migrated to the wire path in the same commit, so the
   subprocess federation suite exercises it end to end. Point MCP Inspector at
   `/agent/mcp` — it lists and calls.
-- ✅ Red-team and sentinel suites green — **681 tests**, `mypy` and `ruff` clean
+- ✅ Red-team and sentinel suites green — **684 tests**, `mypy` and `ruff` clean
 - ✅ **Chat-native purchase flow** — a live `discord.Client` runs in the server's
   lifespan; a buyer DMs the bot, gets a `handoffs`-table signing link if no policy exists,
   auto-resumes the errand on signature, gets the Razorpay pay link and hold/cancel status

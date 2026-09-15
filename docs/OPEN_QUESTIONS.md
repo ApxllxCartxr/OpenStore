@@ -954,3 +954,24 @@
   cache. Scope posture: token response must carry `read_products`
   (`write_products` implies it and is tolerated, but the recommended version
   is read-only — least privilege for a credential that only ever GETs).
+
+## Q-039 | stage: 19 | date: 2026-09-14T00:00:00Z
+- What is ambiguous: Flagship webchat slice A (anonymous storefront-lite)
+  needs a new GET route serving a static page. No stage spec names it;
+  REGISTRY `routes` is a closed set and
+  `tests/sentinel/test_route_table_snapshot.py` enforces both directions
+  (mount-without-registry and registry-without-mount both fail the build).
+  R0.2 forbids naming the route without a prior RESOLUTION.
+- Options considered: (a) new `/chat` route + REGISTRY entry, static
+  `chat.html`, ungated (discovery surface like `/`, unlike the gated
+  `/agent/*` feeds it reads); (b) reuse `/` by replacing the Stage-1
+  storefront stub — rejected, `/` sits on the sentinel infra allowlist and
+  hiding a commerce surface there repeats the shadow-route pattern Q-015
+  removed; (c) no page.
+- Blocked since: 2026-09-14T00:00:00Z
+- RESOLUTION (2026-09-14): Option (a), operator-authorised (flagship webchat
+  slice A). Same-origin relative URLs only (CORS-clean on any origin, no
+  SID-5 change). Anonymous GETs only — catalog + signed campaign feed +
+  evidence/studio links; no mutations, no new scopes, no new reason codes,
+  so `registry_diff.py` is unaffected. Checkout stays on the buyer agent /
+  studios; the page never takes payment input.

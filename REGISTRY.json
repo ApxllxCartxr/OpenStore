@@ -63,6 +63,7 @@
     "/agent/mcp",
     "/agent/acp",
     "/agent/campaigns",
+    "/chat",
     "/protocols/<name>/spec-excerpt",
     "/intent/studio",
     "/campaign/studio",
