@@ -134,8 +134,12 @@ def main() -> None:
             def create(self, req: dict) -> dict:
                 ref = req.get("reference_id", "")
                 if ref in self.links:
-                    # Razorpay's literal duplicate-reference_id error code.
-                    raise RuntimeError("REFERENCE_ID_ALREADY_EXISTS")
+                    # Razorpay's live duplicate-reference_id rejection text
+                    # (2026-09-10 capture — the SDK carries no code).
+                    raise RuntimeError(
+                        f"payment link with given reference_id: {ref} already exists. "
+                        "Please create a payment link with a different reference_id"
+                    )
                 link = dict(req)
                 link["id"] = f"plink_{ref[:20]}"
                 self.links[ref] = link

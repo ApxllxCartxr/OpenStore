@@ -137,6 +137,17 @@ def _seed_pending_intent(
 
 
 def _duplicate_error() -> Exception:
+    # Live SDK shape (captured 2026-09-10 against test-mode): BadRequestError
+    # with NO code attribute — only the description text quoted below.
+    return Exception(
+        "payment link with given reference_id: chk_live already exists. "
+        "Please create a payment link with a different reference_id"
+    )
+
+
+def _duplicate_error_legacy_code() -> Exception:
+    # Pre-S16 mock shape carrying the legacy code attribute. The driver keeps
+    # matching it so old callers still recover; live never sends it.
     dup = Exception("duplicate reference")
     dup.code = driver.RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE  # type: ignore[attr-defined]
     return dup
@@ -204,7 +215,7 @@ def test_recovery_rejects_when_reference_id_not_findable(psp_session):
     )
 
     mock_client = MagicMock()
-    mock_client.payment_link.create.side_effect = _duplicate_error()
+    mock_client.payment_link.create.side_effect = _duplicate_error_legacy_code()
     mock_client.payment_link.all.return_value = {"items": []}
 
     with pytest.raises(driver.RazorpayError) as ei:
@@ -219,6 +230,22 @@ def test_recovery_rejects_when_reference_id_not_findable(psp_session):
             mock_razorpay=mock_client,
         )
     assert ei.value.error_code == "psp.duplicate_unrecoverable"
+
+
+def test_duplicate_matcher_covers_observed_variants():
+    # Live SDK text (2026-09-10 capture) and the older HTTP-body variant both
+    # recover; unrelated BadRequest text must NOT (no silent adoption).
+    assert driver.is_duplicate_reference_error(
+        None,
+        "payment link with given reference_id: chk_x already exists. "
+        "Please create a payment link with a different reference_id",
+    )
+    assert driver.is_duplicate_reference_error(
+        None, "reference_id provided is already used. Please provide another value"
+    )
+    assert driver.is_duplicate_reference_error("REFERENCE_ID_ALREADY_EXISTS", "anything")
+    assert not driver.is_duplicate_reference_error("BAD_REQUEST_ERROR", "amount is invalid")
+    assert not driver.is_duplicate_reference_error(None, "")
 
 
 def test_idempotent_replay_restores_short_url_and_cancel_token(psp_session):

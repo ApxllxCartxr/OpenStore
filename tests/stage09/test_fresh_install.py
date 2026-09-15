@@ -212,12 +212,23 @@ class TestInstallContract:
 class TestRazorpayTestModeConstants:
     """S9.3 / R0.7: [verify-at-build] constants re-confirmed."""
 
-    def test_duplicate_reference_id_error_code_pinned(self):
-        from openstore.psp.razorpay_driver import RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE
+    def test_duplicate_reference_id_markers_pinned(self):
+        from openstore.psp.razorpay_driver import (
+            RAZORPAY_DUPLICATE_REFERENCE_MARKERS,
+            is_duplicate_reference_error,
+        )
 
-        # Source: captured against live Razorpay test-mode API
-        # scripts/capture_constants.py run against api.razorpay.com
-        assert RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE == "REFERENCE_ID_ALREADY_EXISTS"
+        # Source: captured live against Razorpay test-mode on 2026-09-10.
+        # Live sends NO code on the SDK exception — only description text, so
+        # the driver matches on these markers, not on a code string.
+        anchor, variants = RAZORPAY_DUPLICATE_REFERENCE_MARKERS
+        assert anchor == "reference_id"
+        assert set(variants) == {"already exists", "already used"}
+        assert is_duplicate_reference_error(
+            None,
+            "payment link with given reference_id: r already exists. "
+            "Please create a payment link with a different reference_id",
+        )
 
     def test_cancel_already_paid_http_status_pinned(self):
         from openstore.psp.razorpay_driver import RAZORPAY_CANCEL_ALREADY_PAID_HTTP_STATUS

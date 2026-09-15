@@ -33,14 +33,34 @@ from openstore.models import (
     WebhookStatus,
 )
 
-# [verify-at-build] Pinned Razorpay error codes — captured against live test-mode.
-# See scripts/capture_constants.py. Do NOT invent these from memory (R0.7).
+# [verify-at-build] Pinned Razorpay duplicate-reference markers — captured
+# against live test-mode on 2026-09-10 (see scripts/capture_constants.py and
+# tests/GOLDEN/razorpay/duplicate_reference_id_error.json). Do NOT invent
+# these from memory (R0.7).
 #
-# RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE: Razorpay returns this error code
-# when attempting to create a payment_link with a reference_id that already
-# exists. The driver catches this SPECIFIC code (per S5.2) and recovers by
-# fetching the existing link rather than bare-Exception catching.
+# Live truth: the SDK raises BadRequestError whose str() carries NO code —
+# only the description text, e.g. "payment link with given reference_id:
+# <ref> already exists. Please create a payment link with a different
+# reference_id". The raw HTTP body carries code BAD_REQUEST_ERROR with the
+# same description. An older observed variant reads "reference_id provided
+# is already used. Please provide another value". The driver therefore
+# matches on the two description markers below (never bare-Exception
+# catching), keeping the legacy code match only so old mocks still recover.
 RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE = "REFERENCE_ID_ALREADY_EXISTS"
+# Substring markers observed live in duplicate-reference rejections, matched
+# case-insensitively; BOTH must be present (either "already exists" or
+# "already used" variant).
+RAZORPAY_DUPLICATE_REFERENCE_MARKERS = ("reference_id", ("already exists", "already used"))
+
+
+def is_duplicate_reference_error(err_code: str | None, err_str: str) -> bool:
+    """True when a payment-link create failure is a duplicate-reference_id
+    rejection (live-verified shapes only)."""
+    if err_code == RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE:
+        return True
+    lowered = (err_str or "").lower()
+    anchor, variants = RAZORPAY_DUPLICATE_REFERENCE_MARKERS
+    return anchor in lowered and any(v in lowered for v in variants)
 
 # Cancel-already-paid: Razorpay returns HTTP 400 with this body shape when
 # attempting to cancel a payment_link that has already been paid. Per
@@ -263,10 +283,7 @@ def create_payment_link(
         err_code = getattr(e, "code", None) or getattr(e, "error", {}).get("code", None)
         err_str = str(e)
 
-        if (
-            err_code == RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE
-            or RAZORPAY_DUPLICATE_REFERENCE_ID_ERROR_CODE in err_str
-        ):
+        if is_duplicate_reference_error(err_code, err_str):
             existing_link = _fetch_existing_payment_link_by_reference_id(
                 config, session, checkout_id, mock_razorpay=mock_razorpay
             )
