@@ -6,6 +6,8 @@
 - Options considered: 
 - Blocked since: 2026-08-30T11:08:00Z
 - RESOLUTION:
+- RESOLUTION (2026-09-15): Closed as historical — superseded by PRD v3.0 §0.3
+  (same closure as Q-002/Q-003/Q-004). No code change, no live question.
 ## Q-002 | stage: 02 | date: 2026-08-30T00:00:00Z
 - What is ambiguous: verify_ledger_balances asserts `all(account balance == 0)` per reference_id
   (src/openstore/core/ledger.py). Given the recording convention (both double-entry legs stored with
@@ -273,6 +275,12 @@
 - PROVISIONAL (unattended-agent): Option (b). Use hand-rolled Prometheus text
   exposition format with # HELP/# TYPE lines and gauge values. No new dependency.
   Operator to ratify.
+- RATIFIED (2026-09-15): Option (b) confirmed live — `core/health.py`
+  `metrics_text` still hand-rolls exposition, and `prometheus-client` appears
+  in neither `pyproject.toml` nor `uv.lock` (verified this date). Correction
+  to DECISION-035, which states "prometheus-client added as dependencies":
+  no such dependency exists; the hand-rolled implementation is the shipped
+  one and readiness/metrics are green on it. No code change.
 
 ## Q-012 | stage: 10 | date: 2026-09-01T14:42:34Z
 - What is ambiguous: __version__ single source of truth. PEP 621 (pyproject.toml)
@@ -284,6 +292,9 @@
 - PROVISIONAL (unattended-agent): Option (b). Canonical version in pyproject.toml
   (PEP 621), __init__.py exposes it via importlib.metadata.version("openstore").
   Operator to ratify.
+- RATIFIED (2026-09-15): Option (b) confirmed live —
+  `src/openstore/__init__.py` reads `metadata.version("openstore")`, version
+  `0.1.0` canonical in `pyproject.toml`. No code change.
 
 ## Q-013 | stage: 10 | date: 2026-09-01T14:42:34Z
 - What is ambiguous: Main-prompt §11 step 3 says "Discord bot → search_products → …"
@@ -296,6 +307,10 @@
   3-5 for the unattended run: those steps are executed headlessly with GOLDEN WebAuthn
   fixtures and direct MCP calls; the Discord-bot and live-payment variants move to
   the PENDING-HUMAN list. Operator to ratify.
+- SUPERSEDED (2026-09-15) as spent: the overnight run it governed is long
+  complete (Stage 10 freeze, DECISION-016); headless GOLDEN-fixture exercise
+  is now the permanent suite convention, and live-Discord/live-payment
+  verification lives in PENDING-HUMAN / Q-007. No code change.
 
 ## Q-014 | stage: 11 | date: 2026-09-02T00:00:00Z
 - What is ambiguous: The chat-native purchase flow (approved plan
@@ -802,6 +817,12 @@
   touch the money path and each warrants its own stage with its own adversarial tests, and
   (c) is not implementable without new configuration. The seam is real and is the single
   place OpenStore's UX is behind ACP; it is not closed by this round of work.
+- CLOSED (2026-09-15) as implemented by DECISION-035 (Stage 16): both halves
+  landed — pre-release PSP reconcile in the hold-release loop (bounded, never
+  blocks release) plus `discord_message_id` stamp/edit plumbing with
+  `set_order_message` ownership check. README "Payment stays in the
+  conversation" records the live behavior. Option (c) (UPI intent) remains
+  REJECTED outright per the original entry. No code change.
 
 ## Q-033 | stage: 12 | date: 2026-09-05T00:00:00Z
 - What is ambiguous: the AAL ladder the README sells is unreachable from chat. `BuyerAgent.confirm()`
