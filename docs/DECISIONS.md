@@ -484,3 +484,14 @@
   the claim travels beyond `http://testserver`. No new identifiers;
   REGISTRY.json untouched. Manifest UCP version `2026-01-11` recorded as
   known, not changed.
+
+## DECISION-042 | date: 2026-09-15T00:00:00Z | stage: 22
+- Buyer-in-browser checkout (mirrors Q-042 RESOLUTION; webchat slice B).
+- Identity is `web:<buyer_key>` (localStorage, validated, no cookies);
+  authority is always a passkey tap via the existing CART-handoff ceremony —
+  the browser never touches `create_cart`/`checkout_initiate`.
+- New ungated routes `POST /web/cart`, `GET /web/order/<checkout_id>`,
+  `POST /web/order/<checkout_id>/cancel` (ownership-checked, `cancel_token`
+  never exposed). Cart lines stamped server-side; no campaigns this slice.
+- `catalog.sku_not_found` registered (already raised in-tree). Resume guard:
+  `_consume_and_resume` auto-resumes discord-platform handoffs only.

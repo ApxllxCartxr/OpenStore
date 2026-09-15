@@ -617,6 +617,13 @@ def create_app(config: Settings) -> FastAPI:
     async def chat() -> FileResponse:
         return FileResponse(Path(__file__).parent / "surfaces" / "static" / "chat.html")
 
+    # Web buyer surface (S22 / Q-042): browser-native checkout over handoffs.
+    # Ungated like /chat (readiness gate only); per-request buyer_key
+    # ownership checks inside. No cookies, no sessions.
+    from openstore.surfaces.webcart import webcart_router
+
+    app.include_router(webcart_router(config))
+
     # PSP endpoints: webhook + hold/cancel (S5.3, S5.5)
     from openstore.psp.router import psp_router
 

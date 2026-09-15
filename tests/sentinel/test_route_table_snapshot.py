@@ -26,6 +26,8 @@ _REGISTRY_TO_APP = {
     "/intent/amendment/<amendment_id>/reject": "/intent/amendment/{amendment_id}/reject",
     "/intent/cart/<cart_id>/approve": "/intent/cart/{cart_id}/approve",
     "/intent/cart/<cart_id>/reject": "/intent/cart/{cart_id}/reject",
+    "/web/order/<checkout_id>": "/web/order/{checkout_id}",
+    "/web/order/<checkout_id>/cancel": "/web/order/{checkout_id}/cancel",
 }
 
 # Routes mounted by the app that are NOT in REGISTRY.json because they are

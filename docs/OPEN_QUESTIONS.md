@@ -1094,3 +1094,50 @@
   the build deliberately). Deviations from upstream specs asserted by these
   fixtures are exactly the Q-040 set (`meta` optional, no batch cap, SKU as
   identifier, text-content envelope) — restated, not reopened.
+
+## Q-042 | stage: 22 | date: 2026-09-15T00:00:00Z
+- What is ambiguous: Buyer-in-browser checkout (webchat slice B — the
+  browser-safe auth design DECISION-039 deferred to its own Q-entry). `/chat`
+  is browse-only; the POLICY/CART handoff ceremonies, `cart_studio.html`,
+  `cart_approve`, and `cancel_checkout_by_id` all exist but are only reachable
+  via a Discord buyer agent. No stage spec names browser routes; REGISTRY
+  `routes`/`reason_codes` are closed sets (R0.2). Sub-questions: (i) browser
+  identity without logins/cookies; (ii) cart-line shape the compiler trusts;
+  (iii) closed-set codes for unknown-SKU / bad-qty edge rejections;
+  (iv) `_consume_and_resume` auto-resume would mint a stray checkout + DM for
+  a web signer when `buyer_bot_enabled`; (v) rate limiting on anonymous mint;
+  (vi) what the status surface may expose (pay link? cancel token?);
+  (vii) campaign discounts in browser carts.
+- Options considered:
+  (i) `chat_platform="web"` + `buyer_key` (`token_urlsafe(16)` in
+  `localStorage`, validated `^[A-Za-z0-9_-]{16,64}$`, fits `chat_user_id`
+  max 64); no cookies/sessions/secrets in the browser; authority is ALWAYS a
+  passkey tap — the browser path mints a CART handoff and goes through
+  `cart_approve`, never `create_cart`/`checkout_initiate`, so a stolen key
+  alone authorizes nothing. `chat_platform` is not a REGISTRY closed set
+  (free string today) — noted, not registered.
+  (ii) Lines stamped server-side as `{sku, qty, unit_minor, tags}` from
+  `load_catalog` (the established line shape, stage-16 CART precedent; R0.8
+  — client prices never trusted); no `campaign_id` attachment this slice
+  (full price; campaign-in-browser is future work).
+  (iii) Unknown SKU → `404` + `catalog.sku_not_found`, REGISTERED here (it
+  is already raised in-tree by `get_product` — same legitimize class as
+  DECISION-023 `campaign.*`); bad qty (non-int/`<=0`) → `422` +
+  `policy.qty_invalid` (same meaning as the compiler check); envelope shape
+  via pydantic models (framework 422s, `CartDecision` precedent).
+  (iv) `_consume_and_resume` auto-resumes only when
+  `chat_platform=="discord"` (found in scoping: otherwise a web signing
+  mints a checkout + pay link the browser never sees).
+  (v) No rate limiting (anonymous handoff mint ≈ anonymous MCP search
+  exposure; the passkey ceremony is the real gate; future Q if abused).
+  (vi) Status exposes `short_url` (refresh recovery) + `evidence_url` when a
+  bundle exists; `cancel_token` is NEVER exposed — cancel is an
+  ownership-checked POST reusing `cancel_checkout_by_id`.
+  (vii) No item-count cap (tiny catalogs, 1h TTL rows — same call as Q-040).
+- Blocked since: 2026-09-15T00:00:00Z
+- RESOLUTION (2026-09-15): All of the above, operator-authorised (slice
+  approved 2026-09-15). Routes `/web/cart`, `/web/order/<checkout_id>`,
+  `/web/order/<checkout_id>/cancel` added to REGISTRY alongside the
+  implementation (Q-008 sequencing). Ungated like `/chat` (readiness gate
+  only — `is_gated` is about readiness, not auth). No new scopes, tools,
+  HandoffKind values, binding modes, or migrations.

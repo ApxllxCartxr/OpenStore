@@ -119,11 +119,30 @@ async function decide(action) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),
     });
-    status.textContent = JSON.stringify(await res.json(), null, 2);
+    renderDecision(await res.json());
   } catch (e) {
     status.textContent = "Error: " + e.message;
   }
 }
+
+function renderDecision(decision) {
+  const status = document.getElementById("status");
+  status.textContent = "";
+  const shop = decision && decision.shop_result;
+  if (decision && decision.applied === true && shop && shop.checkout_id) {
+    const pay = document.createElement("a");
+    pay.href = shop.short_url || "#";
+    pay.textContent = "Pay here";
+    const track = document.createElement("a");
+    track.href = "/chat#order=" + encodeURIComponent(shop.checkout_id);
+    track.textContent = "Track your order";
+    const proof = document.createElement("a");
+    proof.href = "/orders/" + encodeURIComponent(shop.checkout_id) + "/evidence/view";
+    proof.textContent = "Receipt (when ready)";
+    status.append("Approved. ", pay, " · ", track, " · ", proof);
+    return;
+  }
+  status.textContent = JSON.stringify(decision, null, 2);
 </script>
 </body>
 </html>

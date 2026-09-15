@@ -103,6 +103,9 @@ def test_registry_reason_codes_complete():
         "checkout.not_owned",
         "checkout.invalid_state",
         "checkout.invalid_cancel_token",
+        # DECISION-042 (Q-042): legitimizes catalog.sku_not_found, already
+        # raised in-tree by get_product (same class as DECISION-023).
+        "catalog.sku_not_found",
         "policy.not_found",
         "psp.invalid_state",
         "psp.checkout_not_found",

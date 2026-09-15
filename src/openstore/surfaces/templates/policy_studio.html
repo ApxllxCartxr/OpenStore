@@ -260,6 +260,8 @@ async function sign(event) {
     res.policy_hash + ", sign_count " + res.sign_count + ").";
   if (res.handoff && res.handoff.resumed) {
     status.textContent += " Resuming your order…";
+  } else if (HANDOFF_TOKEN) {
+    status.textContent += " Return to /chat to continue your order.";
   }
 }
 

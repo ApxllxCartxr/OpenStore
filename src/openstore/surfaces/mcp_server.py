@@ -386,7 +386,15 @@ def checkout_initiate(
             session.add(checkout)
             session.flush()
 
-        customer = {"name": f"Discord user {chat_user_id}"} if chat_user_id else None
+        if chat_user_id:
+            label = (
+                f"Web buyer {chat_user_id}"
+                if chat_platform == "web"
+                else f"Discord user {chat_user_id}"
+            )
+            customer = {"name": label}
+        else:
+            customer = None
 
         checkout = create_payment_link(
             config=config,

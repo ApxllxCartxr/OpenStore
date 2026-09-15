@@ -60,6 +60,19 @@
         </div>
     </section>
 
+    <section aria-label="Cart">
+        <h2>Your cart</h2>
+        <div id="chat-cart"><p class="muted">Your cart is empty.</p></div>
+        <button id="chat-buy" type="button" style="display:none">Buy with passkey</button>
+        <div id="chat-checkout-status"></div>
+    </section>
+
+    <section aria-label="Order status" id="order-section" style="display:none">
+        <h2>Order status</h2>
+        <div id="chat-order"></div>
+        <button id="chat-cancel" type="button" style="display:none">Cancel order</button>
+    </section>
+
     <nav aria-label="Merchant surfaces">
         <a href="/intent/studio">Policy Studio</a>
         <a href="/campaign/studio">Campaign Studio</a>
@@ -67,7 +80,7 @@
         <a href="/.well-known/agent-commerce.json">Discovery</a>
         <a href="/.well-known/ucp">UCP</a>
     </nav>
-    <p class="muted">Browsing only — checkout runs through the buyer agent or Policy Studio. Prices in paise-exact minor units.</p>
+    <p class="muted">Browse and buy — checkout uses your passkey, one tap per order. Prices in paise-exact minor units.</p>
 </main>
 
 <script>
@@ -145,6 +158,7 @@
             "<div class='tags'>" + (item.tags || []).map((t) => "<span class='tag'>" + esc(t) + "</span>").join("") + "</div>" +
             offers +
             (related ? "<div class='related'>Pairs well with: " + related + "</div>" : "") +
+            "<div><button data-add='" + esc(item.sku) + "' type='button'>Add</button></div>" +
             "</article>";
     }
 
@@ -175,6 +189,17 @@
     }
 
     $("chat-search").addEventListener("input", (e) => renderCatalog(e.target.value));
+    $("chat-catalog").addEventListener("click", (e) => {
+        const btn = e.target.closest ? e.target.closest("[data-add]") : null;
+        if (btn) addToCart(btn.getAttribute("data-add"));
+    });
+    $("chat-cart").addEventListener("click", (e) => {
+        const el = e.target.closest ? e.target.closest("[data-inc],[data-dec]") : null;
+        if (!el) return;
+        const sku = el.getAttribute("data-inc") || el.getAttribute("data-dec");
+        const delta = el.hasAttribute("data-inc") ? 1 : -1;
+        setQty(sku, (cart[sku] || 0) + delta);
+    });
     $("evidence-go").addEventListener("click", () => {
         const id = $("evidence-id").value.trim();
         if (id) location.href = "/orders/" + encodeURIComponent(id) + "/evidence/view";
@@ -184,6 +209,140 @@
     });
 
     boot();
+    bootOrder();
+
+    // ---- buyer identity: random key in localStorage, no login, no cookies.
+    // Authority always comes from a passkey tap; this key only addresses rows.
+    function buyerKey() {
+        let k = null;
+        try { k = localStorage.getItem("openstore_buyer_key"); } catch (e) {}
+        if (!k || !/^[A-Za-z0-9_-]{16,64}$/.test(k)) {
+            const bytes = new Uint8Array(16);
+            crypto.getRandomValues(bytes);
+            let bin = "";
+            for (const b of bytes) bin += String.fromCharCode(b);
+            k = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+            try { localStorage.setItem("openstore_buyer_key", k); } catch (e) {}
+        }
+        return k;
+    }
+
+    // ---- cart (client-side selection only; prices re-resolved server-side).
+    let cart = {};
+
+    function addToCart(sku) {
+        if (!bySku[sku]) return;
+        cart[sku] = (cart[sku] || 0) + 1;
+        renderCart();
+    }
+
+    function setQty(sku, qty) {
+        if (qty <= 0) delete cart[sku];
+        else cart[sku] = qty;
+        renderCart();
+    }
+
+    function renderCart() {
+        const skus = Object.keys(cart).filter((s) => bySku[s]);
+        const buy = $("chat-buy");
+        if (!skus.length) {
+            $("chat-cart").innerHTML = "<p class='muted'>Your cart is empty.</p>";
+            buy.style.display = "none";
+            return;
+        }
+        let total = 0, html = "";
+        for (const sku of skus) {
+            const item = bySku[sku], qty = cart[sku];
+            total += item.unit_minor * qty;
+            html += "<div class='item'><h3>" + esc(item.name) + "</h3>" +
+                "<div>" + esc(inr(item.unit_minor)) + " × " + qty +
+                " = <span class='price'>" + esc(inr(item.unit_minor * qty)) + "</span></div>" +
+                "<div><button data-dec='" + esc(sku) + "' type='button'>−</button> " +
+                "<button data-inc='" + esc(sku) + "' type='button'>+</button></div></div>";
+        }
+        html += "<div class='price'>Total " + esc(inr(total)) + "</div>";
+        $("chat-cart").innerHTML = html;
+        buy.style.display = "";
+    }
+
+    function detailMessage(detail) {
+        if (!detail) return "Checkout failed.";
+        if (Array.isArray(detail)) return "Check your cart and try again.";
+        return detail.message || detail.reason_code || "Checkout failed.";
+    }
+
+    $("chat-buy").addEventListener("click", async () => {
+        const box = $("chat-checkout-status");
+        box.innerHTML = "<p class='muted'>Starting checkout…</p>";
+        try {
+            const res = await fetch("/web/cart", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    buyer_key: buyerKey(),
+                    items: Object.keys(cart).map((sku) => ({sku: sku, qty: cart[sku]})),
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                box.innerHTML = "<div class='notice' role='alert'>" + esc(detailMessage(data.detail)) + "</div>";
+                return;
+            }
+            location.href = data.approval_url || data.signin_url;
+        } catch (e) {
+            box.innerHTML = "<div class='notice' role='alert'>Could not reach checkout.</div>";
+        }
+    });
+
+    // ---- order tracking (?order=<checkout_id> deep link + 15s poll).
+    let orderTimer = null, trackedOrder = null;
+
+    function orderHtml(data) {
+        let h = "<div class='item'><h3>Order " + esc(data.checkout_id) + "</h3>" +
+            "<div>Status: <strong>" + esc(data.state) + "</strong></div>" +
+            "<div class='price'>" + esc(inr(data.amount_minor)) + "</div>";
+        if (data.short_url) h += "<div><a href='" + esc(data.short_url) + "'>Pay here</a></div>";
+        if (data.evidence_url) h += "<div><a href='" + esc(data.evidence_url) + "'>Receipt</a></div>";
+        return h + "</div>";
+    }
+
+    async function loadOrder(id) {
+        try {
+            const res = await fetch("/web/order/" + encodeURIComponent(id) +
+                "?buyer_key=" + encodeURIComponent(buyerKey()));
+            const data = await res.json();
+            if (!res.ok) {
+                $("chat-order").innerHTML = "<div class='notice' role='alert'>" +
+                    esc(detailMessage(data.detail)) + "</div>";
+                $("chat-cancel").style.display = "none";
+                return;
+            }
+            $("chat-order").innerHTML = orderHtml(data);
+            $("chat-cancel").style.display = data.cancelable ? "" : "none";
+            if (data.state !== "awaiting_payment" && orderTimer) {
+                clearInterval(orderTimer);
+                orderTimer = null;
+            }
+        } catch (e) {
+            $("chat-order").innerHTML = "<div class='notice' role='alert'>Could not load order.</div>";
+        }
+    }
+
+    function bootOrder() {
+        const m = location.hash.match(/^#order=(.+)$/);
+        if (!m) return;
+        trackedOrder = decodeURIComponent(m[1]);
+        $("order-section").style.display = "";
+        loadOrder(trackedOrder);
+        orderTimer = setInterval(() => loadOrder(trackedOrder), 15000);
+    }
+
+    $("chat-cancel").addEventListener("click", async () => {
+        if (!trackedOrder) return;
+        await fetch("/web/order/" + encodeURIComponent(trackedOrder) + "/cancel" +
+            "?buyer_key=" + encodeURIComponent(buyerKey()), {method: "POST"});
+        loadOrder(trackedOrder);
+    });
 </script>
 </body>
 </html>

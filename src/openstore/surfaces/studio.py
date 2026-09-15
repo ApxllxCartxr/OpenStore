@@ -286,6 +286,14 @@ _HANDOFF_STATUS = {
 
 logger = logging.getLogger("openstore.studio")
 
+
+def _customer_label(handoff: Handoff) -> dict[str, str]:
+    """PSP-side display name only (test-mode dashboard label, R0.5: loud
+    about which surface originated the checkout)."""
+    if handoff.chat_platform == "web":
+        return {"name": f"Web buyer {handoff.chat_user_id}"}
+    return {"name": f"Discord user {handoff.chat_user_id}"}
+
 # S12 step 8: short timeout for the best-effort resume_url ping — this must
 # never make the human wait meaningfully longer for their signing response.
 _RESUME_NOTIFY_TIMEOUT_SECONDS = 3.0
@@ -383,7 +391,11 @@ async def _consume_and_resume(
     await send_dm(config, chat_user_id, "Signed. Resuming your order…")
 
     outcome: dict[str, Any] = {"resumed": False}
-    if config.discord.buyer_bot_enabled:
+    # Q-042: auto-resume only replays a Discord conversation (the buyer agent
+    # lives there). A web-platform signing has no conversation to resume into —
+    # resuming would mint a checkout + pay link the browser never sees. Web
+    # signers return to /chat, which re-reads their policy on the next cart.
+    if config.discord.buyer_bot_enabled and chat_platform == "discord":
         result = await resume_after_signing(
             config,
             InProcessMCPClient(config),
@@ -499,7 +511,7 @@ async def _approve_amendment(
             checkout_id=checkout.id,
             amount_minor=checkout.amount_minor,
             currency=checkout.currency,
-            customer={"name": f"Discord user {handoff.chat_user_id}"},
+            customer=_customer_label(handoff),
         )
 
         consume_handoff(session, token, result_policy_id=policy.id)
@@ -606,7 +618,7 @@ async def _approve_cart(
             checkout_id=checkout.id,
             amount_minor=checkout.amount_minor,
             currency=checkout.currency,
-            customer={"name": f"Discord user {handoff.chat_user_id}"},
+            customer=_customer_label(handoff),
         )
 
         consume_handoff(session, token, result_policy_id=policy.id)
