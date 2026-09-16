@@ -641,4 +641,11 @@ def create_app(config: Settings) -> FastAPI:
 
     app.include_router(evidence_router(config))
 
+    # Merchant console (S24 / Q-044): passkey login + every merchant task in
+    # a browser. Mounted after the studio router it complements (no path
+    # overlap: /merchant/* vs /intent/*, /campaign/*, /admin/*)
+    from openstore.surfaces.merchant import merchant_router
+
+    app.include_router(merchant_router(config))
+
     return app

@@ -41,7 +41,7 @@ def build_config_dict(
         },
         "webauthn": {
             "rp_id": "localhost",
-            "rp_name": "OpenStore Demo",
+            "rp_name": merchant,
             "origin": "http://localhost:8000",
         },
         # Production: set DATABASE__URL (nested-delimiter override) to a
@@ -72,36 +72,28 @@ DISCORD_BOT_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 CATALOG_TEMPLATE = """# OpenStore catalog — SKUs in integer paise (minor units)
 # Tags are free-form strings used by IntentPolicy allowed_tags
+# Add rows below, or manage the catalog at /merchant/catalog once serving.
 
-- sku: "gelato_vanilla"
-  name: "Vanilla Gelato"
-  price_minor: 15000
-  tags: ["vegan", "gelato"]
-  stock: 100
+  # - sku: "example_sku_1"
+  #   name: "Example item 1"
+  #   unit_minor: 145000
+  #   tags: ["example"]
+  #   related_skus: []
+  #   description: ""
 
-- sku: "gelato_chocolate"
-  name: "Chocolate Gelato"
-  price_minor: 15000
-  tags: ["gelato"]
-  stock: 100
+  # - sku: "example_sku_2"
+  #   name: "Example item 2"
+  #   unit_minor: 45000
+  #   tags: ["example"]
+  #   related_skus: ["example_sku_1"]
+  #   description: ""
 
-- sku: "gelato_pistachio"
-  name: "Pistachio Gelato"
-  price_minor: 18000
-  tags: ["gelato"]
-  stock: 50
-
-- sku: "cone_waffle"
-  name: "Waffle Cone"
-  price_minor: 3000
-  tags: ["cone"]
-  stock: 200
-
-- sku: "topping_sprinkles"
-  name: "Rainbow Sprinkles"
-  price_minor: 2000
-  tags: ["topping"]
-  stock: 500
+  # - sku: "example_sku_3"
+  #   name: "Example item 3"
+  #   unit_minor: 1450
+  #   tags: ["example"]
+  #   related_skus: []
+  #   description: ""
 """
 
 
@@ -126,7 +118,8 @@ def init(
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    config_path = output_dir / "gelateria.yaml"
+    slug = merchant.lower().replace(" ", "-").replace("'", "")
+    config_path = output_dir / f"{slug}.yaml"
     env_path = output_dir / ".env.example"
     catalog_path = output_dir / "catalog.yaml"
 

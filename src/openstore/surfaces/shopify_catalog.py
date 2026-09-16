@@ -20,6 +20,13 @@ from typing import Any
 import httpx
 
 from openstore.config import Settings
+from openstore.surfaces.adapters.base import AdapterCapability, AdapterHealth
+from openstore.surfaces.adapters.errors import AdapterError, not_configured
+from openstore.surfaces.adapters.errors import not_configured
+from openstore.surfaces.adapters.registry import register_adapter
+from openstore.surfaces.adapters.normalize import clean_sku, normalize_tags, normalized_item, parse_stock, price_to_minor, strip_html
+from openstore.surfaces.adapters.cache import AdapterCache
+import httpx
 
 logger = logging.getLogger("openstore.shopify_catalog")
 
@@ -185,9 +192,11 @@ def normalize_variant(
     }
 
 
-def load_shopify_catalog(config: Settings) -> list[dict[str, Any]]:
+def load_shopify_catalog(config: Settings, max_pages: int | None = None) -> list[dict[str, Any]]:
     """Full read: token → currency gate → products → normalize (TTL-cached)."""
     shop = config.shopify
+    if max_pages is None:
+        max_pages = MAX_PAGES
     if shop is None:
         raise ValueError("load_shopify_catalog called without config.shopify")
     now = time.monotonic()
@@ -231,3 +240,66 @@ def load_shopify_catalog(config: Settings) -> list[dict[str, Any]]:
         )
     _CATALOG_CACHE[shop.store_domain] = (now, items)
     return items
+
+
+class ShopifyAdapter:
+    """Shopify as an SDK adapter (read-only per DECISION-037)."""
+
+    name = "shopify"
+    capabilities = frozenset({AdapterCapability.CATALOG_READ, AdapterCapability.STOCK_READ})
+
+    def __init__(self, source: Any, client: httpx.Client | None = None, merchant_currency: str = "INR", config: Settings | None = None):
+        self._source = source
+        self._client = client
+        self._merchant_currency = merchant_currency
+        self._config = config
+
+    def _creds(self) -> tuple[str, str, str]:
+        source = self._source
+        return (
+            str(getattr(source, "store_domain")),
+            str(getattr(source, "client_id", "") or ""),
+            str(getattr(source, "client_secret", "") or ""),
+        )
+
+    def fetch_items(self) -> list[dict[str, Any]]:
+        domain, cid, csec = self._creds()
+        if not cid or not csec:
+            raise not_configured("shopify", "client credentials")
+        max_pages = getattr(self._source, "max_pages", None) or MAX_PAGES
+        return load_shopify_catalog(self._config, max_pages=max_pages)
+
+    def fetch_stock(self, skus: list[str]) -> dict[str, int]:
+        by_sku = {i["sku"]: i for i in self.fetch_items()}
+        return {
+            sku: int(by_sku[sku]["stock"])
+            for sku in skus
+            if sku in by_sku and by_sku[sku].get("stock") is not None
+        }
+
+    def write_stock(self, deltas: dict[str, int]) -> None:
+        raise not_configured("shopify", "stock write-back (read-only adapter)")
+
+    def push_order_status(self, order: Any) -> None:
+        raise not_configured("shopify", "order write-back (read-only adapter)")
+
+    def health_check(self) -> AdapterHealth:
+        try:
+            items = self.fetch_items()
+        except AdapterError as e:
+            return AdapterHealth(ok=False, detail=f"{e.reason_code}: {e.message}")
+        return AdapterHealth(ok=True, item_count=len(items))
+
+
+def _build_shopify(config: Any, source: Any, client: httpx.Client | None) -> ShopifyAdapter:
+    if source is None:
+        legacy = getattr(config, "shopify", None)
+        if legacy is None:
+            raise not_configured("shopify", "config.shopify block")
+        source = legacy
+    merchant_currency = getattr(getattr(config, "merchant", None), "currency", "INR") or "INR"
+    return ShopifyAdapter(source, client, merchant_currency=merchant_currency, config=config)
+
+
+register_adapter("shopify", _build_shopify)
+

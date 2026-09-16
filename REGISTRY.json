@@ -94,6 +94,16 @@
     "/intent/amendment/<amendment_id>/approve",
     "/intent/amendment/<amendment_id>/reject",
     "/intent/cart/<cart_id>/approve",
-    "/intent/cart/<cart_id>/reject"
+    "/intent/cart/<cart_id>/reject",
+    "/merchant",
+    "/merchant/login",
+    "/merchant/logout",
+    "/merchant/setup",
+    "/merchant/catalog",
+    "/merchant/orders",
+    "/merchant/campaigns",
+    "/merchant/policies",
+    "/merchant/settings",
+    "/merchant/merchandising"
   ]
 }

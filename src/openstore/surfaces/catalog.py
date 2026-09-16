@@ -12,6 +12,12 @@ import yaml
 
 from openstore.config import Settings
 
+from openstore.surfaces.adapters.base import AdapterCapability
+from openstore.surfaces.adapters.cache import AdapterCache
+from openstore.surfaces.adapters.errors import AdapterError, not_configured, price_invalid, price_missing, sku_missing
+from openstore.surfaces.adapters.normalize import clean_sku, normalize_tags, normalized_item, parse_stock, price_to_minor
+from openstore.surfaces.adapters.registry import get_adapter, register_adapter
+
 # Legacy single-slot cache. Tests reach in and set this to None to force a
 # reload, so it stays as the invalidation signal, but the real cache below is
 # keyed by (path, mtime): the single slot was shared across every config in a
@@ -22,20 +28,20 @@ CATALOG_CACHE: list[dict[str, Any]] | None = None
 _CATALOG_BY_PATH: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
-def load_catalog(config: Settings) -> list[dict[str, Any]]:
-    """Load the catalog named by config.catalog_path, cached per path and
-    invalidated when the file's mtime changes.
+def _yaml_path(config: Settings, source: Any) -> str | None:
+    override = getattr(source, "path", None) if source is not None else None
+    if override:
+        return str(override)
+    return getattr(config, "catalog_path", None)
 
-    When config.shopify is set (DECISION-037), the Shopify store is the
-    source instead and the YAML file is never read."""
-    if getattr(config, "shopify", None) is not None:
-        from openstore.surfaces.shopify_catalog import load_shopify_catalog
 
-        return load_shopify_catalog(config)
-
+def _load_yaml_items(config: Settings, source: Any) -> list[dict[str, Any]]:
+    """YAML adapter read: fail-loud pricing (DEF-1), frozen shape (S25)."""
     global CATALOG_CACHE
+    from openstore.config import merchant_id as _merchant_id
 
-    catalog_path = getattr(config, "catalog_path", None)
+    _ = _merchant_id  # merchant scoping arrives with multi-tenant reads (S26+)
+    catalog_path = _yaml_path(config, source)
     if not catalog_path:
         return []
 
@@ -58,21 +64,103 @@ def load_catalog(config: Settings) -> list[dict[str, Any]]:
     else:
         items = data.get("items", [])
     normalized = []
-    for item in items:
+    for raw_item in items:
+        if not isinstance(raw_item, dict) or clean_sku(raw_item.get("sku")) == "":
+            raise sku_missing("yaml", "catalog row without a sku field")
+        sku = clean_sku(raw_item.get("sku"))
+        if "unit_minor" not in raw_item and "price_minor" not in raw_item:
+            raise price_missing(sku, "yaml")
+        raw_price = raw_item.get("unit_minor", raw_item.get("price_minor"))
+        if isinstance(raw_price, int) and not isinstance(raw_price, bool):
+            unit_minor = raw_price
+        elif isinstance(raw_price, str) and raw_price.strip().lstrip("-").isdigit():
+            unit_minor = int(raw_price.strip())
+        else:
+            raise price_invalid(sku, "yaml", raw_price)
+        if unit_minor <= 0:
+            raise price_invalid(sku, "yaml", raw_price)
+        try:
+            stock = parse_stock(raw_item.get("stock", None))
+        except ValueError as e:
+            raise price_invalid(sku, "yaml", raw_item.get("stock"), "stock") from e
         normalized.append(
-            {
-                "sku": str(item["sku"]),
-                "name": str(item.get("name", item["sku"])),
-                "unit_minor": int(item.get("unit_minor", item.get("price_minor", 0))),
-                "tags": sorted([str(t) for t in item.get("tags", [])]),
-                "related_skus": [str(s) for s in item.get("related_skus", [])],
-                "description": str(item.get("description", "")),
-                "offers": item.get("offers", []),
-            }
+            normalized_item(
+                sku=sku,
+                name=str(raw_item.get("name", sku)),
+                unit_minor=unit_minor,
+                tags=normalize_tags(raw_item.get("tags", [])),
+                related_skus=[str(s) for s in raw_item.get("related_skus", [])],
+                related_source="yaml",
+                description=str(raw_item.get("description", "")),
+                offers=raw_item.get("offers", []),
+                stock=stock,
+            )
         )
     _CATALOG_BY_PATH[key] = (mtime, normalized)
     CATALOG_CACHE = normalized
     return normalized
+
+
+class YamlAdapter:
+    """The YAML catalog as an SDK adapter (no special status)."""
+
+    name = "yaml"
+    capabilities = frozenset(
+        {AdapterCapability.CATALOG_READ, AdapterCapability.STOCK_READ}
+    )
+
+    def __init__(self, config: Settings, source: Any = None):
+        self._config = config
+        self._source = source
+
+    def fetch_items(self) -> list[dict[str, Any]]:
+        return _load_yaml_items(self._config, self._source)
+
+    def fetch_stock(self, skus: list[str]) -> dict[str, int]:
+        by_sku = {i["sku"]: i for i in self.fetch_items()}
+        out: dict[str, int] = {}
+        for sku in skus:
+            item = by_sku.get(sku)
+            if item is not None and item.get("stock") is not None:
+                out[sku] = int(item["stock"])
+        return out
+
+    def write_stock(self, deltas: dict[str, int]) -> None:
+        raise not_configured("yaml", "stock write-back (flat file, no write API)")
+
+    def push_order_status(self, order: Any) -> None:
+        raise not_configured("yaml", "order write-back (flat file, no order API)")
+
+    def health_check(self) -> Any:
+        try:
+            items = self.fetch_items()
+        except AdapterError as e:
+            return Any(ok=False, detail=f"{e.reason_code}: {e.message}")
+        return Any(ok=True, item_count=len(items))
+
+
+def _build_yaml(config: Settings, source: Any, _client: Any) -> Any:
+    return YamlAdapter(config, source)
+
+
+register_adapter("yaml", _build_yaml)
+
+
+def load_catalog(config: Settings, session: Session | None = None) -> list[dict[str, Any]]:
+    """Load the catalog through the resolved CatalogAdapter (S25).
+
+    Legacy catalog_path:/shopify: blocks normalize into catalog_source at
+    resolution (adapters/registry.py); YAML-with-no-path and missing files
+    still answer [] exactly as before.
+    
+    If a session is provided, it's used to apply the DB overlay (catalog_source
+    from /merchant/settings). If no session, a new one is created.
+    """
+    from openstore.surfaces.adapters import get_adapter
+    from openstore.core.settings_overlay import effective_settings
+
+    eff = effective_settings(config, session)
+    return get_adapter(eff, purpose="catalog").fetch_items()
 
 
 def search_catalog_items(
@@ -209,22 +297,21 @@ def active_offers_by_sku(config: Settings) -> dict[str, list[dict[str, Any]]]:
     session = get_session(config)
     try:
         campaigns = _active_in_window_campaigns(session)
+        by_sku: dict[str, list[dict[str, Any]]] = {}
+        for campaign in campaigns:
+            for sku in campaign.applies_to_skus:
+                by_sku.setdefault(sku, []).append(
+                    {
+                        "campaign_id": campaign.id,
+                        "title": campaign.title,
+                        "discount_bps": campaign.discount_bps,
+                        "starts_at": campaign.starts_at.isoformat() + "Z",
+                        "ends_at": campaign.ends_at.isoformat() + "Z",
+                    }
+                )
+        return by_sku
     finally:
         session.close()
-
-    by_sku: dict[str, list[dict[str, Any]]] = {}
-    for campaign in campaigns:
-        for sku in campaign.applies_to_skus:
-            by_sku.setdefault(sku, []).append(
-                {
-                    "campaign_id": campaign.id,
-                    "title": campaign.title,
-                    "discount_bps": campaign.discount_bps,
-                    "starts_at": campaign.starts_at.isoformat() + "Z",
-                    "ends_at": campaign.ends_at.isoformat() + "Z",
-                }
-            )
-    return by_sku
 
 
 def _active_in_window_campaigns(session: Any) -> list[Any]:

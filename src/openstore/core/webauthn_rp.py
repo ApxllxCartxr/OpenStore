@@ -256,7 +256,7 @@ def _binding_matches(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
         return expected.get("campaign_id") is not None and expected.get(
             "campaign_id"
         ) == actual.get("campaign_id")
-    if expected_mode == "policy":
+    if expected_mode in ("policy", "merchant-login"):
         return True
     return False
 

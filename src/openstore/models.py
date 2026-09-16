@@ -159,6 +159,15 @@ class Checkout(SQLModel, table=True):
     # non-chat checkout, or one not yet RELEASED).
     poai_bundle: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
+    # Stage 24 (Q-045): arbitrator share-link bearer token. SHA-256 hex of the
+    # raw token (never the token itself — handoff discipline); null means no
+    # share link is live for this checkout. Revoked by nulling both columns
+    # from /merchant/orders.
+    evidence_token_hash: str | None = Field(default=None, max_length=64, index=True)
+    evidence_token_expires_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime, nullable=True)
+    )
+
     __table_args__ = (
         Index("ix_checkout_trace_client", "trace_id", "client_id"),
         Index("ix_checkout_merchant_state", "merchant_id", "state"),
@@ -211,7 +220,7 @@ class WebhookEvent(SQLModel, table=True):
 class AuditLog(SQLModel, table=True):
     __tablename__ = "audit_logs"
 
-    id: int = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     trace_id: str = Field(index=True, max_length=64)
     client_id: str = Field(index=True, max_length=64)
     action: str = Field(max_length=64)
@@ -289,7 +298,7 @@ class OAuthToken(SQLModel, table=True):
 class WebAuthnCredential(SQLModel, table=True):
     __tablename__ = "webauthn_credentials"
 
-    id: int = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     credential_id: str = Field(max_length=256, unique=True, index=True)
     user_handle: str = Field(max_length=64, index=True)  # merchant_id or admin user
     public_key: bytes = Field(
@@ -412,7 +421,7 @@ class Handoff(SQLModel, table=True):
     # either the legacy single-process path (studio.py resumes in-process
     # via resume_after_signing) or a federated buyer that hasn't opted in.
     # Carries no authority: see surfaces/buyer_internal.py for why a forged
-    # or replayed POST to this URL gains an attacker nothing.
+    # or replayed call here must gain an attacker nothing.
     resume_url: str | None = Field(default=None, max_length=1024)
 
     # S16 (Q-033): for kind=CART handoffs, the pending cart awaiting a
@@ -471,3 +480,46 @@ class ShoppingSession(SQLModel, table=True):
     __table_args__ = (
         Index("ix_shopping_session_chat_user", "chat_platform", "chat_user_id", "chat_channel_id"),
     )
+
+
+# Stage 24 (Q-044/Q-045): passkey-bound merchant browsing sessions + non-secret config overlay
+class MerchantSession(SQLModel, table=True):
+    """Stage 24 (Q-044): a passkey-authenticated merchant-operator browsing
+    session. Proves WHICH operator is browsing — it is NOT money authority;
+    every money-moving action still requires a fresh WebAuthn assertion
+    exactly as today. The raw cookie token is never persisted (SHA-256 only,
+    mirroring how Handoff treats its token)."""
+
+    __tablename__ = "merchant_sessions"
+
+    id: str = Field(primary_key=True, max_length=64)  # uuid4 hex
+    token_hash: str = Field(max_length=64, unique=True, index=True)  # sha256 hex
+    operator_id: str = Field(max_length=64, index=True)
+    credential_id: str = Field(max_length=256)  # which WebAuthn credential authenticated it
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+    last_seen_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+    expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False))
+    revoked_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
+    user_agent_hash: str | None = Field(default=None, max_length=64)
+
+    __table_args__ = (Index("ix_merchant_session_operator", "operator_id"),)
+
+
+class MerchantSetting(SQLModel, table=True):
+    """Stage 24 (DECISION-045): non-secret config overlay edited from the
+    browser. Overlays the YAML at load time so a browser edit never rewrites
+    a file that may be templated or read-only in a container. Secrets never
+    live here (presence/absence only in the UI)."""
+
+    __tablename__ = "merchant_settings"
+
+    key: str = Field(primary_key=True, max_length=128)
+    value: str = Field(max_length=4096)
+    updated_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+

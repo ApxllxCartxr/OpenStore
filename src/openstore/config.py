@@ -10,8 +10,9 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated, Literal
 
 _ENV_VAR_PATTERN = re.compile(r"^\$\{([A-Z_][A-Z0-9_]*)\}$")
 
@@ -111,6 +112,128 @@ class ShopifyConfig(BaseModel):
     client_secret: str
 
 
+class StrictModel(BaseModel):
+    """Stage 25: nested source models REJECT unknown keys. They do NOT
+    inherit the outer Settings' extra="forbid" (pydantic v2), so without
+    this base a typo'd adapter key (e.g. base_ur1) would be silently
+    accepted — the same silent-default class R0.3 exists to kill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class YamlSource(StrictModel):
+    """Local YAML catalog (today's catalog.yaml, no special status)."""
+
+    type: Literal["yaml"] = "yaml"
+    path: str | None = None  # None => config.catalog_path
+
+
+class CsvSource(StrictModel):
+    """CSV file catalog (Dukaan/Instamojo/WhatsApp-only SMBs). One of path
+    (local file) or url (published CSV) is required."""
+
+    type: Literal["csv"] = "csv"
+    path: str | None = None
+    url: str | None = None
+    sku_column: str = "sku"
+    name_column: str = "name"
+    price_column: str = "price"
+    tags_column: str = "tags"
+    stock_column: str = "stock"
+    related_column: str = "related_skus"
+    description_column: str = "description"
+
+
+class SheetsSource(StrictModel):
+    """Google Sheets via published-CSV URL first; API key optional later."""
+
+    type: Literal["sheets"] = "sheets"
+    url: str
+    gid: str | None = None
+    sku_column: str = "sku"
+    name_column: str = "name"
+    price_column: str = "price"
+    tags_column: str = "tags"
+    stock_column: str = "stock"
+    related_column: str = "related_skus"
+    description_column: str = "description"
+
+
+class ShopifySource(StrictModel):
+    """Shopify as a discriminated-union member (legacy `shopify:` block
+    normalizes into this shape at resolution time)."""
+
+    type: Literal["shopify"] = "shopify"
+    store_domain: str
+    client_id: str
+    client_secret: str
+    page_size: int = 250
+    max_pages: int = 40
+
+
+class WooCommerceSource(StrictModel):
+    type: Literal["woocommerce"] = "woocommerce"
+    base_url: str
+    consumer_key: str
+    consumer_secret: str
+    page_size: int = 100
+    max_pages: int = 40
+
+
+class BigCommerceSource(StrictModel):
+    type: Literal["bigcommerce"] = "bigcommerce"
+    store_hash: str
+    access_token: str
+    page_size: int = 250
+    max_pages: int = 40
+
+
+class MagentoSource(StrictModel):
+    type: Literal["magento"] = "magento"
+    base_url: str
+    access_token: str
+    page_size: int = 100
+    max_pages: int = 40
+
+
+class WixSource(StrictModel):
+    """Wix Stores Catalog V3; OAuth app-instance token (browser install
+    flow in /merchant/setup — a pasted key alone cannot provision it)."""
+
+    type: Literal["wix"] = "wix"
+    instance_token: str
+    page_size: int = 100
+    max_pages: int = 40
+
+
+class ZohoSource(StrictModel):
+    """Zoho Commerce; data-centre suffix is an explicit field, never
+    inferred (`.in` / `.com` / `.eu`)."""
+
+    type: Literal["zoho"] = "zoho"
+    dc: str = "in"
+    client_id: str
+    client_secret: str
+    refresh_token: str
+    organization_id: str | None = None
+    page_size: int = 100
+    max_pages: int = 40
+
+
+CatalogSource = Annotated[
+    YamlSource
+    | CsvSource
+    | SheetsSource
+    | ShopifySource
+    | WooCommerceSource
+    | BigCommerceSource
+    | MagentoSource
+    | WixSource
+    | ZohoSource,
+    Field(discriminator="type"),
+]
+
+
 class Settings(BaseSettings):
     # No env_file here on purpose. from_yaml() already calls load_dotenv() and
     # resolves ${VAR} itself, so a dotenv settings source is redundant — and
@@ -132,11 +255,42 @@ class Settings(BaseSettings):
     campaign: CampaignSettings = Field(default_factory=CampaignSettings)
     catalog_path: str | None = None
     shopify: ShopifyConfig | None = None
+    # Stage 25 (Q-046): discriminated source unions. catalog_source names
+    # the catalog origin; stock_source (optional, independent — the 25b OMS
+    # shape) names the stock origin and defaults to the catalog adapter.
+    # Legacy catalog_path:/shopify: keep working, normalized at resolution.
+    catalog_source: CatalogSource | None = None
+    stock_source: CatalogSource | None = None
     evidence_retention_days: int = 540
+    # Stage 24 (Q-045): arbitrator share-link TTL. A config key, not a
+    # REGISTRY identifier (Q-043 precedent). Bounds fail loud, and a link
+    # must never outlive the bundle it points at.
+    evidence_share_ttl_days: int = 30
     # SID-1: public origin (scheme+host) the sidecar is reachable at, used for
     # manifests and CORS/RP binding. None => same-origin reverse proxy (derive
     # from request). Subdomain deployments MUST set this explicitly.
     public_base_url: str | None = None
+    # Stage 25 (Q-046): discriminated source unions. catalog_source names
+    # the catalog origin; stock_source (optional, independent -- the 25b OMS
+    # shape) names the stock origin and defaults to the catalog adapter.
+    # Legacy catalog_path:/shopify: keep working, normalized at resolution.
+    catalog_source: "CatalogSource | None" = None
+    stock_source: "CatalogSource | None" = None
+
+    @model_validator(mode="after")
+    def _check_evidence_share_ttl(self) -> Settings:
+        """Stage 24 (Q-045): the share link must live 1–540 days and never
+        outlive the evidence bundle itself. Fail loud (R0.5)."""
+        ttl = self.evidence_share_ttl_days
+        if not 1 <= ttl <= 540:
+            raise ValueError(f"evidence_share_ttl_days must be within 1-540, got {ttl}")
+        if ttl > self.evidence_retention_days:
+            raise ValueError(
+                "evidence_share_ttl_days "
+                f"({ttl}) must not exceed evidence_retention_days "
+                f"({self.evidence_retention_days}): a link must never outlive its bundle"
+            )
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> Settings:
@@ -183,6 +337,9 @@ def load_config(config_path: str | Path) -> Settings:
     # merchants in the same repo silently served identical catalogs.
     if settings.catalog_path:
         settings.catalog_path = str(Path(config_path).parent / settings.catalog_path)
-    else:
+    elif settings.catalog_source is None and settings.shopify is None:
+        # DEF-11: only default the YAML path when NO other source is
+        # configured — a defaulted path must never count as a second origin
+        # next to shopify:/catalog_source: at resolution time.
         settings.catalog_path = str(Path(config_path).parent / "catalog.yaml")
     return settings

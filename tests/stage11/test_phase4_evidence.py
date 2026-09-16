@@ -46,7 +46,7 @@ def _make_held_checkout(
     checkout_id: str,
     amount_minor: int = 15000,
     request_text: str | None = "vegan gelato please",
-    chat_user_id: str | None = "d77",
+    chat_user_id: str | None = "buyerkey123456789012",
 ) -> Checkout:
     checkout, _ = get_or_create_checkout(
         session=session,
@@ -74,7 +74,7 @@ def _make_held_checkout(
         currency="INR",
     )
     update_checkout_state(session=session, checkout_id=checkout.id, new_state=OrderState.HELD)
-    checkout.chat_platform = "discord"
+    checkout.chat_platform = "web"
     checkout.chat_user_id = chat_user_id
     checkout.chat_channel_id = "chan_1"
     checkout.request_text = request_text
@@ -169,15 +169,15 @@ class TestEvidenceRoutes:
         psp_router_module._build_and_store_evidence(settings, session, checkout, "Paid!")
         session.commit()
 
-        res = evidence_client.get(f"/orders/{checkout.id}/evidence")
-        assert res.status_code == 200
+        res = evidence_client.get(f"/orders/{checkout.id}/evidence", params={"buyer_key": checkout.chat_user_id})
+        assert res.status_code == 200, res.text
         assert res.json()["bundle_id"] == checkout.poai_bundle["bundle_id"]
 
     def test_get_evidence_404_when_no_bundle_yet(self, settings, session, evidence_client):
-        _make_held_checkout(session, checkout_id="chk_ev_pending")
-
-        res = evidence_client.get("/orders/chk_ev_pending/evidence")
-        assert res.status_code == 404
+        checkout = _make_held_checkout(session, checkout_id="chk_ev_pending")
+        # No bundle stored yet
+        res = evidence_client.get(f"/orders/{checkout.id}/evidence", params={"buyer_key": checkout.chat_user_id})
+        assert res.status_code == 404, res.text
         assert res.json()["detail"]["reason_code"] == "checkout.evidence_not_found"
 
     def test_get_evidence_404_when_checkout_unknown(self, evidence_client):
@@ -190,8 +190,8 @@ class TestEvidenceRoutes:
         psp_router_module._build_and_store_evidence(settings, session, checkout, "Paid!")
         session.commit()
 
-        res = evidence_client.get(f"/orders/{checkout.id}/evidence/view")
-        assert res.status_code == 200
+        res = evidence_client.get(f"/orders/{checkout.id}/evidence/view", params={"buyer_key": checkout.chat_user_id})
+        assert res.status_code == 200, res.text
         assert "PoAI Evidence Viewer" in res.text
         assert f"/orders/{checkout.id}/evidence" in res.text
 

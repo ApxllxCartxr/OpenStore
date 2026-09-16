@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -90,6 +90,12 @@ from openstore.models import (
 )
 from openstore.notifier import send_dm, sync_alert
 from openstore.psp.razorpay_driver import create_payment_link
+from openstore.core.session import (
+    SESSION_COOKIE,
+    validate_session,
+    csrf_token_for,
+)
+from openstore.core.api import CommerceError
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
@@ -178,10 +184,13 @@ class _Operator:
     """Session-carried operator identity (INV-10). user_id is never read from a
     request body; it comes from the operator session header, which stands in for
     the authenticated merchant-operator session here (no auth framework is in
-    this stage's scope)."""
+    this stage's scope). `authenticated` tells routes which case they got,
+    so money-adjacent surfaces can later demand a real session without
+    changing the resolution chain."""
 
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str, authenticated: bool = False):
         self.user_id = user_id
+        self.authenticated = authenticated
 
 
 _CAMPAIGN_STATUS = {
@@ -265,17 +274,89 @@ def _operator(
     x_operator_id: str | None = Header(default=None, alias=_NONCE_HEADER),
     operator: str | None = Query(default=None),
 ) -> _Operator:
-    """operator_id carries no authority of its own (see _Operator's
+    """Legacy unauthenticated namespace selection (header or query param).
+
+    operator_id carries no authority of its own (see _Operator's
     docstring) — it only selects which WebAuthn credential set a session
     uses, so accepting it as a query param alongside the header weakens
     nothing. Without this, a plain browser navigation (which cannot set a
     custom header) could never open a GET route behind this dependency at
     all — every fetch() the page itself makes afterward already sends the
-    header correctly (JS can set headers; a top-level navigation can't)."""
+    header correctly (JS can set headers; a top-level navigation can't).
+    Authenticated callers resolve through _resolve_operator (factory-level,
+    cookie first); this stays as the shared fallback."""
     user_id = x_operator_id or operator
     if not user_id or not user_id.strip():
         raise HTTPException(status_code=401, detail="operator session required")
     return _Operator(user_id.strip())
+
+
+def _csrf_meta_for(request: Request) -> str:
+    """CSRF <meta> for pages with mutating fetch() calls: the derived
+    token when the viewer holds a session cookie, empty otherwise."""
+    raw = request.cookies.get(SESSION_COOKIE)
+    return csrf_meta(csrf_token_for(raw) if raw else "")
+
+def _require_csrf_if_session(request: Request) -> None:
+    """CSRF gate for mutating studio routes. Fires only when the request
+    carries a session cookie (ambient credential = CSRF exposure): the
+    cross-site attacker cannot set the header, the page's own JS can.
+    Cookie-less callers (tests, header/query operator flows) are
+    unaffected. CommerceError maps to its HTTP status with the
+    closed-set code (R0.5)."""
+    raw = request.cookies.get(SESSION_COOKIE)
+    if raw is None:
+        return
+    try:
+        check_csrf(raw, request.headers.get("X-OpenStore-CSRF"))
+    except CommerceError as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail={"reason_code": e.reason_code, "message": e.message},
+        ) from e
+
+def _render_amendment_page(
+    handoff: Handoff, token: str, store: ChallengeStore, request: Request
+) -> HTMLResponse:
+    """S11 Phase 4: render the amendment-approval page. Issues the
+    WebAuthn challenge inline (bound to {"mode":"amendment",
+    "amendment_id":...}) so no separate "begin assertion" route is
+    needed (Q-017 reserves only the two approve/reject routes)."""
+    draft_wrapper = handoff.amendment_draft or {}
+    draft = draft_wrapper.get("draft", {})
+    amendment_id = draft.get("amendment_id", "")
+    buyer = buyer_handle(handoff)
+    begin = begin_assertion(
+        config, buyer, binding={"mode": "amendment", "amendment_id": amendment_id}, store=store
+    )
+    html = (TEMPLATES / "amendment_studio.html").read_text(encoding="utf-8")
+    html = html.replace("__AMENDMENT_ID__", _safe_json(amendment_id))
+    html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
+    html = html.replace("__DRAFT_JSON__", _safe_json(draft))
+    html = html.replace("__ASSERTION_BEGIN_JSON__", _safe_json(begin))
+    html = inject_head(html, _csrf_meta_for(request))
+    return HTMLResponse(html)
+
+
+def inject_head(html_text: str, extra: str) -> str:
+    """Insert `extra` markup before </head> without touching template bytes
+    otherwise. Lets session-aware handlers add the CSRF meta (and the shell
+    stylesheet link) to legacy templates that predate the shell."""
+    if "</head>" not in html_text:
+        return html_text
+    return html_text.replace("</head>", extra + "\n</head>", 1)
+
+def csrf_meta(csrf_token: str) -> str:
+    """<meta> carrying the per-session CSRF token for fetch() callers.
+    Empty content when the viewer holds no session (CSRF is only enforced
+    when a session cookie is present, so anonymous callers need nothing)."""
+    import html as _html
+    return f'<meta name="csrf-token" content="{_html.escape(csrf_token)}">' ''
+
+def _safe_json(value: Any) -> str:
+    """JSON for direct embedding in <script>."""
+    import json
+    return json.dumps(value, separators=(",", ":"))
 
 
 _HANDOFF_STATUS = {
@@ -656,9 +737,40 @@ def policy_studio_router(
     make_session = session_factory or (lambda: get_session(config))
     store = challenge_store or ChallengeStore()
 
+    def _resolve_operator(
+        request: Request,
+        x_operator_id: str | None = Header(default=None, alias=_NONCE_HEADER),
+        operator: str | None = Query(default=None),
+    ) -> _Operator:
+        """Stage 24 (Q-044): cookie -> header -> ?operator= -> 401.
+
+        A valid `openstore_session` cookie resolves to an AUTHENTICATED
+        operator (passkey-verified at login). The header and query param are
+        the legacy unauthenticated namespace selectors — kept so no existing
+        test or JS flow breaks, and so plain browser navigation works
+        (DECISION-030). An expired/invalid cookie falls through to them
+        rather than hard-failing, exactly as if no cookie were sent."""
+        from openstore.core.api import CommerceError as _CommerceError
+        from openstore.core.session import SESSION_COOKIE, validate_session
+
+        raw = request.cookies.get(SESSION_COOKIE)
+        if raw:
+            db = make_session()
+            try:
+                row = validate_session(
+                    db, raw, request.headers.get("user-agent")
+                )
+                db.commit()  # persist the sliding-window refresh
+                return _Operator(row.operator_id, authenticated=True)
+            except _CommerceError:
+                db.rollback()
+            finally:
+                db.close()
+        return _operator(x_operator_id, operator)
+
     router = APIRouter()
 
-    def _render_amendment_page(handoff: Handoff, token: str, store: ChallengeStore) -> HTMLResponse:
+    def _render_amendment_page(handoff: Handoff, token: str, store: ChallengeStore, request: Request) -> HTMLResponse:
         """S11 Phase 4: render the amendment-approval page. Issues the
         WebAuthn challenge inline (bound to {"mode":"amendment",
         "amendment_id":...}) so no separate "begin assertion" route is
@@ -675,9 +787,12 @@ def policy_studio_router(
         html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
         html = html.replace("__DRAFT_JSON__", _safe_json(draft))
         html = html.replace("__ASSERTION_BEGIN_JSON__", _safe_json(begin))
+        html = inject_head(html, _csrf_meta_for(request))
         return HTMLResponse(html)
 
-    def _render_cart_page(handoff: Handoff, token: str, store: ChallengeStore) -> HTMLResponse:
+    def _render_cart_page(
+        handoff: Handoff, token: str, store: ChallengeStore, request: Request
+    ) -> HTMLResponse:
         """S16 (Q-033): render the per-cart approval page. Issues the WebAuthn
         challenge inline bound to {"mode": "cart", "cart_hash": ...} so the
         resulting assertion cannot be replayed onto a different cart."""
@@ -695,28 +810,32 @@ def policy_studio_router(
         html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
         html = html.replace("__CART_JSON__", _safe_json(cart))
         html = html.replace("__ASSERTION_BEGIN_JSON__", _safe_json(begin))
+        html = inject_head(html, _csrf_meta_for(request))
         return HTMLResponse(html)
 
     # ------------------------------------------------------------------ page
     @router.get("/intent/studio", response_class=HTMLResponse)
     async def studio_page(
+        request: Request,
         token: str | None = None,
         x_operator_id: str | None = Header(default=None, alias=_NONCE_HEADER),
+        operator: str | None = Query(default=None),
     ) -> HTMLResponse:
         if token is not None:
             handoff = _resolve_handoff(make_session, token)
             if handoff.kind == HandoffKind.AMENDMENT:
-                return _render_amendment_page(handoff, token, store)
+                return _render_amendment_page(handoff, token, store, request)
             if handoff.kind == HandoffKind.CART:
-                return _render_cart_page(handoff, token, store)
+                return _render_cart_page(handoff, token, store, request)
             user_id = buyer_handle(handoff)
         else:
-            user_id = _operator(x_operator_id, operator=None).user_id
+            user_id = _resolve_operator(request, x_operator_id, operator).user_id
         html = (TEMPLATES / "policy_studio.html").read_text(encoding="utf-8")
         html = html.replace("__OPERATOR_ID__", _safe_json(user_id))
         html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
         html = html.replace("__HOLD_TABLE_ROWS__", _render_hold_rows())
         html = html.replace("__CAP_NOTE_HTML__", _render_cap_note())
+        html = inject_head(html, _csrf_meta_for(request))
         return HTMLResponse(html)
 
     # ------------------------------------------------------------ enrolment
@@ -862,7 +981,8 @@ def policy_studio_router(
     # real RP verification inside activate_campaign.
     @router.get("/campaign/studio", response_class=HTMLResponse)
     async def campaign_studio_page(
-        operator: _Operator = Depends(_operator),
+        request: Request,
+        operator: _Operator = Depends(_resolve_operator),
     ) -> HTMLResponse:
         session = make_session()
         try:
@@ -872,6 +992,7 @@ def policy_studio_router(
         html = (TEMPLATES / "campaign_studio.html").read_text(encoding="utf-8")
         html = html.replace("__OPERATOR_ID__", _safe_json(operator.user_id))
         html = html.replace("__CAMPAIGNS_JSON__", _safe_json(rows))
+        html = inject_head(html, _csrf_meta_for(request))
         return HTMLResponse(html)
 
     @router.post("/campaign/{campaign_id}/approve")
@@ -930,7 +1051,7 @@ def policy_studio_router(
 
     # ------------------------------------------------------------------- admin
     @router.get("/admin/campaigns")
-    async def admin_campaigns(operator: _Operator = Depends(_operator)) -> dict[str, Any]:
+    async def admin_campaigns(request: Request, operator: _Operator = Depends(_resolve_operator)) -> dict[str, Any]:
         session = make_session()
         try:
             return {
@@ -952,7 +1073,8 @@ def policy_studio_router(
 
     @router.get("/admin/orders/view", response_class=HTMLResponse)
     async def admin_orders_page(
-        limit: int = 50, operator: _Operator = Depends(_operator)
+        request: Request,
+        limit: int = 50, operator: _Operator = Depends(_resolve_operator)
     ) -> HTMLResponse:
         session = make_session()
         try:
@@ -963,6 +1085,7 @@ def policy_studio_router(
         html = html.replace("__OPERATOR_ID__", _safe_json(operator.user_id))
         html = html.replace("__ORDERS_JSON__", _safe_json(rows))
         html = html.replace("__LIMIT__", str(limit))
+        html = inject_head(html, _csrf_meta_for(request))
         return HTMLResponse(html)
 
     # ------------------------------------------------------------ blast radius
