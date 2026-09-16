@@ -272,7 +272,7 @@ def merchant_router(
             ][:5]
             from openstore.surfaces.catalog import load_catalog
 
-            catalog_count = len(load_catalog(config))
+            catalog_count = len(load_catalog(config, db))
             claimed = store_claimed(db)
         finally:
             db.close()

@@ -76,6 +76,11 @@ def effective_settings(config: Settings, session: Session | None = None) -> Sett
     ready" flag was considered and rejected: it leaks across the
     differently-scoped per-test databases this function must also work
     against.
+
+    Callers that are already inside a transaction MUST pass their own
+    session. The fallback below opens a second one, and under SQLite's
+    StaticPool (the in-memory test/dev path) every Session shares a single
+    connection — closing this one rolls back the caller's in-flight work.
     """
     if session is not None:
         return apply_overlay(config, read_overlay(session))

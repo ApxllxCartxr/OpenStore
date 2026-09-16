@@ -84,7 +84,11 @@ def validate_campaign(
     if campaign.applies_to_skus:
         from openstore.surfaces.catalog import load_catalog
 
-        catalog = load_catalog(config)
+        # Thread the caller's session: load_catalog resolves the DB settings
+        # overlay, and opening a second Session here would share (and on close
+        # roll back) the caller's connection under SQLite's StaticPool,
+        # discarding in-flight campaign work.
+        catalog = load_catalog(config, session)
         catalog_skus = {item["sku"] for item in catalog}
         for sku in campaign.applies_to_skus:
             if sku not in catalog_skus:
