@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -55,7 +55,7 @@ from openstore.agents.buyer_agent import (
 )
 from openstore.agents.mcp_client import InProcessMCPClient
 from openstore.config import Settings, merchant_id
-from openstore.core.api import create_checkout_from_policy
+from openstore.core.api import CommerceError, create_checkout_from_policy
 from openstore.core.campaigns import (
     CampaignValidationError,
     activate_campaign,
@@ -70,6 +70,11 @@ from openstore.core.policy_signing import (
     PER_USER_AGGREGATE_CAP_MINOR,
     blast_radius,
     complete_policy_signing,
+)
+from openstore.core.session import (
+    SESSION_COOKIE,
+    check_csrf,
+    csrf_token_for,
 )
 from openstore.core.webauthn_rp import (
     ChallengeStore,
@@ -90,12 +95,6 @@ from openstore.models import (
 )
 from openstore.notifier import send_dm, sync_alert
 from openstore.psp.razorpay_driver import create_payment_link
-from openstore.core.session import (
-    SESSION_COOKIE,
-    validate_session,
-    csrf_token_for,
-)
-from openstore.core.api import CommerceError
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
@@ -315,29 +314,6 @@ def _require_csrf_if_session(request: Request) -> None:
             detail={"reason_code": e.reason_code, "message": e.message},
         ) from e
 
-def _render_amendment_page(
-    handoff: Handoff, token: str, store: ChallengeStore, request: Request
-) -> HTMLResponse:
-    """S11 Phase 4: render the amendment-approval page. Issues the
-    WebAuthn challenge inline (bound to {"mode":"amendment",
-    "amendment_id":...}) so no separate "begin assertion" route is
-    needed (Q-017 reserves only the two approve/reject routes)."""
-    draft_wrapper = handoff.amendment_draft or {}
-    draft = draft_wrapper.get("draft", {})
-    amendment_id = draft.get("amendment_id", "")
-    buyer = buyer_handle(handoff)
-    begin = begin_assertion(
-        config, buyer, binding={"mode": "amendment", "amendment_id": amendment_id}, store=store
-    )
-    html = (TEMPLATES / "amendment_studio.html").read_text(encoding="utf-8")
-    html = html.replace("__AMENDMENT_ID__", _safe_json(amendment_id))
-    html = html.replace("__HANDOFF_TOKEN__", _safe_json(token))
-    html = html.replace("__DRAFT_JSON__", _safe_json(draft))
-    html = html.replace("__ASSERTION_BEGIN_JSON__", _safe_json(begin))
-    html = inject_head(html, _csrf_meta_for(request))
-    return HTMLResponse(html)
-
-
 def inject_head(html_text: str, extra: str) -> str:
     """Insert `extra` markup before </head> without touching template bytes
     otherwise. Lets session-aware handlers add the CSRF meta (and the shell
@@ -351,13 +327,7 @@ def csrf_meta(csrf_token: str) -> str:
     Empty content when the viewer holds no session (CSRF is only enforced
     when a session cookie is present, so anonymous callers need nothing)."""
     import html as _html
-    return f'<meta name="csrf-token" content="{_html.escape(csrf_token)}">' ''
-
-def _safe_json(value: Any) -> str:
-    """JSON for direct embedding in <script>."""
-    import json
-    return json.dumps(value, separators=(",", ":"))
-
+    return f'<meta name="csrf-token" content="{_html.escape(csrf_token)}">'
 
 _HANDOFF_STATUS = {
     "authority.handoff_not_found": 404,
@@ -839,7 +809,7 @@ def policy_studio_router(
         return HTMLResponse(html)
 
     # ------------------------------------------------------------ enrolment
-    @router.post("/internal/webauthn/register/begin")
+    @router.post("/internal/webauthn/register/begin", dependencies=[Depends(_require_csrf_if_session)])
     async def register_begin(
         body: RegistrationBegin, operator: _Operator = Depends(_operator)
     ) -> dict[str, Any]:
@@ -853,7 +823,7 @@ def policy_studio_router(
         options["user_id"] = operator.user_id
         return options
 
-    @router.post("/internal/webauthn/register/complete")
+    @router.post("/internal/webauthn/register/complete", dependencies=[Depends(_require_csrf_if_session)])
     async def register_complete(
         body: RegistrationComplete, operator: _Operator = Depends(_operator)
     ) -> dict[str, Any]:
@@ -886,7 +856,7 @@ def policy_studio_router(
             session.close()
 
     # ------------------------------------------------------------ assertion
-    @router.post("/internal/webauthn/assertion/begin")
+    @router.post("/internal/webauthn/assertion/begin", dependencies=[Depends(_require_csrf_if_session)])
     async def assertion_begin(
         body: AssertionBegin, operator: _Operator = Depends(_operator)
     ) -> dict[str, Any]:
@@ -899,7 +869,7 @@ def policy_studio_router(
         options["binding"] = binding
         return options
 
-    @router.post("/internal/webauthn/assertion/complete")
+    @router.post("/internal/webauthn/assertion/complete", dependencies=[Depends(_require_csrf_if_session)])
     async def assertion_complete(
         body: AssertionComplete, operator: _Operator = Depends(_operator)
     ) -> dict[str, Any]:
@@ -995,7 +965,7 @@ def policy_studio_router(
         html = inject_head(html, _csrf_meta_for(request))
         return HTMLResponse(html)
 
-    @router.post("/campaign/{campaign_id}/approve")
+    @router.post("/campaign/{campaign_id}/approve", dependencies=[Depends(_require_csrf_if_session)])
     async def campaign_approve(
         campaign_id: str,
         body: CampaignDecision,
@@ -1022,7 +992,7 @@ def policy_studio_router(
         campaign = _campaign_txn(make_session, _act)
         return {"status": "approved", "campaign_id": campaign.id, "state": campaign.state.value}
 
-    @router.post("/campaign/{campaign_id}/reject")
+    @router.post("/campaign/{campaign_id}/reject", dependencies=[Depends(_require_csrf_if_session)])
     async def campaign_reject(
         campaign_id: str,
         body: CampaignReject,
@@ -1039,7 +1009,7 @@ def policy_studio_router(
             "reason": body.reason,
         }
 
-    @router.post("/campaign/{campaign_id}/pause")
+    @router.post("/campaign/{campaign_id}/pause", dependencies=[Depends(_require_csrf_if_session)])
     async def campaign_pause(
         campaign_id: str,
         operator: _Operator = Depends(_operator),
@@ -1119,7 +1089,7 @@ def policy_studio_router(
             session.close()
 
     # ------------------------------------------------------------ amendment ceremony (S11 Phase 4)
-    @router.post("/intent/amendment/{amendment_id}/approve")
+    @router.post("/intent/amendment/{amendment_id}/approve", dependencies=[Depends(_require_csrf_if_session)])
     async def amendment_approve(amendment_id: str, body: AmendmentDecision) -> dict[str, Any]:
         handoff = _resolve_handoff(make_session, body.token)
         if handoff.kind != HandoffKind.AMENDMENT:
@@ -1182,7 +1152,7 @@ def policy_studio_router(
 
         return await _approve_amendment(config, make_session, handoff, body.token)
 
-    @router.post("/intent/amendment/{amendment_id}/reject")
+    @router.post("/intent/amendment/{amendment_id}/reject", dependencies=[Depends(_require_csrf_if_session)])
     async def amendment_reject(amendment_id: str, body: AmendmentDecision) -> dict[str, Any]:
         handoff = _resolve_handoff(make_session, body.token)
         if handoff.kind != HandoffKind.AMENDMENT:
@@ -1214,7 +1184,7 @@ def policy_studio_router(
         return {"applied": False, "state": "REJECTED"}
 
     # ------------------------------------------------------------ cart ceremony (S16 / Q-033)
-    @router.post("/intent/cart/{cart_id}/approve")
+    @router.post("/intent/cart/{cart_id}/approve", dependencies=[Depends(_require_csrf_if_session)])
     async def cart_approve(cart_id: str, body: CartDecision) -> dict[str, Any]:
         handoff = _resolve_handoff(make_session, body.token)
         if handoff.kind != HandoffKind.CART:
@@ -1277,7 +1247,7 @@ def policy_studio_router(
 
         return await _approve_cart(config, make_session, handoff, body.token)
 
-    @router.post("/intent/cart/{cart_id}/reject")
+    @router.post("/intent/cart/{cart_id}/reject", dependencies=[Depends(_require_csrf_if_session)])
     async def cart_reject(cart_id: str, body: CartDecision) -> dict[str, Any]:
         handoff = _resolve_handoff(make_session, body.token)
         if handoff.kind != HandoffKind.CART:
