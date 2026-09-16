@@ -164,3 +164,31 @@ def approve_campaign():
         )
 
     return _approve
+
+
+@pytest.fixture
+def demo_client(tmp_path):
+    """A demo-mode app on its own sqlite file (Q-050 / demo tests).
+
+    The database engine is a process-global singleton, so it is swapped out
+    and restored around the test; demo_surface.reset() drops the virtual
+    authenticator and the in-memory payment links between sittings.
+    """
+    from demo_harness import write_config
+    from fastapi.testclient import TestClient
+    from openstore.core.database import apply_migrations, get_engine
+    from openstore.server import create_app
+    from openstore.surfaces import demo as demo_surface
+
+    demo_surface.reset()
+    prev = _database_module._engine
+    _database_module._engine = None
+    config = write_config(tmp_path)
+    apply_migrations(config)
+    try:
+        with TestClient(create_app(config)) as client:
+            yield client
+    finally:
+        get_engine(config).dispose()
+        _database_module._engine = prev
+        demo_surface.reset()

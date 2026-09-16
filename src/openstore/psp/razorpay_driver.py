@@ -275,10 +275,7 @@ def create_payment_link(
         if mock_razorpay is not None:
             link = mock_razorpay.payment_link.create(link_request)
         else:
-            from razorpay import Client
-
-            rz = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
-            link = rz.payment_link.create(link_request)
+            link = _get_client(config).payment_link.create(link_request)
     except Exception as e:
         err_code = getattr(e, "code", None) or getattr(e, "error", {}).get("code", None)
         err_str = str(e)
@@ -375,9 +372,7 @@ def _fetch_existing_payment_link_by_reference_id(
         if mock_razorpay is not None:
             client = mock_razorpay
         else:
-            from razorpay import Client
-
-            client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
+            client = _get_client(config)
         resp = client.payment_link.all({"reference_id": reference_id})
         items = resp.get("items", [])
         if items:
@@ -396,10 +391,7 @@ def fetch_payment_link(
     assert_test_mode_key(config.razorpay.key_id)
     if mock_razorpay is not None:
         return cast("dict[str, Any]", mock_razorpay.payment_link.fetch(payment_link_id))
-    from razorpay import Client
-
-    client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
-    return cast("dict[str, Any]", client.payment_link.fetch(payment_link_id))
+    return cast("dict[str, Any]", _get_client(config).payment_link.fetch(payment_link_id))
 
 
 def cancel_payment_link(
@@ -433,10 +425,7 @@ def cancel_payment_link(
         if mock_razorpay is not None:
             resp = mock_razorpay.payment_link.cancel(payment_link_id)
         else:
-            from razorpay import Client
-
-            client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
-            resp = client.payment_link.cancel(payment_link_id)
+            resp = _get_client(config).payment_link.cancel(payment_link_id)
     except Exception as e:
         err_str = str(e)
         if RAZORPAY_CANCEL_ALREADY_PAID_HTTP_STATUS == 400 and (
@@ -600,10 +589,7 @@ def refund_checkout(
         if mock_razorpay is not None:
             payment_link = mock_razorpay.payment_link.fetch(link_id)
         else:
-            from razorpay import Client
-
-            client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
-            payment_link = client.payment_link.fetch(link_id)
+            payment_link = _get_client(config).payment_link.fetch(link_id)
         payments = payment_link.get("payments", [])
         if not payments:
             raise RazorpayError("psp.no_payment", "No payment found for payment_link", 400)
@@ -627,10 +613,7 @@ def refund_checkout(
         if mock_razorpay is not None:
             refund = mock_razorpay.payment.refund(payment_id, refund_request)
         else:
-            from razorpay import Client
-
-            client = Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))
-            refund = client.payment.refund(payment_id, refund_request)
+            refund = _get_client(config).payment.refund(payment_id, refund_request)
     except Exception as e:
         raise RazorpayError("psp.refund_failed", f"Refund failed: {e}", None)
 
@@ -1117,7 +1100,18 @@ def reconciliation_sweep(
 # Cancel token generation (PRD §3.7): 32-byte secrets.token_urlsafe, single-use,
 # expires with the hold. The token IS the capability; do not "improve" with login.
 def _get_client(config: Settings) -> Any:
-    """Module-level factory for the Razorpay client (used by tests to mock)."""
+    """The ONE place a PSP client is constructed (used by tests to mock).
+
+    Demo mode swaps in an in-process client with the same five methods this
+    driver calls (payment_link.create/fetch/all/cancel, payment.refund), so
+    `openstore demo` runs the real INV-4 dual write, the real ledger entries
+    and the real signed-webhook path against no external account. Nothing
+    below this function knows which client it got.
+    """
+    if config.demo_mode:
+        from openstore.psp.demo_driver import DemoClient
+
+        return DemoClient(config)
     from razorpay import Client
 
     return Client(auth=(config.razorpay.key_id, config.razorpay.key_secret))

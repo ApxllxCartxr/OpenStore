@@ -265,6 +265,10 @@ class Settings(BaseSettings):
     # REGISTRY identifier (Q-043 precedent). Bounds fail loud, and a link
     # must never outlive the bundle it points at.
     evidence_share_ttl_days: int = 30
+    # `openstore demo`: swap the PSP client for an in-process one and mount
+    # the demo-only surfaces (fake payment page, virtual authenticator). Never
+    # set on a real deployment — create_app refuses it beside a live key.
+    demo_mode: bool = False
     # SID-1: public origin (scheme+host) the sidecar is reachable at, used for
     # manifests and CORS/RP binding. None => same-origin reverse proxy (derive
     # from request). Subdomain deployments MUST set this explicitly.

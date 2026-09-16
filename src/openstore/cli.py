@@ -224,6 +224,100 @@ def init(
 
 
 @app.command()
+def demo(
+    host: str = typer.Option("127.0.0.1", "--host", "-h"),
+    port: int = typer.Option(8000, "--port", "-p"),
+    directory: Path = typer.Option(
+        Path(".openstore-demo"), "--dir", help="Where the demo config and database live"
+    ),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open a browser tab"),
+    fresh: bool = typer.Option(False, "--fresh", help="Delete the demo database first"),
+) -> None:
+    """Run a self-contained demo store — no PSP account, no passkey hardware.
+
+    Payments go through an in-process PSP client and a fake gateway page;
+    passkeys come from the virtual authenticator. Everything between them —
+    policy signing, the hold, the ledger, the signed webhook, the evidence
+    bundle — is the real code path.
+    """
+    import shutil
+    import threading
+    import webbrowser
+
+    from openstore.psp.demo_driver import DEMO_KEY_ID, DEMO_WEBHOOK_SECRET
+
+    directory = directory.resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    db_path = directory / "demo.db"
+    if fresh and db_path.exists():
+        db_path.unlink()
+
+    origin = f"http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}"
+    catalog_path = directory / "catalog.yaml"
+    if not catalog_path.exists():
+        seed = Path(__file__).resolve().parent.parent.parent / "configs" / "catalog.yaml"
+        if seed.exists():
+            shutil.copy(seed, catalog_path)
+        else:
+            catalog_path.write_text(CATALOG_TEMPLATE)
+
+    config_dict: dict[str, Any] = {
+        "merchant": {"name": "OpenStore Demo", "currency": "INR"},
+        # The demo client is selected by demo_mode; the key is asserted by
+        # create_app so a demo config can never point at a real account.
+        "razorpay": {
+            "key_id": DEMO_KEY_ID,
+            "key_secret": "demo_secret",
+            "webhook_secret": DEMO_WEBHOOK_SECRET,
+        },
+        "discord": {
+            "bot_token": "",
+            "buyer_trace_channel_id": 0,
+            "merchant_trace_channel_id": 0,
+            "money_trace_channel_id": 0,
+            "alerts_channel_id": 0,
+            "buyer_bot_enabled": False,
+        },
+        "webauthn": {"rp_id": "localhost", "rp_name": "OpenStore Demo", "origin": origin},
+        "database": {"url": f"sqlite:///{db_path}"},
+        "catalog_path": str(catalog_path),
+        "demo_mode": True,
+    }
+    config_path = directory / "demo.yaml"
+    config_path.write_text(yaml.safe_dump(config_dict, sort_keys=False))
+
+    config = load_config(config_path)
+
+    from openstore.core.database import apply_migrations
+
+    apply_migrations(config)
+
+    import uvicorn
+
+    from openstore.server import create_app
+
+    fastapi_app = create_app(config)
+
+    console.print()
+    console.print("[bold]OpenStore demo[/bold]")
+    console.print(f"  Storefront   {origin}/")
+    # /merchant is session-gated; /merchant/login is where an unclaimed
+    # store is claimed with a passkey (the demo one, via the shim).
+    console.print(f"  Merchant     {origin}/merchant/login")
+    console.print(f"  Workspace    {directory}")
+    console.print()
+    console.print(
+        "[dim]Payments are simulated; passkeys come from a virtual "
+        "authenticator. Ctrl-C to stop.[/dim]"
+    )
+    console.print()
+
+    if open_browser:
+        threading.Timer(1.0, lambda: webbrowser.open(f"{origin}/")).start()
+    uvicorn.run(fastapi_app, host=host, port=port, log_config=None)
+
+
+@app.command()
 def serve(
     config_path: Path = typer.Argument(..., help="Path to merchant config YAML"),
     host: str = typer.Option("0.0.0.0", "--host", "-h"),

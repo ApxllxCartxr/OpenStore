@@ -335,6 +335,15 @@ def create_app(config: Settings) -> FastAPI:
                 f"({pub_host}) != webauthn.rp_id ({config.webauthn.rp_id})"
             )
 
+    if config.demo_mode:
+        from openstore.psp.demo_driver import DEMO_KEY_ID
+
+        if config.razorpay.key_id != DEMO_KEY_ID:
+            raise ValueError(
+                f"demo_mode requires razorpay.key_id == {DEMO_KEY_ID!r} "
+                f"(got {config.razorpay.key_id!r}): demo mode never talks to a real account"
+            )
+
     app = FastAPI(
         title=f"OpenStore — {config.merchant.name}",
         version=__version__,
@@ -682,5 +691,44 @@ def create_app(config: Settings) -> FastAPI:
     from openstore.surfaces.merchant import merchant_router
 
     app.include_router(merchant_router(config))
+
+    # `openstore demo`: fake PSP page + virtual authenticator, plus the shim
+    # that routes the browser's WebAuthn calls at it. Mounted last and only
+    # under demo_mode; a real deployment never builds this router.
+    if config.demo_mode:
+        from openstore.surfaces.demo import BANNER, demo_router
+
+        app.include_router(demo_router(config))
+
+        @app.middleware("http")
+        async def inject_demo_shim(
+            request: Request, call_next: Callable[[Request], Awaitable[Response]]
+        ) -> Response:
+            """Append the passkey shim to every HTML page.
+
+            Injection rather than template edits: the seven studio templates
+            carry the money ceremony, and DECISION-044 already rules that
+            churning their JS for anything cosmetic is not worth the risk.
+            The shim only replaces navigator.credentials, so pages that never
+            call it are unaffected.
+            """
+            response = await call_next(request)
+            if not response.headers.get("content-type", "").startswith("text/html"):
+                return response
+            # call_next hands back a streaming response; buffer it so the
+            # shim can be appended and content-length recomputed.
+            iterator: Any = getattr(response, "body_iterator", None)
+            if iterator is None:
+                return response
+            body = b"".join([bytes(chunk) async for chunk in iterator])
+            body += (BANNER + '<script src="/demo/shim.js"></script>').encode()
+            headers = dict(response.headers)
+            headers.pop("content-length", None)
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                headers=headers,
+                media_type=response.media_type,
+            )
 
     return app
