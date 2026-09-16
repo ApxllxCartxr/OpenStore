@@ -505,3 +505,96 @@
   merchant-reported `effective_amount_minor`; breach or malformed input
   blocks everything (`buyer.budget_exceeded` /
   `buyer.exposure_unavailable`, buyer-local codes).
+
+## DECISION-044 | date: 2026-09-16T00:00:00Z | stage: 24
+- Trust-on-first-use merchant claim (mirrors Q-044 RESOLUTION). The first
+  passkey to complete on an unclaimed store becomes operator #1
+  (`core/session.py::store_claimed`: true once ANY WebAuthn credential row
+  exists; `store_claimed_by_other` separates the genuine two-tab stale-claim
+  race from an operator completing its own first claim).
+- A merchant session proves WHICH operator is browsing — it is NOT money
+  authority. Every money-moving action still requires a fresh WebAuthn
+  assertion exactly as before (R0.10). Session cookie: HttpOnly,
+  SameSite=Lax, 12h sliding idle window, 7d hard cap, UA-change tripwire;
+  raw tokens never persisted (SHA-256 only, Handoff discipline); per-session
+  CSRF token HKDF-derived, never stored, never in a cookie.
+- Deliberate compromise: merchant-console form-validation failures (bad
+  price, unknown setting, blank name) answer 422 with the registered generic
+  `webhook.invalid_payload`, not a new `settings.*` namespace. Minting that
+  namespace would have added identifiers beyond the Q-044 ratification;
+  domain validations keep their own codes (`catalog.sku_not_found`,
+  `campaign.*`).
+
+## DECISION-045 | date: 2026-09-16T00:00:00Z | stage: 24
+- Browser drafting and the settings overlay (mirrors Q-044 RESOLUTION).
+  Supersedes DECISION-025's CLI-only drafting trigger: `POST
+  /merchant/campaigns` (`action: draft` / `growth-check`) runs the identical
+  ingest → validate → DRAFT → PENDING_APPROVAL pipeline; activation still
+  requires the WebAuthn ceremony (R0.10 unchanged).
+- Settings precedence: env > DB > YAML > default. `DATABASE__URL` overrides
+  at `from_yaml` time (fail loud on empty); the DB overlay
+  (`merchant_settings`, `core/settings_overlay.py::apply_overlay`) sits over
+  YAML; `SETTABLE_KEYS` (`surfaces/merchant.py`) is the closed editable set
+  and secrets never live in the overlay (presence/absence only in the UI).
+  Stage 25 reuses the same resolution on the buyer-facing catalog path, or a
+  saved platform connection would display correctly yet never serve.
+
+## DECISION-046 | date: 2026-09-16T00:00:00Z | stage: 25
+- Catalog adapter SDK with independent catalog/stock resolution (mirrors
+  Q-046-note RESOLUTION context; the stage-25 spec names this DECISION-046
+  — the `Q-046` citations in `config.py`, `adapters/registry.py`, and
+  `adapters/errors.py` header comments mean this decision, fixed alongside).
+- `surfaces/adapters/`: `CatalogAdapter` Protocol + `AdapterCapability`
+  (exhaustiveness-tested), `AdapterError(CommerceError)` with 11 `catalog.*`
+  codes, provider registry mirroring `agents/llm.py::register_provider`,
+  unified TTL+ETag cache, shared normalization (paise-exact Decimal money,
+  stdlib HTML strip, tag/SKU rules; fractional minor units FATAL, never
+  rounded).
+- `catalog_source` / `stock_source` discriminated unions resolve
+  independently; stock defaults to the catalog adapter when unset. Legacy
+  `catalog_path` / `shopify` normalize at resolution; two catalog origins at
+  once fail loud (`catalog.adapter_multiple_sources`). Nested source models
+  subclass `StrictModel` (`extra="forbid"`) so a typo'd adapter key fails
+  loud instead of silently defaulting.
+- Merchant YAML fails loud on missing/zero/non-integer prices (naming the
+  SKU) and SKU-less rows; platform adapters skip-and-count SKU-less rows and
+  fail loud only when zero usable rows remain (third-party data must not
+  nuke a sync). Any shop currency != merchant currency fails loud — never a
+  conversion. Normalized shape frozen once: `stock: int | None` (`None` =
+  unmanaged, never coerced to 0) plus `related_source` provenance; the
+  catalog digest excludes provenance (YAML≡CSV proven).
+
+## DECISION-047 | date: 2026-09-16T00:00:00Z | stage: 26
+- Pre-compiler oversell gate (recorded before implementation, per
+  `docs/PLAN-stage-26-27.md` prerequisite 1 — stage 26 builds against this).
+- `create_checkout_from_policy` checks sellability BEFORE constructing the
+  `CompilerContext`, raising `CommerceError("inventory.insufficient_stock")`.
+  Rationale is soundness, not convenience: a transcript-row check would force
+  the offline verifier to trust an unsigned point-in-time quantity, breaking
+  replayability. So `core/compiler.py` stays byte-identical (the stage-24
+  compiler-digest sentinel pins this), check 10 is left alone (Q-046), and
+  the auditor escape hatch, if ever needed, is an optional attested PoAI
+  pre-check section — never a transcript row. `tracked=false` SKUs bypass
+  the gate entirely.
+
+## DECISION-048 | date: 2026-09-16T00:00:00Z | stage: 27
+- Bundles reuse campaign discounts (recorded before implementation, per
+  `docs/PLAN-stage-26-27.md` prerequisite 1 — stage 27 builds against this).
+- A BUNDLE merchandising rule references a `Campaign` row for its discount.
+  There is no second discount path: compiler check 12 recomputes it exactly
+  as today, R0.8 stays intact, and a paused or expired bundle is silently
+  inapplicable rather than an error.
+
+## DECISION-049 | date: 2026-09-16T00:00:00Z | stage: 25/27
+- `related_source` stays on the wire (settles `docs/PLAN-stage-26-27.md`
+  prerequisite 3). Stage 25 froze the normalized shape with `stock` and
+  `related_source`, and the MCP `get_product` conformance fixtures were
+  regenerated around both; stripping one field now would churn a frozen,
+  back-compat shape for zero buyer harm (`related_source` is a short adapter
+  name, not PII — and the catalog digest already excludes provenance, so
+  attestation equality is unaffected).
+- Stage 27 accordingly adds NO second provenance field to `get_product`
+  items. Merchandising provenance (which rule suggested this, of what kind,
+  and the why-stat behind it) lives on the NEW `suggest_related` response
+  shape and the merchant why-stat panel only — never retrofitted onto the
+  existing item shape.

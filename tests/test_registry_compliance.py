@@ -106,6 +106,25 @@ def test_registry_reason_codes_complete():
         # DECISION-042 (Q-042): legitimizes catalog.sku_not_found, already
         # raised in-tree by get_product (same class as DECISION-023).
         "catalog.sku_not_found",
+        # Q-045 RESOLUTION (2026-09-16): the 11 catalog.* adapter codes
+        # (AdapterError helpers in surfaces/adapters/errors.py) and
+        # checkout.evidence_not_found (evidence.py HTTPException detail)
+        # shipped raised-but-unregistered — registry_diff.py scanned neither
+        # AdapterError sites nor HTTPException detail dicts, the same
+        # scanner-blindness root cause as Q-028. Legitimized here; the
+        # differ is widened in the same commit.
+        "catalog.sku_missing",
+        "catalog.price_missing",
+        "catalog.price_invalid",
+        "catalog.adapter_not_configured",
+        "catalog.adapter_multiple_sources",
+        "catalog.adapter_auth_failed",
+        "catalog.adapter_unreachable",
+        "catalog.adapter_rate_limited",
+        "catalog.adapter_currency_mismatch",
+        "catalog.adapter_empty",
+        "catalog.adapter_page_cap",
+        "checkout.evidence_not_found",
         "policy.not_found",
         "psp.invalid_state",
         "psp.checkout_not_found",

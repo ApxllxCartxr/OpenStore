@@ -254,7 +254,7 @@ class Settings(BaseSettings):
     campaign: CampaignSettings = Field(default_factory=CampaignSettings)
     catalog_path: str | None = None
     shopify: ShopifyConfig | None = None
-    # Stage 25 (Q-046): discriminated source unions. catalog_source names
+    # Stage 25 (DECISION-046): discriminated source unions. catalog_source names
     # the catalog origin; stock_source (optional, independent — the 25b OMS
     # shape) names the stock origin and defaults to the catalog adapter.
     # Legacy catalog_path:/shopify: keep working, normalized at resolution.

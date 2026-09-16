@@ -19,10 +19,19 @@ from pathlib import Path
 # checked. WebAuthnError is checked only for registered codes
 # (assertion_required/webauthn_unsupported_alg); audit-only failure_type
 # strings (Q-005 AMENDMENT) are never reason codes.
+# Q-045 (2026-09-16): AdapterError carves the same blindness — errors.py
+# already claimed subclassing CommerceError made its catalog.* codes scanned,
+# but this matcher is syntactic (call name), not inheritance-aware, so eleven
+# raised codes sat unregistered with a green build. HTTPException
+# detail={"reason_code": ...} (evidence.py's checkout.evidence_not_found) was
+# the second blind spot. Both shapes are scanned now. buyer.* codes stay OUT
+# by construction: they are plain dict returns in agents/buyer_agent.py, never
+# exception constructions, and Q-043 keeps them buyer-process-local.
 _REASON_CODE_EXCEPTIONS = {
     "CampaignValidationError",
     "RazorpayError",
     "CommerceError",
+    "AdapterError",
     "HandoffError",
     "WebhookError",
 }
@@ -81,6 +90,51 @@ def check_raised_reason_codes(registry: dict) -> int:
     return failed
 
 
+def check_http_exception_details(registry: dict) -> int:
+    """Diff HTTPException(detail={"reason_code": ...}) literals.
+
+    Surface handlers (evidence.py, webcart.py) answer HTTP errors with a
+    reason_code inside the detail dict rather than a typed exception — the
+    same closed set applies (R0.2/R0.5). Only literal dicts are checked; a
+    computed detail (e.g. merchant.py's _fail passthrough of an already-
+    checked exception's code) is skipped rather than guessed at.
+    authority.* codes are checked against authority_reason_codes.
+    """
+    known = set(registry["reason_codes"]) | set(registry["authority_reason_codes"])
+    failed = 0
+    for path in sorted(_SRC.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError as e:
+            print(f"UNPARSEABLE {path}: {e}", file=sys.stderr)
+            return 1
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args and not node.keywords:
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name != "HTTPException":
+                continue
+            for kw in node.keywords:
+                if kw.arg != "detail" or not isinstance(kw.value, ast.Dict):
+                    continue
+                for k, v in zip(kw.value.keys, kw.value.values):
+                    if (
+                        isinstance(k, ast.Constant)
+                        and k.value == "reason_code"
+                        and isinstance(v, ast.Constant)
+                        and isinstance(v.value, str)
+                        and v.value not in known
+                    ):
+                        print(
+                            f"UNREGISTERED REASON CODE {v.value!r} "
+                            f"raised at {path}:{node.lineno}",
+                            file=sys.stderr,
+                        )
+                        failed = 1
+    return failed
+
+
 def main() -> int:
     registry = load_registry()
 
@@ -123,7 +177,7 @@ def main() -> int:
                     return 1
                 seen.add(item)
 
-    return check_raised_reason_codes(registry)
+    return check_raised_reason_codes(registry) | check_http_exception_details(registry)
 
 
 if __name__ == "__main__":

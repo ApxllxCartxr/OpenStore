@@ -1,4 +1,4 @@
-# OpenStore catalog adapter SDK — provider registry (S25 / Q-046).
+# OpenStore catalog adapter SDK — provider registry (S25 / DECISION-046).
 #
 # register_adapter(name, builder) / get_adapter(config, purpose=...) mirrors
 # agents/llm.py::register_provider, the in-repo precedent for a provider

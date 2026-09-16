@@ -1,4 +1,4 @@
-# OpenStore catalog adapter SDK — errors (S25 / Q-046).
+# OpenStore catalog adapter SDK — errors (S25 / DECISION-046).
 #
 # AdapterError subclasses CommerceError so scripts/registry_diff.py actually
 # scans the reason codes (bare RuntimeError/ValueError are invisible to it —

@@ -1184,3 +1184,104 @@
   buyer's budget — per-merchant hard caps and other merchants unaffected),
   INR-only. Hard cross-merchant enforcement still needs shared spend state
   (DECISION-007, unsolved).
+
+## Q-044 | stage: 24 | date: 2026-09-16T00:00:00Z
+- What is ambiguous: every merchant task moves into a browser, so the
+  sidecar needs a passkey-bound browsing session (which operator is
+  clicking) distinct from money authority (a fresh WebAuthn assertion per
+  action, R0.10) — plus a rewritten `_operator` gate (cookie → header →
+  `?operator=` → 401), CSRF on mutating merchant routes, and new closed-set
+  codes. No table, route, or code for any of this exists; R0.2 blocks naming
+  them without a RESOLUTION.
+- Options considered: (a) `merchant_sessions` table + HKDF-derived CSRF +
+  `auth.session_required` / `auth.session_expired` / `auth.csrf_invalid`
+  (chosen); (b) reuse the OAuth bearer scheme for browser sessions —
+  rejected, browser cookie handling and bearer header handling are different
+  surfaces with different expiry semantics; (c) no sessions, keep
+  `X-Operator-Id` header only — rejected, a plain browser click cannot set a
+  header (DECISION-030 precedent), so the console would be unopenable.
+- Blocked since: 2026-09-16T00:00:00Z
+- RESOLUTION (2026-09-16): Option (a), recorded after the fact against the
+  stage-24 tree (commit `c6072c1` plus fixes `dcf2190`/`d97197b`/`6ad6074`):
+  `core/session.py` (12h sliding / 7d hard cap, UA tripwire, SHA-256-only
+  token storage), migration `0011`, `_operator` cookie → header → query →
+  401 with an `authenticated` flag, CSRF via `X-OpenStore-CSRF` +
+  `__CSRF_TOKEN__`, and the three `auth.*` codes registered (the
+  `registry_diff.py` flag that caught the missing registration is itself
+  the fix for this class of gap). TOFU claim semantics live in
+  DECISION-044, browser drafting + settings precedence in DECISION-045.
+
+## Q-045 | stage: 24 | date: 2026-09-16T00:00:00Z
+- What is ambiguous: a completed purchase's PoAI bundle contains buyer
+  detail, so serving it back needs an access model — merchant session, buyer
+  capability, arbitrator share link — plus TTL bounds, token storage, and a
+  closed-set code for "no bundle / bad link". The PRD predates the evidence
+  surface; R0.2 blocks naming the code without a RESOLUTION.
+- Options considered: (a) gate on ONE of merchant session cookie OR buyer
+  capability (`?buyer_key=`, same ownership check as `/web/order`) OR
+  merchant-minted share token (`?t=`, SHA-256 hash + expiry on the checkout,
+  `evidence_share_ttl_days` default 30, bounds 1–540, capped by
+  `evidence_retention_days`), with `view?t=` rendering and autoload fetching
+  `evidence?t=`, the `evidence.py` fail-silent handler fixed to an explicit
+  state, and `checkout.evidence_not_found` registered (chosen); (b)
+  merchant-session only — rejected, locks the buyer out of their own
+  receipt; (c) signed-URL expiry without server-side revocation — rejected,
+  revocation from `/merchant/orders` must take effect immediately.
+- Blocked since: 2026-09-16T00:00:00Z
+- RESOLUTION (2026-09-16): Option (a), recorded after the fact against the
+  stage-24 tree (`surfaces/evidence.py`, `Checkout.evidence_token_hash` +
+  `evidence_token_expires_at`, config bounds with fail-loud validation,
+  brute-force counter that alerts but keeps answering an indistinguishable
+  404). One half missed its execution: the spec authorized registering
+  `checkout.evidence_not_found`, but the code raises it through
+  `HTTPException(detail={...})` at `evidence.py:143,178` — a shape
+  `registry_diff.py` never scanned — so the code shipped unregistered while
+  the differ printed nothing (same root cause as Q-028). It is legitimized
+  by this RESOLUTION and registered alongside it (REGISTRY.json +
+  `test_registry_compliance.py`), with the differ widened to scan
+  `HTTPException` detail dicts and `AdapterError` sites so the class cannot
+  recur silently. Stage 27's why-stat panel builds on this access model
+  (merchant session gates the aggregates; INV-14 unchanged).
+
+## Q-046 | stage: 25 | date: 2026-09-16T00:00:00Z
+- What is ambiguous: compiler check 10 (`spend_envelope`, delegated-only)
+  unconditionally passes (`core/compiler.py:270-273`) — for a root policy it
+  is a no-op by construction, and delegation chains are cut per
+  DECISION-007. Stage 26 needs an oversell soundness story: promote stock
+  into the compiler transcript, or gate before it?
+- Options considered: (a) leave check 10 alone (no-op, DEF-12) and gate
+  oversell pre-compiler (chosen); (b) encode available stock as a transcript
+  row — rejected, forces the offline verifier to trust an unsigned
+  point-in-time quantity, breaking replayability; (c) implement delegated
+  envelopes to give check 10 meaning — rejected, DECISION-007's unsolved
+  blocker, a stage of its own.
+- Blocked since: 2026-09-16T00:00:00Z
+- RESOLUTION (2026-09-16): Option (a), by the stage-26 spec
+  (`docs/SPECS/stage-26-inventory.md`, DECISION-047): check 10 stays a
+  no-op, `core/compiler.py` stays byte-identical under the stage-24 digest
+  sentinel, and the oversell block lives pre-compiler. Numbering note: the
+  `Q-046` citations in `config.py:257`, `adapters/registry.py:1`, and
+  `adapters/errors.py:1` (source-union / independent-resolution work) mean
+  DECISION-046, not this question — corrected alongside this entry.
+
+## Q-047 | stage: 25 | date: 2026-09-16T00:00:00Z
+- What is ambiguous: PoAI predicate `e6` (`goods.catalog_attestations_valid
+  is True`) can never hold — `psp/router.py` builds `goods` with only
+  `items` + `cart_hash` (lines 311/354), and nothing in `src/` ever sets the
+  key — so every bundle evaluates `e6 = False` regardless of whether the
+  catalog attestations would verify. The stage-25 spec scoped this as "e6
+  gap, fix if trivial".
+- Options considered: (a) set the flag where goods is built (key exists +
+  cart SKUs resolve against the serving catalog) — small in diff terms, but
+  it changes bundle bytes (goldens regen + verifier re-pin) on the webhook
+  money path of an already-committed stage; (b) record the gap honestly and
+  fix it in its own slice with golden/verify coverage.
+- Blocked since: 2026-09-16T00:00:00Z
+- RESOLUTION: none yet. The stage-25 commit message claims this fix
+  ("DEF-9 (e6 gap): catalog_attestations_valid set where goods built") but
+  the tree does not contain it — message-as-intent, per
+  `docs/PLAN-stage-26-27.md`. Numbering note: the stage-25 spec's `Q-045
+  (catalog_attestations_valid)` citation is a slip for this question;
+  Q-045 is the evidence-access model above. Left OPEN deliberately: it is
+  orthogonal to stages 26/27 (neither spec needs `e6`), and fixing it here
+  would smuggle a bundle-shape change into an inventory stage.
