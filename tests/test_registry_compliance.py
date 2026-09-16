@@ -131,6 +131,12 @@ def test_registry_reason_codes_complete():
         # already used by create_cart/update_cart/checkout_initiate/checkout_confirm,
         # also unregistered until now.
         "auth.insufficient_scope",
+        # Stage 24 (Q-044): merchant browsing sessions and the CSRF gate raise
+        # these from core/session.py. They shipped unregistered — registry_diff.py
+        # flagged all three — same class of gap as campaign.* above.
+        "auth.session_required",
+        "auth.session_expired",
+        "auth.csrf_invalid",
     }
 
     actual = set(registry["reason_codes"])
