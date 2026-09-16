@@ -279,4 +279,26 @@ def webcart_router(
         finally:
             session.close()
 
+    @router.get("/web/suggestions")
+    async def web_suggestions(
+        skus: str = Query(default=""),
+        limit: int = Query(default=4, ge=1, le=10),
+    ) -> dict[str, Any]:
+        """Stage 27: deterministic cart suggestions for /chat ("Goes well
+        with" + "Upgrade to"). Ungated like /chat (readiness gate only, no
+        auth — suggestions name public catalog SKUs, never buyer state).
+        Rules first, adapter-native next, sellability-filtered throughout."""
+        from openstore.config import merchant_id as _merchant_id
+        from openstore.core.merchandising import suggest_for_cart
+
+        cart_skus = [s.strip() for s in skus.split(",") if s.strip()]
+        session = make_session()
+        try:
+            suggestions = suggest_for_cart(
+                session, config, _merchant_id(config), cart_skus, limit=limit
+            )
+            return {"suggestions": suggestions}
+        finally:
+            session.close()
+
     return router

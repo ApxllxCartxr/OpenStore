@@ -74,6 +74,19 @@ class CampaignState(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class MerchandisingKind(str, enum.Enum):
+    """Stage 27: what a merchandising rule suggests. CROSS_SELL names a
+    companion SKU, UPGRADE names a better (usually pricier) SKU with an
+    honest delta, BUNDLE names a SKU whose discount comes from a Campaign
+    row (DECISION-048: no second discount path). Not in REGISTRY's pinned
+    enum set (order/campaign/ledger only) — SQLEnum-enforced here,
+    HandoffKind precedent."""
+
+    CROSS_SELL = "CROSS_SELL"
+    UPGRADE = "UPGRADE"
+    BUNDLE = "BUNDLE"
+
+
 class WebhookStatus(str, enum.Enum):
     RECEIVED = "RECEIVED"
     PROCESSING = "PROCESSING"
@@ -650,5 +663,50 @@ class InventoryWriteback(SQLModel, table=True):
     __table_args__ = (
         Index("ix_inventory_writeback_status", "status"),
         Index("ix_inventory_writeback_merchant_sku", "merchant_id", "sku"),
+    )
+
+
+class MerchandisingRule(SQLModel, table=True):
+    """Stage 27: a merchant- or agent-authored cross-sell / up-sell / bundle
+    rule. Mirrors Campaign's lifecycle (DRAFT -> PENDING_APPROVAL -> ACTIVE ->
+    PAUSED / EXPIRED / REJECTED), approval assertion fields, and auditability;
+    adds the rule itself (kind, trigger_skus, suggested_sku) and a nullable
+    campaign_id through which BUNDLE discounts flow (DECISION-048).
+
+    Selection is LLM-free and deterministic (core/merchandising.py); an LLM
+    may word the surface copy and nothing else. A rule takes effect only via
+    a passkey assertion bound to {"mode": "merchandising", "rule_id": ...}."""
+
+    __tablename__ = "merchandising_rules"
+
+    id: str = Field(primary_key=True, max_length=64)  # rule_id
+    merchant_id: str = Field(max_length=64, index=True)
+    kind: MerchandisingKind = Field(
+        sa_column=Column(SQLEnum(MerchandisingKind), nullable=False)
+    )
+    title: str = Field(max_length=256)
+    rationale: str = Field(max_length=2048)
+    trigger_skus: list[str] = Field(sa_column=Column(JSON, nullable=False))
+    suggested_sku: str = Field(max_length=128)
+    campaign_id: str | None = Field(default=None, max_length=64)
+    source_signals: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
+    draft_digest: str = Field(max_length=64)
+    state: CampaignState = Field(
+        default=CampaignState.DRAFT, sa_column=Column(SQLEnum(CampaignState), nullable=False)
+    )
+    approver_credential_id: str | None = Field(default=None, max_length=256)
+    approved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
+    webauthn_assertion: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+    updated_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+
+    __table_args__ = (
+        Index("ix_merchandising_merchant_state", "merchant_id", "state"),
     )
 

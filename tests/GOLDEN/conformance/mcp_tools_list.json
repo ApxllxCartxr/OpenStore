@@ -1,5 +1,5 @@
 {
-  "description": "MCP 2025-06-18 tools/list: all 22 tools with inputSchema.",
+  "description": "MCP 2025-06-18 tools/list: all 23 tools with inputSchema.",
   "expect_body": {
     "id": 1,
     "jsonrpc": "2.0",
@@ -400,6 +400,25 @@
             "type": "object"
           },
           "name": "set_order_message"
+        },
+        {
+          "description": "Deterministic cross-sell / up-sell for a cart: ACTIVE merchandising rules first, then adapter-native related, then catalog related_skus; sellability-filtered, capped.",
+          "inputSchema": {
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "skus": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [],
+            "type": "object"
+          },
+          "name": "suggest_related"
         },
         {
           "description": "Replace a HELD checkout's cart (cancels the old hold, creates a new one).",

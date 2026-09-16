@@ -108,11 +108,11 @@ class TestInitialize:
 
 
 class TestToolsList:
-    def test_lists_all_twenty_two_tools_with_schemas(self, client):
+    def test_lists_all_twenty_three_tools_with_schemas(self, client):
         r = _rpc(client, "tools/list")
         assert r.status_code == 200
         tools = r.json()["result"]["tools"]
-        assert len(tools) == 22
+        assert len(tools) == 23
         names = [t["name"] for t in tools]
         assert names == sorted(names)
         assert set(names) == set(TOOL_NAMES)

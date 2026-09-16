@@ -1,4 +1,4 @@
-# OpenStore surfaces — MCP server (22 tools, closed set per PRD §6 / REGISTRY.json)
+# OpenStore surfaces — MCP server (23 tools, closed set per PRD §6 / REGISTRY.json)
 # Per PRD S6.3 — thin adapters over core/api.py + WebAuthn RP.
 # Transport: JSON-RPC 2.0 wire protocol, MCP 2025-06-18 (DECISION-036, hard
 # cutover). POST /agent/mcp accepts ONLY the wire envelope; the legacy
@@ -79,6 +79,37 @@ def get_product(
                 "ucp": _ucp_envelope("dev.ucp.shopping.catalog.lookup"),
             },
         )
+    except CommerceError as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": e.reason_code, "message": e.message}
+        )
+    except Exception as e:
+        return MCPToolResult(
+            success=False, error={"reason_code": "internal_error", "message": str(e)}
+        )
+
+
+def suggest_related(
+    config: Settings,
+    session: Any,
+    skus: list[str] | None = None,
+    limit: int = 4,
+) -> MCPToolResult:
+    """MCP tool: suggest_related. Deterministic cross-sell / up-sell for a
+    cart (ACTIVE merchandising rules first, then adapter-native related,
+    then catalog related_skus; sellability-filtered, capped). Read-only and
+    ungated like the other catalog reads — suggestions name public SKUs and
+    carry rule provenance (rule_id/kind/why, DECISION-049), never buyer
+    state. Selection is LLM-free; an LLM may word the copy and nothing else.
+    """
+    try:
+        from openstore.core.merchandising import suggest_for_cart
+
+        cart_skus = [s for s in (skus or []) if isinstance(s, str) and s.strip()]
+        suggestions = suggest_for_cart(
+            session, config, _merchant_id(config), cart_skus, limit=int(limit or 4)
+        )
+        return MCPToolResult(success=True, data={"suggestions": suggestions})
     except CommerceError as e:
         return MCPToolResult(
             success=False, error={"reason_code": e.reason_code, "message": e.message}
@@ -1150,6 +1181,7 @@ TOOL_NAMES = frozenset(
         "search_catalog",
         "lookup_catalog",
         "get_product",
+        "suggest_related",
         "create_cart",
         "update_cart",
         "checkout_initiate",
@@ -1229,6 +1261,14 @@ def handle_mcp_request(
             )
         else:
             result = get_product(config, sku=sku)
+    elif tool_name == "suggest_related":
+        skus = arguments.get("skus", arguments.get("cart_skus", []))
+        result = suggest_related(
+            config,
+            session,
+            skus=skus if isinstance(skus, list) else [],
+            limit=arguments.get("limit", 4),
+        )
     elif tool_name == "create_cart":
         result = create_cart(
             config=config,
@@ -1467,6 +1507,10 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "lookup_catalog": {
         "description": "UCP catalog batch lookup by identifier (SKU); misses answer success + not_found messages, never isError.",
         "inputSchema": _obj({"meta": _OBJ, "catalog": _OBJ}, ["catalog"]),
+    },
+    "suggest_related": {
+        "description": "Deterministic cross-sell / up-sell for a cart: ACTIVE merchandising rules first, then adapter-native related, then catalog related_skus; sellability-filtered, capped.",
+        "inputSchema": _obj({"skus": _ARR_STR, "limit": _INT}, []),
     },
     "create_cart": {
         "description": "Compile a cart against the signed policy; returns ALLOW/DENY plus checkout_id.",

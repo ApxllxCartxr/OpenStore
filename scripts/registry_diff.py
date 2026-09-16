@@ -29,6 +29,7 @@ from pathlib import Path
 # exception constructions, and Q-043 keeps them buyer-process-local.
 _REASON_CODE_EXCEPTIONS = {
     "CampaignValidationError",
+    "MerchandisingError",
     "RazorpayError",
     "CommerceError",
     "AdapterError",

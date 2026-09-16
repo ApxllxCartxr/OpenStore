@@ -13,7 +13,7 @@ uv run openstore init --merchant "Gelateria Milano" --currency INR
 uv run openstore serve gelateria.yaml
 ```
 
-Three commands, **no API keys and no account required**. Migrations run on first boot and the store comes up serving a discovery manifest, a UCP capability manifest, an agent-readable catalog, 22 MCP commerce tools over JSON-RPC, checkout, hold/cancel, a signed campaign feed, a browser storefront at `/chat`, and a cryptographic evidence trail for every rupee that moves. Add Razorpay test-mode keys when you want money to actually move.
+Three commands, **no API keys and no account required**. Migrations run on first boot and the store comes up serving a discovery manifest, a UCP capability manifest, an agent-readable catalog, 23 MCP commerce tools over JSON-RPC, checkout, hold/cancel, a signed campaign feed, a browser storefront at `/chat`, and a cryptographic evidence trail for every rupee that moves. Add Razorpay test-mode keys when you want money to actually move.
 
 **There is no hosted OpenStore.** No SaaS tier, no signup, no usage billing, no phone-home — there is no OpenStore service to phone. You run the process, you hold the keys, the database is yours, and MIT means you can fork it and never speak to this repo again.
 
@@ -25,7 +25,7 @@ Three commands, **no API keys and no account required**. Migrations run on first
 
 Three jobs, one sidecar process:
 
-1. **Makes your store transactable by an AI buyer, end to end** — discovery manifests, agent-readable catalog with signed attestations, 22 MCP tools (JSON-RPC wire-conformant, so stock clients like MCP Inspector work), deterministic checkout, hold/cancel, Razorpay payment links, webhooks with reconciliation, and an anonymous browser storefront at `/chat`.
+1. **Makes your store transactable by an AI buyer, end to end** — discovery manifests, agent-readable catalog with signed attestations, 23 MCP tools (JSON-RPC wire-conformant, so stock clients like MCP Inspector work), deterministic checkout, hold/cancel, Razorpay payment links, webhooks with reconciliation, and an anonymous browser storefront at `/chat`.
 2. **Grows revenue, not just processes sales** — aggregate analytics, human-gated campaign orchestration, deterministic cross-sell, a read-only merchant bot, and an autonomous loop that drafts (never activates) campaigns for stalled SKUs.
 3. **Leaves behind a receipt no one can dispute** — every completed order assembles a 9-section evidence bundle a third party can verify offline with nothing but a browser.
 
@@ -105,7 +105,7 @@ flowchart TB
 
     subgraph L3["Layer 3 — Execution Server (deterministic, holds keys)"]
         direction TB
-        MCP["MCP server · 22 tools"] --> API["Commerce Core API"]
+        MCP["MCP server · 23 tools"] --> API["Commerce Core API"]
         WK["/.well-known/* manifests"] --> API
         Studio["Policy Studio · Campaign Studio · /admin"] --> API
         API --> Compiler["Intent Compiler<br/>check 0 + checks 1–12"]
@@ -328,8 +328,8 @@ A third-party agent can find and call the store today:
 
 - `/.well-known/agent-commerce.json` (endpoints, OAuth scopes, evidence + campaign feeds), `/.well-known/ucp` (real capabilities only), `/.well-known/agent-campaigns.json` (signed offers), `/agent/catalog` (attested items + live offers), `/.well-known/poai-jwks.json` (verification keys), and `/protocols/{name}/spec-excerpt` for the excerpt behind each declared protocol.
 - OAuth 2.1 `client_credentials` at `/oauth/token` with ES256 and scope-gated tools (`catalog:read`, `cart:write`, `checkout:initiate`, `checkout:confirm`).
-- 22 tools behind one JSON-RPC 2.0 endpoint: `initialize` (pinned `2025-06-18`), `tools/list` with per-tool `inputSchema`, `tools/call` with `isError` content carrying closed-set reason codes. UCP MCP binding names (`search_catalog`, `lookup_catalog`) are aliased and advertised. Point MCP Inspector at `/agent/mcp` — it lists and calls.
-- `tests/GOLDEN/conformance/` pins the wire bytes byte-for-byte (initialize, all 22 tool schemas, UCP catalog shapes, error envelopes, both discovery manifests) — replay and verify instead of trusting the manifest.
+- 23 tools behind one JSON-RPC 2.0 endpoint: `initialize` (pinned `2025-06-18`), `tools/list` with per-tool `inputSchema`, `tools/call` with `isError` content carrying closed-set reason codes. UCP MCP binding names (`search_catalog`, `lookup_catalog`) are aliased and advertised. Point MCP Inspector at `/agent/mcp` — it lists and calls.
+- `tests/GOLDEN/conformance/` pins the wire bytes byte-for-byte (initialize, all 23 tool schemas, UCP catalog shapes, error envelopes, both discovery manifests) — replay and verify instead of trusting the manifest.
 
 What still needs custom code, and why, is in [Status & roadmap](#status--roadmap).
 
@@ -339,7 +339,7 @@ What still needs custom code, and why, is in [Status & roadmap](#status--roadmap
 
 The money path is pilot-grade and overbuilt on purpose; everything around it still has seams. Nothing here is hidden.
 
-**Solid:** compiler · ledger · idempotency · hold/cancel · webhooks + reconciliation · WebAuthn ceremonies · OAuth with signature-pinned validation · per-merchant signing keys · PoAI bundles + offline verifier + tamper detection · 22 MCP tools with pinned conformance fixtures · discovery manifests · catalog attestations · campaign pipeline · autonomous growth loop · federated multi-merchant shopping with a consolidated budget guardrail · Shopify read-only catalog · anonymous `/chat` storefront with browser checkout · Docker + Postgres + health gates.
+**Solid:** compiler · ledger · idempotency · hold/cancel · webhooks + reconciliation · WebAuthn ceremonies · OAuth with signature-pinned validation · per-merchant signing keys · PoAI bundles + offline verifier + tamper detection · 23 MCP tools with pinned conformance fixtures · discovery manifests · catalog attestations · campaign pipeline · autonomous growth loop · federated multi-merchant shopping with a consolidated budget guardrail · Shopify read-only catalog · anonymous `/chat` storefront with browser checkout · Docker + Postgres + health gates.
 
 **Where friction still lives:**
 
@@ -348,7 +348,7 @@ The money path is pilot-grade and overbuilt on purpose; everything around it sti
 | **Merchant (onboarding)** | `init` + `serve`, migrations on boot, studios served, no keys to explore | Needs a terminal, public HTTPS origin, Postgres for prod, and pasted secrets. No hosted option by design — but also no click-to-deploy yet. |
 | **Merchant (catalog)** | YAML in 60 seconds; Shopify read-only against a real dev store | WooCommerce / Postgres / Tally adapters don't exist. No stock sync, no order write-back, no GST invoice, no Shiprocket/Delhivery, no COD, no returns/RTO. |
 | **Buyer** | Discord DM or `/chat` in the browser — cart → passkey tap → pay link → status/cancel, no login, no cookies | No WhatsApp surface. Payment leaves the conversation (hosted link). Passkeys need HTTPS and a compatible device. |
-| **Agent builder** | Manifests + OAuth + 22 tools with schema discovery + signed offer feed + conformance fixtures | UCP REST binding, AP2 wire mandates and open enrollment (DCR) are still ahead. |
+| **Agent builder** | Manifests + OAuth + 23 tools with schema discovery + signed offer feed + conformance fixtures | UCP REST binding, AP2 wire mandates and open enrollment (DCR) are still ahead. |
 | **Operator** | Compose + Postgres, health gates, metrics, trace channels, runbook | One process + one DB per merchant — 100 merchants is 100 processes, no orchestrator. Sustained live-mode load, key rotation and backup-restore are runbook text, not drilled practice. |
 
 **Roadmap, roughly in order:**

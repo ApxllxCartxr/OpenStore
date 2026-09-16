@@ -91,6 +91,17 @@ class CampaignAction(BaseModel):
     days: int = 7
 
 
+class MerchandisingAction(BaseModel):
+    action: str  # "author" | "draft"
+    kind: str | None = None  # CROSS_SELL | UPGRADE | BUNDLE
+    title: str | None = None
+    rationale: str | None = None
+    trigger_skus: list[str] | None = None
+    suggested_sku: str | None = None
+    campaign_id: str | None = None
+    limit: int = 5
+
+
 class SettingsForm(BaseModel):
     merchant_name: str | None = None
     campaign_min_bps: int | None = None
@@ -1270,17 +1281,162 @@ def merchant_router(
     # -------------------------------------------------------- merchandising
     @router.get("/merchant/merchandising", response_class=HTMLResponse)
     async def merchant_merchandising(request: Request) -> HTMLResponse:
+        """Stage 27: author (kind + triggers + suggestion), review (why-stat
+        per rule: bought-together counts + the suggestion's own sales), and
+        approve with a passkey bound to the specific rule. Selection itself
+        stays LLM-free; this page is the human review surface."""
         _need_session(request)
+        from openstore.core.merchandising import rule_why_stat
+        from openstore.models import MerchandisingRule
+
+        eff = _effective(config)
+        db = make_session()
+        try:
+            rules = db.exec(
+                select(MerchandisingRule)
+                .where(MerchandisingRule.merchant_id == merchant_id(eff))
+                .order_by(MerchandisingRule.created_at.desc())  # type: ignore[attr-defined]
+            ).all()
+            rows = [
+                {
+                    "rule_id": r.id,
+                    "kind": r.kind.value,
+                    "title": r.title,
+                    "state": r.state.value,
+                    "trigger_skus": r.trigger_skus,
+                    "suggested_sku": r.suggested_sku,
+                    "campaign_id": r.campaign_id,
+                    "why": rule_why_stat(db, merchant_id(eff), r),
+                }
+                for r in rules
+            ]
+        finally:
+            db.close()
         body = (
-            "<h1>Merchandising</h1>"
-            '<p class="lede">Cross-sell and up-sell rules land here in Stage 27. '
-            "Until then, suggestions come from the catalog's "
-            "<span class='mono'>related_skus</span> field.</p>"
-            "<p><a class='btn' href='/merchant/catalog'>Catalog</a></p>"
+            "<h1>Merchandising</h1><p class='lede'>Cross-sell and up-sell rules. "
+            "Suggestions stay deterministic and never name an out-of-stock SKU; "
+            "a rule takes effect only after your passkey approves it.</p>"
+            "<div class='card'><h2>Author a rule</h2>"
+            "<label>Kind</label><select id='mk'>"
+            "<option value='CROSS_SELL'>Cross-sell</option>"
+            "<option value='UPGRADE'>Up-sell</option>"
+            "<option value='BUNDLE'>Bundle (needs a campaign)</option></select>"
+            "<label>Trigger SKUs (comma-separated)</label><input id='mt'>"
+            "<label>Suggested SKU</label><input id='ms'>"
+            "<label>Campaign ID (bundles only)</label><input id='mc'>"
+            "<label>Title</label><input id='mtitle'>"
+            "<div class='actions'><button class='primary' id='mcreate'>Author rule</button>"
+            "<button id='mdraft'>Draft from sales aggregates</button></div>"
+            "<div class='status' id='mdst'></div></div>"
+            "<div id='list'></div>"
+            "<script src='/static/js/api.js'></script>"
+            "<script src='/static/js/webauthn.js'></script>"
+            "<script>\"use strict\";const ROWS=" + safe_json(rows) + ";"
+            "const {api}=makeApi(null);" + _merchandising_js() + "</script>"
         )
         return _page(request, "Merchandising", body, "/merchant/merchandising")
 
+    @router.post("/merchant/merchandising")
+    async def merchant_merchandising_action(
+        request: Request, body: MerchandisingAction
+    ) -> dict[str, Any]:
+        _row, raw = _need_session(request)
+        _need_csrf(request, raw)
+        from openstore.core.merchandising import (
+            create_rule as _create_rule,
+        )
+        from openstore.core.merchandising import (
+            draft_merchandising_rules as _draft_rules,
+        )
+        from openstore.core.merchandising import (
+            submit_for_approval as _submit_rule,
+        )
+        from openstore.models import MerchandisingKind as _Kind
+
+        eff = _effective(config)
+        mid = merchant_id(eff)
+        if body.action == "author":
+            try:
+                kind = _Kind(str(body.kind or ""))
+            except ValueError:
+                raise _fail(
+                    422, "webhook.invalid_payload",
+                    f"kind must be CROSS_SELL, UPGRADE, or BUNDLE, got {body.kind!r}",
+                ) from None
+            db = make_session()
+            try:
+                try:
+                    rule = _create_rule(
+                        db, eff, mid, kind,
+                        title=body.title or "",
+                        rationale=body.rationale or "merchant-authored",
+                        trigger_skus=body.trigger_skus or [],
+                        suggested_sku=(body.suggested_sku or "").strip(),
+                        campaign_id=body.campaign_id or None,
+                        source_signals={"trigger": "merchant_authored"},
+                        trace_id=f"merchant-rule-{secrets.token_hex(4)}",
+                    )
+                    _submit_rule(db, rule.id)
+                except Exception as e:
+                    from openstore.core.merchandising import MerchandisingError as _ME
+
+                    if isinstance(e, _ME):
+                        raise _fail(422, e.reason_code, e.message) from e
+                    raise
+                db.commit()
+                rid, state = rule.id, rule.state.value
+            finally:
+                db.close()
+            return {"ok": True, "rule_id": rid, "state": state}
+        if body.action == "draft":
+            from openstore.core.database import session_scope as _scope
+
+            limit = body.limit if 1 <= body.limit <= 20 else 5
+            with _scope(config) as db:
+                drafts = _draft_rules(db, eff, mid, limit=limit,
+                                      trace_id=f"merchant-rule-{secrets.token_hex(4)}")
+                for draft in drafts:
+                    _submit_rule(db, draft.id)
+                ids = [d.id for d in drafts]
+            return {"ok": True, "rule_ids": ids}
+        raise _fail(422, "webhook.invalid_payload", f"unknown action {body.action!r}")
+
     return router
+
+
+def _merchandising_js() -> str:
+    """Inline rule-list renderer for /merchant/merchandising (mirrors
+    _campaigns_js: approve carries a rule-bound passkey assertion; reject
+    and pause ride their routes directly)."""
+    return """
+function esc(s){return String(s??"").replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function render(){const el=document.getElementById('list');
+ if(!ROWS.length){el.innerHTML='<p class="empty">No rules yet — author one above or draft from aggregates.</p>';return;}
+ el.innerHTML=ROWS.map(c=>'<div class="card"><h2>'+esc(c.title)+'</h2><p class="muted">'+esc(c.kind)+' · '+esc(c.state)+' · triggers '+esc((c.trigger_skus||[]).join(", "))+' → '+esc(c.suggested_sku)+'</p>'
+ +'<p class="muted">Why: bought together '+esc(c.why.together_count)+' time(s) · suggestion sold '+esc(c.why.units_sold_30d)+' in 30d</p><div class="actions">'
+ +(c.state==="PENDING_APPROVAL"?'<button class="primary" data-approve="'+esc(c.rule_id)+'">Approve with passkey</button><button data-reject="'+esc(c.rule_id)+'">Reject</button>':'')
+ +(c.state==="ACTIVE"?'<button data-pause="'+esc(c.rule_id)+'">Pause</button>':'')
+ +'</div><div class="status" id="st-'+esc(c.rule_id)+'"></div></div>').join("");}
+async function approve(id){const st=document.getElementById('st-'+id);st.textContent='Requesting challenge…';
+ const begin=await api('/internal/webauthn/assertion/begin',{rule_id:id});
+ const a=await navigator.credentials.get({publicKey:{challenge:b64d(begin.challenge),rpId:begin.rpId,allowCredentials:[],userVerification:'required'}});
+ const r=await api('/merchandising/'+encodeURIComponent(id)+'/approve',{approver_credential_id:a.id,client_data_json:b64url(new Uint8Array(a.response.clientDataJSON)),authenticator_data:b64url(new Uint8Array(a.response.authenticatorData)),signature:b64url(new Uint8Array(a.response.signature)),challenge:begin.challenge});
+ st.textContent='Approved — '+r.state+'.';}
+document.getElementById('mcreate').addEventListener('click',async()=>{const el=document.getElementById('mdst');
+ try{const r=await api('/merchant/merchandising',{action:'author',kind:document.getElementById('mk').value,trigger_skus:document.getElementById('mt').value.split(',').map(s=>s.trim()).filter(Boolean),suggested_sku:document.getElementById('ms').value.trim(),campaign_id:document.getElementById('mc').value.trim()||null,title:document.getElementById('mtitle').value});el.textContent='Authored '+r.rule_id+' — reload to review.';}
+ catch(e){el.textContent='Failed: '+(e.code||e.message);el.className='status err';}});
+document.getElementById('mdraft').addEventListener('click',async()=>{const el=document.getElementById('mdst');
+ try{const r=await api('/merchant/merchandising',{action:'draft'});el.textContent=(r.rule_ids||[]).length?('Drafted '+(r.rule_ids||[]).join(', ')):'Nothing co-occurs yet.';}
+ catch(e){el.textContent='Failed: '+(e.code||e.message);el.className='status err';}});
+document.getElementById('list').addEventListener('click',async(e)=>{const t=e.target;
+ const ap=t.closest('button[data-approve]'),rj=t.closest('button[data-reject]'),pa=t.closest('button[data-pause]');
+ try{if(ap){ap.disabled=true;await approve(ap.dataset.approve);}
+ else if(rj){await api('/merchandising/'+encodeURIComponent(rj.dataset.reject)+'/reject',{reason:''});location.reload();}
+ else if(pa){await api('/merchandising/'+encodeURIComponent(pa.dataset.pause)+'/pause');location.reload();}}
+ catch(err){const id=(ap||rj||pa).dataset.approve||(ap||rj||pa).dataset.reject||(ap||rj||pa).dataset.pause;
+  const st=document.getElementById('st-'+id);st.textContent='Failed: '+(err.code||err.message);st.className='status err';}});
+render();
+"""
 
 
 def _campaigns_js() -> str:

@@ -3,10 +3,10 @@
 Slug: `merchandising`. Goal: real suggestions for every adapter, merchant- or
 agent-authored, never an out-of-stock or hallucinated SKU.
 
-Status: **not started**, and blocked on Stage 26 — `suggest_for_cart` filters
-on sellability, which does not exist until inventory does. See
-`docs/PLAN-stage-26-27.md`. DECISION-048 is cited below but is not yet
-recorded in `docs/DECISIONS.md`.
+Status: **shipped** as `stage(27): merchandising` (2026-09-16). Blocked on
+Stage 26 while building — `suggest_for_cart` filters on sellability (now
+`core/inventory.py::is_sellable`). DECISION-048 is recorded in
+`docs/DECISIONS.md`.
 
 ## Scope
 

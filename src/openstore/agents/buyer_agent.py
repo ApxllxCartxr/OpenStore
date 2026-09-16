@@ -1515,17 +1515,36 @@ def build_federated_shop_result_embed(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_upsell_nudge_embed(suggestions: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """S14: sent once, right after the order-placed embed, on success only.
+    """S14 cross-sell follow-up, sent once right after the order-placed embed,
+    on success only. Stage 27 (DEF-13): titled "Goes well with" and driven by
+    suggest_for_cart (rules + sellability) at the call site — this builder
+    stays a pure renderer so the stage-11 pin on its shape holds.
     Returns None (skip sending) when there's nothing to suggest — no
     empty-field spam."""
     if not suggestions:
         return None
     return {
-        "title": "Pairs well with your order",
+        "title": "Goes well with",
         "description": "\n".join(
             f"{item['name']} — ₹{item['unit_minor'] / 100:.2f}" for item in suggestions
         ),
     }
+
+
+def build_upgrade_embed(suggestions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Stage 27: the real up-sell embed — UPGRADE suggestions only, each with
+    its honest price delta. Never mutates the cart; purely informational, so
+    a wrong tap costs nothing (the buyer still checks out the original cart).
+    Returns None when no UPGRADE suggestion is present."""
+    ups = [s for s in suggestions if s.get("kind") == "UPGRADE"]
+    if not ups:
+        return None
+    lines = []
+    for item in ups:
+        delta = item.get("price_delta_minor")
+        more = f" (+₹{delta / 100:.2f} more)" if isinstance(delta, int) and delta > 0 else ""
+        lines.append(f"{item['name']} — ₹{item['unit_minor'] / 100:.2f}{more}")
+    return {"title": "Upgrade to", "description": "\n".join(lines)}
 
 
 def _describe_cart_delta(cart_delta: dict[str, Any]) -> str:
@@ -1974,14 +1993,31 @@ class BuyerBot:
                 )
 
     async def _maybe_send_upsell_nudge(self, message: Any, result: dict[str, Any]) -> None:
-        """S14: one short follow-up embed after a successful order, suggesting
-        catalog items related to what was just bought (deterministic lookup,
-        no LLM call). Silent no-op if there's nothing to suggest."""
+        """S14 cross-sell follow-up + stage-27 up-sell embed, sent after a
+        successful order. Suggestions come from suggest_for_cart (ACTIVE rules
+        first, sellability-filtered) — never an out-of-stock or hallucinated
+        SKU. Silent no-op if there's nothing to suggest."""
+        from openstore.core.database import get_session
+        from openstore.core.merchandising import suggest_for_cart
+
         cart = result.get("cart") or []
-        suggestions = suggest_related_items(self.config, [item["sku"] for item in cart])
-        embed = build_upsell_nudge_embed(suggestions)
+        db_session = get_session(self.config)
+        try:
+            suggestions = suggest_for_cart(
+                db_session,
+                self.config,
+                merchant_id(self.config),
+                [item["sku"] for item in cart],
+            )
+        finally:
+            db_session.close()
+        cross = [s for s in suggestions if s.get("kind") != "UPGRADE"]
+        embed = build_upsell_nudge_embed(cross)
         if embed is not None:
             await message.channel.send(embed=build_discord_embed(embed))
+        upgrade = build_upgrade_embed(suggestions)
+        if upgrade is not None:
+            await message.channel.send(embed=build_discord_embed(upgrade))
 
     async def _maybe_offer_amendment(
         self,

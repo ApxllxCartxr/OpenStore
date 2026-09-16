@@ -63,6 +63,7 @@
     <section aria-label="Cart">
         <h2>Your cart</h2>
         <div id="chat-cart"><p class="muted">Your cart is empty.</p></div>
+        <div id="chat-suggest"></div>
         <button id="chat-buy" type="button" style="display:none">Buy with passkey</button>
         <div id="chat-checkout-status"></div>
     </section>
@@ -157,7 +158,7 @@
             "<div class='price'>" + esc(inr(item.unit_minor)) + "</div>" +
             "<div class='tags'>" + (item.tags || []).map((t) => "<span class='tag'>" + esc(t) + "</span>").join("") + "</div>" +
             offers +
-            (related ? "<div class='related'>Pairs well with: " + related + "</div>" : "") +
+            (related ? "<div class='related'>Goes well with: " + related + "</div>" : "") +
             "<div><button data-add='" + esc(item.sku) + "' type='button'>Add</button></div>" +
             "</article>";
     }
@@ -247,6 +248,7 @@
         const buy = $("chat-buy");
         if (!skus.length) {
             $("chat-cart").innerHTML = "<p class='muted'>Your cart is empty.</p>";
+            $("chat-suggest").innerHTML = "";
             buy.style.display = "none";
             return;
         }
@@ -263,6 +265,32 @@
         html += "<div class='price'>Total " + esc(inr(total)) + "</div>";
         $("chat-cart").innerHTML = html;
         buy.style.display = "";
+        loadSuggestions(skus);
+    }
+
+    async function loadSuggestions(skus) {
+        const box = $("chat-suggest");
+        try {
+            const res = await fetch("/web/suggestions?skus=" + encodeURIComponent(skus.join(",")));
+            if (!res.ok) { box.innerHTML = ""; return; }
+            const data = await res.json();
+            const suggestions = data.suggestions || [];
+            const cross = suggestions.filter((s) => s.kind !== "UPGRADE");
+            const up = suggestions.filter((s) => s.kind === "UPGRADE");
+            let html = "";
+            if (cross.length) {
+                html += "<div class='related'><strong>Goes well with your cart:</strong> " +
+                    cross.map((s) => "<span>" + esc(bySku[s.sku] ? bySku[s.sku].name : s.sku) + "</span>").join("") +
+                    "</div>";
+            }
+            if (up.length) {
+                html += up.map((s) => "<div class='offer'><strong>Upgrade to:</strong> " +
+                    esc(bySku[s.sku] ? bySku[s.sku].name : s.sku) + " " + esc(inr(s.unit_minor)) +
+                    (s.price_delta_minor != null ? " (+" + esc(inr(s.price_delta_minor)) + " more)" : "") +
+                    "</div>").join("");
+            }
+            box.innerHTML = html;
+        } catch (e) { box.innerHTML = ""; }
     }
 
     function detailMessage(detail) {

@@ -338,6 +338,24 @@ def _active_in_window_campaigns(session: Any) -> list[Any]:
     ]
 
 
+def _sellable_set(
+    config: Settings, merchant_id: str, items: list[dict[str, Any]]
+) -> set[str]:
+    """SKUs the feed may point suggestions at: everything unmanaged (no
+    tracked row — unmanaged is distinct from zero) plus tracked SKUs with
+    one available unit. Straight-line like active_offers_by_sku above: a
+    broken database fails this feed loudly, never as a silently unfiltered
+    one (R0.5)."""
+    from openstore.core.database import get_session
+    from openstore.core.inventory import is_sellable
+
+    session = get_session(config)
+    try:
+        return {i["sku"] for i in items if is_sellable(session, merchant_id, i["sku"])}
+    finally:
+        session.close()
+
+
 def serve_catalog_feed(
     config: Settings, merchant_id: str, private_key_pem: bytes | None = None
 ) -> dict[str, Any]:
@@ -345,6 +363,7 @@ def serve_catalog_feed(
     items = load_catalog(config)
     catalog_digest = compute_catalog_digest(config)
     offers = active_offers_by_sku(config)
+    sellable = _sellable_set(config, merchant_id, items)
     import time
 
     iat = int(time.time())
@@ -369,6 +388,11 @@ def serve_catalog_feed(
         served_items.append(
             {
                 **item,
+                # Stage 27: never point a suggestion at an SKU that cannot
+                # ship — related targets are sellability-filtered here, so
+                # /chat chips and adapter-native cross-sell stay honest with
+                # zero merchant configuration.
+                "related_skus": [s for s in item.get("related_skus", []) if s in sellable],
                 "offers": offers.get(item["sku"], []),
                 "catalog_attestation": attestation,
             }

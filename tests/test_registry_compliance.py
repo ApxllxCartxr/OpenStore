@@ -130,6 +130,17 @@ def test_registry_reason_codes_complete():
         # before) — raised by core/inventory.py via CommerceError, so
         # registry_diff.py scans it from this commit on.
         "inventory.insufficient_stock",
+        # Stage 27: merchandising rule lifecycle (core/merchandising.py
+        # MerchandisingError — registered alongside the implementation and
+        # scanned by registry_diff.py. Draft-validation rejections share
+        # merchandising.invalid_rule (the message carries the detail);
+        # unknown SKUs reuse catalog.sku_not_found; unknown campaigns reuse
+        # campaign.not_found.
+        "merchandising.not_found",
+        "merchandising.invalid_state_transition",
+        "merchandising.no_webauthn_approval",
+        "merchandising.webauthn_verification_failed",
+        "merchandising.invalid_rule",
         "policy.not_found",
         "psp.invalid_state",
         "psp.checkout_not_found",
@@ -178,6 +189,8 @@ def test_registry_mcp_tools_complete():
         "get_product",
         "search_catalog",
         "lookup_catalog",
+        # Stage 27: suggest_related (deterministic merchandising suggestions).
+        "suggest_related",
         "create_cart",
         "update_cart",
         "checkout_initiate",

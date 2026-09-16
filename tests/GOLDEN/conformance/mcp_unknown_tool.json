@@ -6,7 +6,7 @@
     "result": {
       "content": [
         {
-          "text": "{\"error\": {\"message\": \"Unknown MCP tool: nope_tool. Known tools: ['cancel_order', 'checkout_confirm', 'checkout_initiate', 'create_cart', 'create_cart_handoff', 'create_policy_handoff', 'get_audit_log', 'get_campaign', 'get_order', 'get_product', 'list_campaigns', 'list_orders', 'lookup_catalog', 'resolve_policy', 'search_catalog', 'search_products', 'set_order_message', 'update_cart', 'webauthn_begin_assertion', 'webauthn_complete_assertion', 'webauthn_register_begin', 'webauthn_register_complete']\", \"reason_code\": \"auth.unknown_tool\"}, \"success\": false}",
+          "text": "{\"error\": {\"message\": \"Unknown MCP tool: nope_tool. Known tools: ['cancel_order', 'checkout_confirm', 'checkout_initiate', 'create_cart', 'create_cart_handoff', 'create_policy_handoff', 'get_audit_log', 'get_campaign', 'get_order', 'get_product', 'list_campaigns', 'list_orders', 'lookup_catalog', 'resolve_policy', 'search_catalog', 'search_products', 'set_order_message', 'suggest_related', 'update_cart', 'webauthn_begin_assertion', 'webauthn_complete_assertion', 'webauthn_register_begin', 'webauthn_register_complete']\", \"reason_code\": \"auth.unknown_tool\"}, \"success\": false}",
           "type": "text"
         }
       ],

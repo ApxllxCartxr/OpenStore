@@ -66,6 +66,18 @@ from openstore.core.campaigns import (
 from openstore.core.database import get_session
 from openstore.core.handoff import HandoffError, buyer_handle, consume_handoff, resolve_handoff
 from openstore.core.holdcancel import AAL_HOLD_SECONDS
+from openstore.core.merchandising import (
+    MerchandisingError,
+)
+from openstore.core.merchandising import (
+    activate_rule as activate_merchandising_rule,
+)
+from openstore.core.merchandising import (
+    pause_rule as pause_merchandising_rule,
+)
+from openstore.core.merchandising import (
+    reject_rule as reject_merchandising_rule,
+)
 from openstore.core.policy_signing import (
     PER_USER_AGGREGATE_CAP_MINOR,
     blast_radius,
@@ -117,7 +129,10 @@ class AssertionBegin(BaseModel):
     # DECISION-024: when present, the challenge is bound to
     # {"mode": "campaign", "campaign_id": ...} instead of {"mode": "policy"},
     # so an assertion approving one campaign cannot be replayed onto another.
+    # Stage 27: rule_id binds {"mode": "merchandising", "rule_id": ...} the
+    # same way (cross-rule replay fails closed).
     campaign_id: str | None = None
+    rule_id: str | None = None
 
 
 class CampaignDecision(BaseModel):
@@ -133,6 +148,23 @@ class CampaignDecision(BaseModel):
 
 
 class CampaignReject(BaseModel):
+    reason: str = ""
+
+
+class MerchandisingDecision(BaseModel):
+    """Body for POST /merchandising/<id>/approve. Mirrors CampaignDecision:
+    the assertion fields are mandatory (no agent-authored rule takes effect
+    without a passkey assertion bound to that specific rule); /reject and
+    /pause take no assertion."""
+
+    approver_credential_id: str
+    client_data_json: str
+    authenticator_data: str
+    signature: str
+    challenge: str
+
+
+class MerchandisingReject(BaseModel):
     reason: str = ""
 
 
@@ -199,6 +231,37 @@ _CAMPAIGN_STATUS = {
     "campaign.no_webauthn_approval": 401,
     "campaign.webauthn_verification_failed": 401,
 }
+
+
+_MERCHANDISING_STATUS = {
+    "merchandising.not_found": 404,
+    "merchandising.invalid_state_transition": 409,
+    "merchandising.invalid_rule": 422,
+    "merchandising.no_webauthn_approval": 401,
+    "merchandising.webauthn_verification_failed": 401,
+}
+
+
+def _merchandising_txn(
+    session_factory: Callable[[], Session], op: Callable[[Session], Any]
+) -> Any:
+    """One merchandising-rule transition in its own transaction — the
+    _campaign_txn discipline, mapped onto the merchandising closed set."""
+    session = session_factory()
+    try:
+        try:
+            rule = op(session)
+            session.commit()
+            session.refresh(rule)
+            return rule
+        except MerchandisingError as e:
+            session.rollback()
+            raise HTTPException(
+                status_code=_MERCHANDISING_STATUS.get(e.reason_code, 422),
+                detail={"reason_code": e.reason_code, "message": e.message},
+            ) from e
+    finally:
+        session.close()
 
 
 def _campaign_txn(
@@ -863,7 +926,11 @@ def policy_studio_router(
         binding = (
             {"mode": "campaign", "campaign_id": body.campaign_id}
             if body.campaign_id
-            else {"mode": "policy"}
+            else (
+                {"mode": "merchandising", "rule_id": body.rule_id}
+                if body.rule_id
+                else {"mode": "policy"}
+            )
         )
         options = begin_assertion(config, operator.user_id, binding=binding, store=store)
         options["binding"] = binding
@@ -1018,6 +1085,65 @@ def policy_studio_router(
             make_session, lambda s: pause_campaign(s, campaign_id, f"campaign:{campaign_id}")
         )
         return {"status": "paused", "campaign_id": campaign.id, "state": campaign.state.value}
+
+    # ------------------------------------------------------- merchandising
+    # Stage 27: rule approval ceremony, mirroring the campaign routes above —
+    # same operator gate, same CSRF gate, same transaction discipline, with
+    # the assertion bound to {"mode": "merchandising", "rule_id": ...} so a
+    # cross-rule replay fails closed.
+    @router.post("/merchandising/{rule_id}/approve", dependencies=[Depends(_require_csrf_if_session)])
+    async def merchandising_approve(
+        rule_id: str,
+        body: MerchandisingDecision,
+        operator: _Operator = Depends(_operator),
+    ) -> dict[str, Any]:
+        def _act(session: Session) -> Any:
+            return activate_merchandising_rule(
+                session,
+                rule_id,
+                approver_credential_id=body.approver_credential_id,
+                webauthn_assertion={
+                    "credential_id": body.approver_credential_id,
+                    "client_data_json": body.client_data_json,
+                    "authenticator_data": body.authenticator_data,
+                    "signature": body.signature,
+                    "challenge": body.challenge,
+                },
+                config=config,
+                user_handle=operator.user_id,
+                challenge_store=store,
+                trace_id=f"merchandising:{rule_id}",
+            )
+
+        rule = _merchandising_txn(make_session, _act)
+        return {"status": "approved", "rule_id": rule.id, "state": rule.state.value}
+
+    @router.post("/merchandising/{rule_id}/reject", dependencies=[Depends(_require_csrf_if_session)])
+    async def merchandising_reject(
+        rule_id: str,
+        body: MerchandisingReject,
+        operator: _Operator = Depends(_operator),
+    ) -> dict[str, Any]:
+        rule = _merchandising_txn(
+            make_session,
+            lambda s: reject_merchandising_rule(s, rule_id, body.reason, f"merchandising:{rule_id}"),
+        )
+        return {
+            "status": "rejected",
+            "rule_id": rule.id,
+            "state": rule.state.value,
+            "reason": body.reason,
+        }
+
+    @router.post("/merchandising/{rule_id}/pause", dependencies=[Depends(_require_csrf_if_session)])
+    async def merchandising_pause(
+        rule_id: str,
+        operator: _Operator = Depends(_operator),
+    ) -> dict[str, Any]:
+        rule = _merchandising_txn(
+            make_session, lambda s: pause_merchandising_rule(s, rule_id, f"merchandising:{rule_id}")
+        )
+        return {"status": "paused", "rule_id": rule.id, "state": rule.state.value}
 
     # ------------------------------------------------------------------- admin
     @router.get("/admin/campaigns")

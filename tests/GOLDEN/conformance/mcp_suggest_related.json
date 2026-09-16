@@ -1,0 +1,35 @@
+{
+  "description": "suggest_related for one cart SKU: deterministic related-SKU suggestion with rule provenance.",
+  "expect_body": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"data\": {\"suggestions\": []}, \"error\": {}, \"success\": true}",
+          "type": "text"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "expect_status": 200,
+  "name": "mcp_suggest_related",
+  "request": {
+    "body": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "skus": [
+            "GEL-VAN-500"
+          ]
+        },
+        "name": "suggest_related"
+      }
+    },
+    "method": "POST",
+    "path": "/agent/mcp"
+  }
+}

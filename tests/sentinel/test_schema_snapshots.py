@@ -286,6 +286,25 @@ EXPECTED_COLUMNS = {
         "created_at",
         "updated_at",
     },
+    # Stage 27: merchant-/agent-authored cross-sell / up-sell / bundle rules.
+    "merchandising_rules": {
+        "id",
+        "merchant_id",
+        "kind",
+        "title",
+        "rationale",
+        "trigger_skus",
+        "suggested_sku",
+        "campaign_id",
+        "source_signals",
+        "draft_digest",
+        "state",
+        "approver_credential_id",
+        "approved_at",
+        "webauthn_assertion",
+        "created_at",
+        "updated_at",
+    },
 }
 
 

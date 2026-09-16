@@ -7,10 +7,11 @@
 # against your own origin; only the origin-derived URLs change (see
 # test_manifest_urls_derive_from_request_origin).
 #
-# Fixtures cover: MCP 2025-06-18 initialize + tools/list (all 22 tools),
+# Fixtures cover: MCP 2025-06-18 initialize + tools/list (all 23 tools),
 # search_catalog / lookup_catalog / get_product in UCP {meta, catalog} shape
-# (hit, partial-miss, legacy shape), unknown-tool isError, legacy-envelope
-# -32600 rejection, missing-catalog -32602, and both discovery manifests.
+# (hit, partial-miss, legacy shape), suggest_related, unknown-tool isError,
+# legacy-envelope -32600 rejection, missing-catalog -32602, and both
+# discovery manifests.
 # Seeded catalog is fixed (2 gelato SKUs) so catalog bytes are stable.
 # Golden discipline applies: a fixture break means the wire changed — review
 # the diff as a spec change, never "fix" the vector to match.
@@ -45,6 +46,7 @@ FIXTURES = [
     "mcp_lookup_catalog_partial",
     "mcp_get_product_legacy",
     "mcp_get_product_ucp",
+    "mcp_suggest_related",
     "mcp_unknown_tool",
     "mcp_lookup_missing_catalog",
     "mcp_legacy_shape_rejected",

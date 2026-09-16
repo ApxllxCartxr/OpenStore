@@ -77,6 +77,20 @@ from .ledger import (
     get_ledger_balance,
     verify_ledger_balances,
 )
+from .merchandising import (
+    MerchandisingError,
+    activate_rule,
+    co_occurrence_counts,
+    create_rule,
+    draft_merchandising_rules,
+    pause_rule,
+    reject_rule,
+    rule_why_stat,
+    suggest_for_cart,
+)
+from .merchandising import (
+    submit_for_approval as submit_rule_for_approval,
+)
 from .oauth import (
     OAuthError,
     create_authorization_code,
@@ -170,6 +184,17 @@ __all__ = [
     "create_refund_entry",
     "get_ledger_balance",
     "verify_ledger_balances",
+    # merchandising
+    "MerchandisingError",
+    "create_rule",
+    "submit_rule_for_approval",
+    "activate_rule",
+    "reject_rule",
+    "pause_rule",
+    "suggest_for_cart",
+    "draft_merchandising_rules",
+    "co_occurrence_counts",
+    "rule_why_stat",
     # inventory
     "InventoryError",
     "create_reserve_entries",
