@@ -1294,3 +1294,66 @@
   already carried — no golden regen, no verifier re-pin, `openstore-verify`
   green. The numbering slip noted in the original entry (the stage-25 spec's
   `Q-045` citation for this question) stands corrected here.
+
+## Q-048 | stage: 25 | date: 2026-09-16T00:00:00Z
+- What is ambiguous: offline verifier check 8 (`check_catalog_attestations`,
+  `verify/checks.py:342`) skips any item whose `catalog_attestation` is absent
+  (`if not attestation: continue`), and every production cart line carries
+  `catalog_attestation: null` — cart lines are built as
+  `{sku, qty, unit_minor, tags}` in `webcart.py` and `mcp_server.py`. So check 8
+  passes vacuously on every real bundle, exactly as e6 used to fail on every
+  real bundle (Q-047/DECISION-050). The PoAI goldens have the same shape
+  (`catalog_attestation: null` alongside `catalog_attestations_valid: true`), so
+  the fixtures do not expose it either. DECISION-050 closed the bundle-time half
+  (resolution); this is the offline half (signature).
+- Options considered: (a) persist the served attestation beside the cart — NOT
+  in the cart line, since `compute_cart_hash` covers the line and moving
+  `cart_hash` breaks e5's challenge binding — as a `cart_snapshot` sidecar keyed
+  by sku, carried into `goods.items[].catalog_attestation` at bundle build, so
+  check 8 verifies a real ES256 signature over sku/price/tags/catalog_digest
+  with `iat <= cart_created_at`; needs the merchant public key reachable by the
+  verifier (JWKS is already served — `tests/GOLDEN/poai/jwks`) and a golden
+  regen. (b) Make check 8 fail-closed on a missing attestation without plumbing
+  one — rejected, it would fail every bundle the sidecar currently produces and
+  turn a silent pass into a silent blanket failure. (c) Leave check 8 vacuous
+  and document it — rejected as the same class of gap Q-047 just closed.
+- Blocked since: 2026-09-16T00:00:00Z
+- RESOLUTION: none yet. (a) is the intended shape but it changes the cart
+  snapshot written on the money path, the bundle bytes, and the PoAI goldens,
+  and it needs the verifier's key-resolution path exercised against a real JWKS
+  — a slice with its own adversarial tests, not a tail-end change to the Q-047
+  fix. Recorded so the vacuous pass is visible rather than mistaken for
+  coverage.
+
+## Q-049 | stage: 26/27 | date: 2026-09-16T00:00:00Z
+- What is ambiguous: two DONE WHEN criteria are live-observation claims under
+  R0.7, and neither has been confirmed against a live response. Stage 26's
+  "WooCommerce write-back observed live; a forced failure lands in the DLQ with
+  an alert" is exercised only through a `_Stub` adapter in
+  `tests/stage26/test_sync.py:72` (the forced-failure/DLQ/alert half IS covered,
+  `test_writeback_failure_lands_in_dlq_with_alert`; the live half is not).
+  Stage 27's "WooCommerce native cross-sell/up-sell appears with zero manual
+  configuration" is exercised in `tests/stage27/test_adapter_native.py` against
+  a hand-built payload at `https://shop.example` — no socket is opened. So
+  `woo_adapter.write_stock`'s request shape (`manage_stock` +
+  `stock_quantity`, and the `/products/{parent}/variations/{id}` split) and
+  `_normalize`'s reliance on `cross_sell_ids` / `upsell_ids` are taken from the
+  documented WooCommerce REST v3 surface, not from a captured live response.
+  Every other DONE WHEN item in both specs maps to a passing test.
+- Options considered: (a) stand up a WooCommerce test-mode store, capture the
+  real product and stock-write responses into `tests/GOLDEN/adapters/woo/`, and
+  pin the adapter against them — the R0.7 protocol used for Razorpay
+  (`scripts/capture_constants.py`, Q-007), and the only thing that actually
+  discharges the claim; (b) weaken both criteria to "observed against a
+  recorded fixture" and say so in the specs — honest, but it silently lowers
+  the bar the specs were written to; (c) leave the criteria as written and the
+  stages as claimed-done — rejected, it is the same class of unearned pass as
+  Q-047's e6 and Q-048's check 8.
+- Blocked since: 2026-09-16T00:00:00Z
+- RESOLUTION: none yet. (a) needs credentials and a live store that this tree
+  does not have; it cannot be discharged from the repository alone. Recorded so
+  that stages 26 and 27 read as "complete but for one live-verification item
+  each" rather than as unconditionally done. No code is known to be wrong — the
+  field names are the documented ones — but under R0.7 "documented" is not
+  "observed", and an adapter that writes stock to a real merchant's store is
+  exactly where that distinction earns its keep.
