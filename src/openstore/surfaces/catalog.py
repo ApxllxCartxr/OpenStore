@@ -9,13 +9,23 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from sqlmodel import Session
 
 from openstore.config import Settings
-
-from openstore.surfaces.adapters.base import AdapterCapability
-from openstore.surfaces.adapters.cache import AdapterCache
-from openstore.surfaces.adapters.errors import AdapterError, not_configured, price_invalid, price_missing, sku_missing
-from openstore.surfaces.adapters.normalize import clean_sku, normalize_tags, normalized_item, parse_stock, price_to_minor
+from openstore.surfaces.adapters.base import AdapterCapability, AdapterHealth
+from openstore.surfaces.adapters.errors import (
+    AdapterError,
+    not_configured,
+    price_invalid,
+    price_missing,
+    sku_missing,
+)
+from openstore.surfaces.adapters.normalize import (
+    clean_sku,
+    normalize_tags,
+    normalized_item,
+    parse_stock,
+)
 from openstore.surfaces.adapters.registry import get_adapter, register_adapter
 
 # Legacy single-slot cache. Tests reach in and set this to None to force a
@@ -131,12 +141,12 @@ class YamlAdapter:
     def push_order_status(self, order: Any) -> None:
         raise not_configured("yaml", "order write-back (flat file, no order API)")
 
-    def health_check(self) -> Any:
+    def health_check(self) -> AdapterHealth:
         try:
             items = self.fetch_items()
         except AdapterError as e:
-            return Any(ok=False, detail=f"{e.reason_code}: {e.message}")
-        return Any(ok=True, item_count=len(items))
+            return AdapterHealth(ok=False, detail=f"{e.reason_code}: {e.message}")
+        return AdapterHealth(ok=True, item_count=len(items))
 
 
 def _build_yaml(config: Settings, source: Any, _client: Any) -> Any:
@@ -152,11 +162,10 @@ def load_catalog(config: Settings, session: Session | None = None) -> list[dict[
     Legacy catalog_path:/shopify: blocks normalize into catalog_source at
     resolution (adapters/registry.py); YAML-with-no-path and missing files
     still answer [] exactly as before.
-    
+
     If a session is provided, it's used to apply the DB overlay (catalog_source
     from /merchant/settings). If no session, a new one is created.
     """
-    from openstore.surfaces.adapters import get_adapter
     from openstore.core.settings_overlay import effective_settings
 
     eff = effective_settings(config, session)
