@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -97,9 +98,69 @@ CATALOG_TEMPLATE = """# OpenStore catalog — SKUs in integer paise (minor units
 """
 
 
+def _init_interactive(
+    merchant: str | None,
+    currency: str,
+    output_dir: Path,
+    deployment: str,
+    public_base_url: str | None,
+) -> None:
+    """Run the first-run wizard and write its answers (setup_wizard.py).
+
+    Flags passed on the command line seed the matching answers; everything
+    else is asked. Secrets go to .env only — the YAML gets ${VAR}.
+    """
+    from openstore.setup_wizard import (
+        WizardState,
+        config_from_state,
+        env_from_state,
+        render_config,
+        render_env,
+        run_wizard,
+    )
+
+    state = WizardState(
+        merchant=merchant or "",
+        currency=currency,
+        deployment=deployment,
+        public_base_url=public_base_url,
+    )
+    try:
+        run_wizard(console, state)
+    except (KeyboardInterrupt, EOFError):
+        console.print("\n[yellow]Cancelled — nothing written.[/yellow]")
+        raise typer.Exit(code=130) from None
+
+    config_path = output_dir / f"{state.slug}.yaml"
+    env_path = output_dir / ".env"
+    catalog_path = output_dir / "catalog.yaml"
+
+    written: list[Path] = []
+    for path, text in (
+        (config_path, render_config(state, config_from_state(state))),
+        (env_path, render_env(env_from_state(state))),
+    ):
+        if path.exists() and not typer.confirm(f"  {path.name} exists — overwrite?"):
+            console.print(f"[yellow]![/yellow] Kept existing {path}")
+            continue
+        path.write_text(text)
+        written.append(path)
+    if state.source_kind == "yaml" and not catalog_path.exists():
+        catalog_path.write_text(CATALOG_TEMPLATE)
+        written.append(catalog_path)
+
+    console.print()
+    for path in written:
+        console.print(f"[green]✓[/green] {path}")
+    console.print()
+    console.print("Next:")
+    console.print(f"  [bold]openstore serve {config_path}[/bold]")
+    console.print("  then finish setup at /merchant/setup")
+
+
 @app.command()
 def init(
-    merchant: str = typer.Option(..., "--merchant", "-m", help="Merchant name"),
+    merchant: str | None = typer.Option(None, "--merchant", "-m", help="Merchant name"),
     currency: str = typer.Option("INR", "--currency", "-c", help="Currency (ISO 4217)"),
     output_dir: Path = typer.Option(Path("."), "--output", "-o", help="Output directory"),
     deployment: str = typer.Option(
@@ -113,10 +174,24 @@ def init(
         "--public-base-url",
         help="SID-1 public origin for subdomain deployments (e.g. https://openstore.gelateria.example)",
     ),
+    interactive: bool = typer.Option(
+        True,
+        "--interactive/--no-interactive",
+        help="Ask step by step. Ignored when stdin is not a TTY (CI, pipes).",
+    ),
 ) -> None:
     """Initialize a new OpenStore sidecar project."""
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # A non-TTY stdin cannot answer prompts; falling back keeps scripted and
+    # CI invocations on the template path without a flag.
+    if interactive and sys.stdin.isatty():
+        _init_interactive(merchant, currency, output_dir, deployment, public_base_url)
+        return
+    if merchant is None:
+        console.print("[red]✗[/red] --merchant is required without an interactive terminal")
+        raise typer.Exit(code=2)
 
     slug = merchant.lower().replace(" ", "-").replace("'", "")
     config_path = output_dir / f"{slug}.yaml"
