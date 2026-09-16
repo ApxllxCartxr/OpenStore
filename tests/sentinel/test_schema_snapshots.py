@@ -48,6 +48,10 @@ EXPECTED_COLUMNS = {
         "discord_message_id",
         "request_text",
         "poai_bundle",
+        # Q-050 (DECISION-051): the assertion and ALLOW transcript a bundle
+        # needs to carry honest e2/e4/e5/e7 evidence.
+        "webauthn_assertion",
+        "decision_transcript",
     },
     "intent_policies": {
         "id",
@@ -211,7 +215,6 @@ EXPECTED_COLUMNS = {
         "resume_url",
         "cart_payload",
     },
-
     "shopping_sessions": {
         "id",
         "chat_platform",

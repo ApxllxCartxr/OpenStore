@@ -199,6 +199,25 @@ class Checkout(SQLModel, table=True):
     # non-chat checkout, or one not yet RELEASED).
     poai_bundle: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
+    # Q-050 (DECISION-051): the per-checkout WebAuthn assertion the ceremony
+    # just verified — signature, authenticator_data, credential_id, the
+    # challenge binding, and when it was signed. Persisted because nothing
+    # else retains it (complete_assertion keeps only the sign counter), and
+    # without it a bundle can never carry honest e2/e4/e5 evidence. Null for
+    # checkouts authorized without a per-cart tap (agent/chat paths) and for
+    # every row predating the column — readers must stay null-tolerant.
+    webauthn_assertion: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+
+    # Q-050 (DECISION-051): compile_decision's transcript for the ALLOW that
+    # authorized this checkout. Captured at creation rather than replayed at
+    # bundle time: cumulative spend and checkout count move on, so a later
+    # replay can legitimately differ from the decision actually taken.
+    decision_transcript: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+
     # Stage 24 (Q-045): arbitrator share-link bearer token. SHA-256 hex of the
     # raw token (never the token itself — handoff discipline); null means no
     # share link is live for this checkout. Revoked by nulling both columns
@@ -706,7 +725,4 @@ class MerchandisingRule(SQLModel, table=True):
         default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
     )
 
-    __table_args__ = (
-        Index("ix_merchandising_merchant_state", "merchant_id", "state"),
-    )
-
+    __table_args__ = (Index("ix_merchandising_merchant_state", "merchant_id", "state"),)

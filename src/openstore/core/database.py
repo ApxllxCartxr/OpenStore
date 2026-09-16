@@ -320,6 +320,8 @@ def get_or_create_checkout(
     idempotency_key: str,
     cart_snapshot: dict[str, Any],
     agent_plan: dict[str, Any] | None = None,
+    webauthn_assertion: dict[str, Any] | None = None,
+    decision_transcript: list[dict[str, Any]] | None = None,
 ) -> tuple[Checkout, bool]:
     """
     Get existing checkout or create new one (idempotent).
@@ -349,6 +351,11 @@ def get_or_create_checkout(
         idempotency_key=idempotency_key,
         cart_snapshot=cart_snapshot,
         agent_plan=agent_plan,
+        # Q-050: written here, in the same transaction that creates the
+        # checkout, because this is the last point where the authorizing
+        # ceremony and its decision are both still in hand.
+        webauthn_assertion=webauthn_assertion,
+        decision_transcript=decision_transcript,
         created_at=datetime.now(UTC).replace(tzinfo=None),
         updated_at=datetime.now(UTC).replace(tzinfo=None),
     )

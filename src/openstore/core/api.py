@@ -133,6 +133,7 @@ def create_checkout_from_policy(
     assertion_age_seconds: int = 0,
     agent_plan: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
+    assertion_evidence: dict[str, Any] | None = None,
 ) -> CompilerResult:
     """
     Checkout creation against an already-resolved policy object.
@@ -143,6 +144,15 @@ def create_checkout_from_policy(
     4: an amendment-relieved, unpersisted, one-time policy override — Q-020)
     can drive the exact same compile-and-persist path without a second DB
     round-trip re-fetching the (unrelieved) real policy row.
+
+    assertion_evidence (Q-050) is the per-cart WebAuthn assertion the caller
+    just verified — signature, authenticator_data, credential_id, binding,
+    signed_at. It is persisted verbatim beside the ALLOW transcript so the
+    evidence bundle can carry both; callers that authorize without a per-cart
+    tap pass None and their bundles stay exactly as complete as they are now.
+    It is evidence, never authority: `assertion_verified` remains what the
+    compiler grades on, and nothing here re-reads this dict to make a
+    decision.
     """
     # Audit log
     audit_log(
@@ -274,6 +284,8 @@ def create_checkout_from_policy(
         idempotency_key=idem_key,
         cart_snapshot=cart_snapshot,
         agent_plan=agent_plan,
+        webauthn_assertion=assertion_evidence,
+        decision_transcript=result.transcript,
     )
 
     # Initiate hold (creates RESERVE ledger entry) only on first creation.

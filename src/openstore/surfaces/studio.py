@@ -37,6 +37,7 @@ import json
 import logging
 import secrets
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -656,6 +657,7 @@ async def _approve_cart(
     session_factory: Callable[[], Session],
     handoff: Handoff,
     token: str,
+    assertion_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """S16 (Q-033): the cart approval assertion just verified against the
     cart-bound challenge. Create the checkout with assertion_verified=True so
@@ -698,6 +700,10 @@ async def _approve_cart(
             policy=policy,
             assertion_verified=True,  # the cart approval assertion just verified
             agent_plan={"cart_id": payload.get("cart_id")},
+            # Q-050: the assertion itself, so the bundle can carry it. Nothing
+            # downstream grades on it — assertion_verified above is what the
+            # compiler reads.
+            assertion_evidence=assertion_evidence,
         )
 
         if not result.allowed:
@@ -1346,6 +1352,7 @@ def policy_studio_router(
             )
 
         buyer = buyer_handle(handoff)
+        binding = {"mode": "cart", "cart_hash": payload.get("cart_hash", "")}
         vsession = make_session()
         try:
             complete_assertion(
@@ -1357,7 +1364,7 @@ def policy_studio_router(
                 body.authenticator_data,
                 body.signature,
                 body.challenge,
-                binding={"mode": "cart", "cart_hash": payload.get("cart_hash", "")},
+                binding=binding,
                 store=store,
             )
             vsession.commit()
@@ -1371,7 +1378,20 @@ def policy_studio_router(
         finally:
             vsession.close()
 
-        return await _approve_cart(config, make_session, handoff, body.token)
+        # Q-050: complete_assertion keeps only the sign counter, so capture
+        # the verified ceremony here — this is the last point it exists.
+        # signed_at is the verification instant (the assertion carries no
+        # timestamp of its own); PoAI e3 measures adjudication against it.
+        evidence = {
+            "credential_id": body.credential_id,
+            "client_data_json": body.client_data_json,
+            "authenticator_data": body.authenticator_data,
+            "signature": body.signature,
+            "challenge": body.challenge,
+            "challenge_binding": binding,
+            "signed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        }
+        return await _approve_cart(config, make_session, handoff, body.token, evidence)
 
     @router.post("/intent/cart/{cart_id}/reject", dependencies=[Depends(_require_csrf_if_session)])
     async def cart_reject(cart_id: str, body: CartDecision) -> dict[str, Any]:

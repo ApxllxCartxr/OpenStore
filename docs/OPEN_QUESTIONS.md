@@ -1357,3 +1357,70 @@
   field names are the documented ones — but under R0.7 "documented" is not
   "observed", and an adapter that writes stock to a real merchant's store is
   exactly where that distinction earns its keep.
+
+## Q-050 | stage: 11/28 | date: 2026-09-16T00:00:00Z
+- What is ambiguous: a bundle built by `psp/router._build_and_store_evidence`
+  fails 5 of the offline verifier's 14 checks — `webauthn_assertion`,
+  `challenge_binding`, `uv_flag`, `re_execution`, and `aal`. This is not a
+  demo-mode artifact: every bundle the live webhook path has ever produced
+  fails the same five, for two root causes plus one divergence.
+  (i) The per-checkout WebAuthn assertion is verified in
+  `surfaces/studio.py::cart_approve` and then discarded — `complete_assertion`
+  persists only the credential's sign counter, so nothing retrievable by
+  `checkout_id` carries `signature`, `authenticator_data`, or the
+  `{"mode":"cart","cart_hash":...}` binding. `_build_and_store_evidence`'s own
+  docstring records this and declines to fabricate the fields, which is right;
+  the consequence is that predicates e2/e4/e5 and checks 5/6/7 are honestly
+  False on every real bundle.
+  (ii) `compile_decision`'s ALLOW transcript is computed and then dropped:
+  `core/api.py` audits `result.transcript` on DENY but persists nothing on
+  ALLOW, so `adjudication.transcript` is hardcoded `[]` and check 10 fails on
+  a transcript that did exist and did pass.
+  (iii) Even with (i) and (ii) fixed, check 12 still fails: the bundle's
+  `aal.level` is copied from `Checkout.aal_level`, which `holdcancel`
+  computes as an amount-banded RISK tier (2 here), while the verifier
+  recomputes AAL from the bundle's own predicates and gets 3 once e5 holds
+  (cart-bound assertion). Item 22 flagged this divergence; it becomes a hard
+  check failure the moment the evidence is complete enough to recompute.
+- Options considered:
+  (i) assertion persistence: (i-a) a new `webauthn_assertions` table keyed by
+  checkout — rejected as indirection over a one-row-per-checkout fact, against
+  the Q-018/Q-020 nullable-JSON-column-on-Checkout precedent; (i-b) re-derive
+  the assertion at bundle time — impossible, the signature is not reproducible
+  and forging one is the exact thing the docstring refuses; (i-c)
+  `Checkout.webauthn_assertion` (JSON, nullable), written in the same
+  transaction that creates the checkout, carrying only what the ceremony
+  already verified (chosen).
+  (ii) transcript persistence: (ii-a) re-run `compile_decision` at bundle
+  time — rejected: the cumulative-spend and checkout-count inputs have moved
+  on by then, so a replay can legitimately differ from the decision actually
+  taken, and the bundle must carry the decision that authorized THIS payment;
+  (ii-b) `Checkout.decision_transcript` (JSON, nullable), written from the
+  ALLOW result at creation (chosen).
+  (iii) aal divergence: (iii-a) make `holdcancel.compute_aal_level` agree with
+  the bundle recomputation — rejected, it is a money-path risk tier that gates
+  holds and its inputs (amount bands) are deliberately not the bundle's
+  predicates; (iii-b) write the RECOMPUTED level into the bundle's `aal`
+  section, with its predicates and reasons, leaving `Checkout.aal_level`
+  untouched (chosen) — the bundle should assert what the bundle proves, which
+  is precisely what an offline verifier can check.
+- Blocked since: 2026-09-16T00:00:00Z
+- RESOLUTION (2026-09-16): (i-c), (ii-b), (iii-b). DECISION-051.
+  `alembic/versions/0014_evidence_completeness.py` adds
+  `checkouts.webauthn_assertion` and `checkouts.decision_transcript` (both
+  JSON, nullable), following the Q-018/Q-020 precedent;
+  `tests/sentinel/test_schema_snapshots.py`'s `checkouts` entry updated in
+  lockstep. `core/api.create_checkout_from_policy` gains an optional
+  `assertion_evidence` kwarg and persists it beside the ALLOW transcript;
+  `surfaces/studio.py::cart_approve` passes what `complete_assertion` just
+  verified. Both columns stay nullable and every reader stays null-tolerant:
+  pre-migration checkouts, and the agent/chat paths that hold no per-cart
+  assertion, keep producing exactly the bundles they produce today — a bundle
+  is now as complete as its ceremony was, never more.
+  NOT in scope: `verify/checks.py::check_webauthn_assertion` still verifies
+  the signature STRUCTURALLY (base64url-decodable) rather than
+  cryptographically, because the bundle carries no enrolled public key to
+  verify against — closing that needs `authority.enrolment.public_key` in the
+  schema, which is a bundle-format change (the check's own docstring names it,
+  and Q-019 already reserves the schema question). Persisting the assertion is
+  the prerequisite for that work, not a substitute for it.

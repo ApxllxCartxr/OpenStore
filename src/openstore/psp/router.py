@@ -261,7 +261,13 @@ def _build_and_store_evidence(
     from datetime import UTC, datetime
 
     from openstore.core.audit import audit_log
-    from openstore.core.poai import PoAISigningError, create_poai_bundle
+    from openstore.core.poai import (
+        PoAISigningError,
+        build_aal_section,
+        compute_aal_level_from_bundle,
+        create_poai_bundle,
+        evaluate_aal_predicates,
+    )
     from openstore.models import IntentPolicy
     from openstore.surfaces.catalog import cart_resolves_against_catalog
     from openstore.surfaces.wellknown import get_catalog_signing_key
@@ -299,39 +305,84 @@ def _build_and_store_evidence(
         cfg, checkout.merchant_id, cart_items, session
     )
 
+    # Q-050 (DECISION-051): the assertion the cart ceremony verified and the
+    # transcript compile_decision produced, both persisted at authorization
+    # time. Null for checkouts authorized without a per-cart tap and for rows
+    # predating the columns — those bundles stay exactly as complete as they
+    # were, which is the point: a bundle is as complete as its ceremony was.
+    assertion = checkout.webauthn_assertion or {}
+    webauthn_section: dict[str, Any] | None = None
+    if policy:
+        webauthn_section = {"credential_id": policy.webauthn_credential_id}
+        if assertion:
+            webauthn_section.update(
+                {
+                    "signature": assertion.get("signature"),
+                    "authenticator_data": assertion.get("authenticator_data"),
+                    "client_data_json": assertion.get("client_data_json"),
+                    "challenge_binding": assertion.get("challenge_binding"),
+                    "signed_at": assertion.get("signed_at"),
+                    # e3 measures adjudication against signed_at using the
+                    # freshness the signed policy itself declares.
+                    "assertion_max_age_seconds": policy.assertion_max_age_seconds,
+                }
+            )
+
+    sections: dict[str, Any] = {
+        "transaction": {
+            "checkout_id": checkout.id,
+            "amount_minor": checkout.amount_minor,
+            "merchant_id": checkout.merchant_id,
+            "currency": checkout.currency,
+        },
+        "human_intent": human_intent,
+        "authority": {
+            "scheme": "native_webauthn",
+            "policy": {
+                "policy_id": policy.id,
+                "policy_version": policy.policy_version,
+                "policy_hash": policy.policy_hash,
+            }
+            if policy
+            else None,
+            "webauthn": webauthn_section,
+        },
+        "goods": {
+            "items": cart_items,
+            "cart_hash": checkout.cart_hash,
+            "catalog_attestations_valid": attestations_valid,
+        },
+        "agent": {
+            "client_id": checkout.client_id,
+            "scopes": ["checkout:confirm"],
+            "token_jti": checkout.trace_id,
+        },
+        "adjudication": {
+            "verdict": "ALLOW",
+            "transcript": checkout.decision_transcript or [],
+            "evaluated_at": now_iso,
+        },
+        "notification": {"sent_at": now_iso, "receipt_digest": f"sha256:{receipt_digest}"},
+    }
+
+    # Q-050 (iii-b): the bundle's AAL is recomputed from the bundle's OWN
+    # predicates, not copied from Checkout.aal_level. The two are different
+    # quantities — holdcancel grades an amount-banded risk tier to size the
+    # money hold, while this is what the evidence can prove to an offline
+    # verifier, which recomputes exactly this way. Copying the risk tier made
+    # check 12 fail the moment the evidence was complete enough to recompute.
+    predicates = evaluate_aal_predicates(sections)
+    computed_level = compute_aal_level_from_bundle(sections)
+    reasons = [name for name, held in sorted(predicates.items()) if not held]
+    sections["aal"] = build_aal_section(
+        computed_level,
+        predicates,
+        [f"{name} not satisfied" for name in reasons],
+    )
+
     try:
         bundle = create_poai_bundle(
-            transaction={
-                "checkout_id": checkout.id,
-                "amount_minor": checkout.amount_minor,
-                "merchant_id": checkout.merchant_id,
-                "currency": checkout.currency,
-            },
-            human_intent=human_intent,
-            authority={
-                "scheme": "native_webauthn",
-                "policy": {
-                    "policy_id": policy.id,
-                    "policy_version": policy.policy_version,
-                    "policy_hash": policy.policy_hash,
-                }
-                if policy
-                else None,
-                "webauthn": {"credential_id": policy.webauthn_credential_id} if policy else None,
-            },
-            goods={
-                "items": cart_items,
-                "cart_hash": checkout.cart_hash,
-                "catalog_attestations_valid": attestations_valid,
-            },
-            agent={
-                "client_id": checkout.client_id,
-                "scopes": ["checkout:confirm"],
-                "token_jti": checkout.trace_id,
-            },
-            adjudication={"verdict": "ALLOW", "transcript": [], "evaluated_at": now_iso},
-            notification={"sent_at": now_iso, "receipt_digest": f"sha256:{receipt_digest}"},
-            aal={"level": checkout.aal_level},
+            **sections,
             merchant_private_key_pem=get_catalog_signing_key(checkout.merchant_id),
             merchant_id=checkout.merchant_id,
         )
@@ -348,37 +399,7 @@ def _build_and_store_evidence(
             metadata={"signing_error": str(e), "unsigned": True},
         )
         bundle = create_poai_bundle(
-            transaction={
-                "checkout_id": checkout.id,
-                "amount_minor": checkout.amount_minor,
-                "merchant_id": checkout.merchant_id,
-                "currency": checkout.currency,
-            },
-            human_intent=human_intent,
-            authority={
-                "scheme": "native_webauthn",
-                "policy": {
-                    "policy_id": policy.id,
-                    "policy_version": policy.policy_version,
-                    "policy_hash": policy.policy_hash,
-                }
-                if policy
-                else None,
-                "webauthn": {"credential_id": policy.webauthn_credential_id} if policy else None,
-            },
-            goods={
-                "items": cart_items,
-                "cart_hash": checkout.cart_hash,
-                "catalog_attestations_valid": attestations_valid,
-            },
-            agent={
-                "client_id": checkout.client_id,
-                "scopes": ["checkout:confirm"],
-                "token_jti": checkout.trace_id,
-            },
-            adjudication={"verdict": "ALLOW", "transcript": [], "evaluated_at": now_iso},
-            notification={"sent_at": now_iso, "receipt_digest": f"sha256:{receipt_digest}"},
-            aal={"level": checkout.aal_level},
+            **sections,
             merchant_private_key_pem=None,  # No signature
             merchant_id=checkout.merchant_id,
         )
