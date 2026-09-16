@@ -20,7 +20,6 @@ from openstore.core.database import (
 from openstore.core.holdcancel import (
     AALLevel,
     cancel_hold,
-    check_and_expire_checkouts,
     initiate_hold,
 )
 from openstore.core.idempotency import (
@@ -28,9 +27,6 @@ from openstore.core.idempotency import (
 )
 from openstore.core.ledger import verify_ledger_balances
 from openstore.core.webauthn_rp import WebAuthnError, complete_assertion
-from openstore.core.webhooks import (
-    process_webhook_retry_queue,
-)
 from openstore.models import (
     AuditLog,
     Campaign,
@@ -161,6 +157,29 @@ def create_checkout_from_policy(
 
     policy_id = policy.id
 
+    # Stage 26 (DECISION-047): pre-compiler oversell gate. Runs BEFORE the
+    # CompilerContext is constructed, in the caller's transaction — a
+    # transcript-row check would force the offline verifier to trust an
+    # unsigned point-in-time quantity, breaking replayability, so the
+    # compiler stays byte-identical and denials here audit exactly like
+    # compiler denials below.
+    from openstore.core.inventory import gate_checkout_stock
+
+    try:
+        gate_checkout_stock(session, config, merchant_id, cart_items)
+    except CommerceError as e:
+        audit_log(
+            session,
+            trace_id,
+            client_id,
+            "checkout_denied",
+            "checkout",
+            resource_id=policy_id,
+            response_status=400,
+            metadata={"reason_code": e.reason_code, "transcript": []},
+        )
+        raise
+
     # Load campaigns referenced in cart
     campaign_lookup = {}
     for item in cart_items:
@@ -275,6 +294,20 @@ def create_checkout_from_policy(
             policy_hash=policy.policy_hash,
             max_spend_per_tx_minor=policy.max_spend_per_tx_minor,
             max_spend_total_minor=policy.max_spend_total_minor,
+        )
+        # Stage 26: RESERVE inventory in the SAME transaction as initiate_hold
+        # (same session — never a nested one). Re-checks under the row lock
+        # immediately before writing, closing the gate-to-write TOCTOU.
+        from openstore.core.inventory import reserve_checkout_stock
+
+        reserve_checkout_stock(
+            session,
+            config,
+            merchant_id,
+            cart_items,
+            trace_id,
+            client_id,
+            checkout.id,
         )
 
     # Audit success
@@ -540,15 +573,4 @@ def verify_checkout_evidence(
             for a in audit_logs
         ],
         "ledger_balanced": balanced,
-    }
-
-
-def run_sweepers(config: Settings, session: Session) -> dict[str, int]:
-    """Run all maintenance sweepers (INV-7, INV-8)."""
-    expired_checkouts = check_and_expire_checkouts(session)
-    retried_webhooks = process_webhook_retry_queue(session)
-
-    return {
-        "expired_checkouts_processed": expired_checkouts,
-        "webhooks_retried": retried_webhooks,
     }

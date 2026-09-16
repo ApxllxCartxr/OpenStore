@@ -220,6 +220,20 @@ def release_hold(
         description=f"Hold released for checkout {checkout_id}",
     )
 
+    # Stage 26: COMMIT inventory beside the money CAPTURE (same transaction,
+    # same session). Guarded on the outstanding reservation, so the hold-loop
+    # reconcile and the webhook path cannot double-commit.
+    from openstore.core.inventory import commit_checkout_stock
+
+    commit_checkout_stock(
+        session,
+        checkout.merchant_id,
+        checkout.id,
+        (checkout.cart_snapshot or {}).get("items", []),
+        checkout.trace_id,
+        checkout.client_id,
+    )
+
     checkout.state = OrderState.RELEASED
     checkout.released_at = datetime.now(UTC).replace(tzinfo=None)
     checkout.updated_at = datetime.now(UTC).replace(tzinfo=None)
@@ -261,6 +275,20 @@ def cancel_hold(
         amount_minor=checkout.amount_minor,
         currency=checkout.currency,
         description=f"Hold cancelled: {reason}",
+    )
+
+    # Stage 26: RELEASE inventory beside the money RELEASE (same transaction).
+    # Guarded on the outstanding reservation: a CREATED-expired checkout holds
+    # nothing, and the second reconciliation path finds nothing left.
+    from openstore.core.inventory import release_checkout_stock
+
+    release_checkout_stock(
+        session,
+        checkout.merchant_id,
+        checkout.id,
+        (checkout.cart_snapshot or {}).get("items", []),
+        checkout.trace_id,
+        checkout.client_id,
     )
 
     checkout.state = OrderState.CANCELLED
@@ -308,6 +336,20 @@ def refund_checkout(
         amount_minor=checkout.amount_minor,
         currency=checkout.currency,
         description=f"Refund: {reason}",
+    )
+
+    # Stage 26: RESTOCK inventory beside the money REFUND (same transaction).
+    # Guarded on committed-but-unrestocked units, so a double refund path
+    # cannot restock twice.
+    from openstore.core.inventory import restock_checkout_stock
+
+    restock_checkout_stock(
+        session,
+        checkout.merchant_id,
+        checkout.id,
+        (checkout.cart_snapshot or {}).get("items", []),
+        checkout.trace_id,
+        checkout.client_id,
     )
 
     checkout.state = OrderState.REFUNDED

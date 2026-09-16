@@ -8,7 +8,6 @@ from .api import (
     confirm_checkout,
     create_checkout,
     get_checkout,
-    run_sweepers,
     verify_checkout_evidence,
 )
 from .audit import AuditContext, audit_log, get_audit_trail
@@ -50,6 +49,24 @@ from .idempotency import (
     compute_request_hash,
     generate_idempotency_key,
     store_idempotency_result,
+)
+from .inventory import (
+    InventoryError,
+    available_qty,
+    check_stock_available,
+    commit_checkout_stock,
+    compute_sku_exposure,
+    create_commit_entries,
+    create_release_entries,
+    create_reserve_entries,
+    create_restock_entries,
+    gate_checkout_stock,
+    inventory_sync_tick,
+    is_sellable,
+    release_checkout_stock,
+    reserve_checkout_stock,
+    restock_checkout_stock,
+    verify_inventory_balances,
 )
 from .ledger import (
     LedgerError,
@@ -110,7 +127,6 @@ __all__ = [
     "confirm_checkout",
     "cancel_hold_flow",
     "verify_checkout_evidence",
-    "run_sweepers",
     # compiler
     "CompilerContext",
     "CompilerResult",
@@ -154,6 +170,23 @@ __all__ = [
     "create_refund_entry",
     "get_ledger_balance",
     "verify_ledger_balances",
+    # inventory
+    "InventoryError",
+    "create_reserve_entries",
+    "create_commit_entries",
+    "create_release_entries",
+    "create_restock_entries",
+    "compute_sku_exposure",
+    "available_qty",
+    "check_stock_available",
+    "gate_checkout_stock",
+    "reserve_checkout_stock",
+    "commit_checkout_stock",
+    "release_checkout_stock",
+    "restock_checkout_stock",
+    "is_sellable",
+    "verify_inventory_balances",
+    "inventory_sync_tick",
     # oauth
     "OAuthError",
     "register_client",

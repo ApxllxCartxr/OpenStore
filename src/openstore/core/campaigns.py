@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -232,16 +233,27 @@ def compute_merchant_headroom(session: Session, merchant_id: str) -> int:
     return headroom
 
 
-def detect_stalled_skus(analytics: list[dict[str, Any]], min_units_30d: int) -> list[str]:
+def detect_stalled_skus(
+    analytics: list[dict[str, Any]],
+    min_units_30d: int,
+    *,
+    out_of_stock: Collection[str] = (),
+) -> list[str]:
     """DECISION-034: a SKU is "stalled" when it had real, sustained demand in
     the last 30 days (>= min_units_30d — filters out one-off sales, keeps the
     signal meaningful) but sold ZERO units in the last 7. Deterministic,
     Python-side (R0.5) — the LLM never decides what counts as a decline, it
-    only drafts a response to one Python already found."""
+    only drafts a response to one Python already found.
+
+    Stage 26: `out_of_stock` SKUs are excluded — the growth loop must stop
+    drafting campaigns for things that cannot ship. Empty by default so the
+    pure analytics form is unchanged."""
+    blocked = set(out_of_stock)
     return [
         a["sku"]
         for a in analytics
         if a["units_sold_30d"] >= min_units_30d and a["units_sold_7d"] == 0
+        and a["sku"] not in blocked
     ]
 
 
@@ -328,6 +340,15 @@ def should_auto_trigger(
 
     analytics = get_analytics_view(session, merchant_id)
     stalled = detect_stalled_skus(analytics, config.campaign.stall_min_units_30d)
+    if not stalled:
+        return []
+
+    # Stage 26: never draft a growth campaign for a SKU that cannot ship.
+    # Unmanaged SKUs (no tracked inventory row) stay eligible — unmanaged is
+    # distinct from zero at every layer.
+    from openstore.core.inventory import is_sellable
+
+    stalled = [sku for sku in stalled if is_sellable(session, merchant_id, sku)]
     if not stalled:
         return []
 

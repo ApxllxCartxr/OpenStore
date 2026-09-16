@@ -245,6 +245,47 @@ EXPECTED_COLUMNS = {
         "value",
         "updated_at",
     },
+    # Stage 26: per-SKU management state + platform-truth cache.
+    "inventory_items": {
+        "id",
+        "merchant_id",
+        "sku",
+        "tracked",
+        "low_stock_threshold",
+        "last_platform_qty",
+        "drifted",
+        "low_stock_notified",
+        "updated_at",
+    },
+    # Stage 26: quantity movements as ledger rows (never in-place decrements).
+    "inventory_ledger_entries": {
+        "id",
+        "trace_id",
+        "client_id",
+        "entry_type",
+        "quantity",
+        "merchant_id",
+        "sku",
+        "reference_id",
+        "account",
+        "counterparty_account",
+        "idempotency_key",
+        "description",
+        "created_at",
+    },
+    # Stage 26: platform write-back queue + DLQ.
+    "inventory_writebacks": {
+        "id",
+        "merchant_id",
+        "sku",
+        "quantity",
+        "status",
+        "attempts",
+        "last_error",
+        "idempotency_key",
+        "created_at",
+        "updated_at",
+    },
 }
 
 

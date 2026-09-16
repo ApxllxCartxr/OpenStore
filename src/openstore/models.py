@@ -28,6 +28,33 @@ class LedgerEntryType(str, enum.Enum):
     REFUND = "REFUND"
 
 
+class InventoryEntryType(str, enum.Enum):
+    """Stage 26: inventory quantity movements. Mirrors LedgerEntryType's
+    lifecycle vocabulary for stock: RESERVE (checkout hold) -> COMMIT (paid)
+    or RELEASE (cancel/fail/expiry); RESTOCK reverses a COMMIT on refund.
+    Not tracked in REGISTRY.json/test_enum_exhaustiveness (that sentinel pins
+    order/campaign/ledger enums only) — enforced here via the SQLEnum column,
+    mirroring HandoffKind."""
+
+    RESERVE = "RESERVE"
+    COMMIT = "COMMIT"
+    RELEASE = "RELEASE"
+    RESTOCK = "RESTOCK"
+
+
+class InventoryWritebackStatus(str, enum.Enum):
+    """Stage 26: platform stock write-back intent lifecycle. pending intents
+    are delivered by the inventory sync loop; failed rows are the DLQ (alert
+    raised, retried each tick); skipped rows target adapters with no
+    STOCK_WRITE capability (flat files have no write API — never a failure);
+    delivered rows are terminal."""
+
+    PENDING = "PENDING"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
 class OrderState(str, enum.Enum):
     CREATED = "CREATED"
     HELD = "HELD"
@@ -521,5 +548,107 @@ class MerchantSetting(SQLModel, table=True):
     value: str = Field(max_length=4096)
     updated_at: datetime = Field(
         default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+
+
+class InventoryItem(SQLModel, table=True):
+    """Stage 26: per-SKU stock management state. This row is the sync loop's
+    cache of platform truth plus merchant intent — it is NEVER decremented
+    by a sale. Quantity movements are inventory_ledger_entries rows only
+    (the money ledger's discipline, for the same reason: an auditable,
+    idempotent movement history instead of a racy counter).
+
+    A SKU with NO row here is unmanaged (the `stock: None` world) and passes
+    every gate. A row with tracked=false opts out explicitly (made-to-order,
+    services). Only tracked=true rows gate sales."""
+
+    __tablename__ = "inventory_items"
+
+    id: int | None = Field(default=None, primary_key=True)
+    merchant_id: str = Field(max_length=64, index=True)
+    sku: str = Field(max_length=128, index=True)
+    tracked: bool = Field(default=True)
+    low_stock_threshold: int = Field(default=5, ge=0)
+    last_platform_qty: int | None = Field(default=None, ge=0)
+    drifted: bool = Field(default=False)
+    low_stock_notified: bool = Field(default=False)
+    updated_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+
+    __table_args__ = (
+        Index("ix_inventory_merchant_sku", "merchant_id", "sku", unique=True),
+    )
+
+
+class InventoryLedgerEntry(SQLModel, table=True):
+    """Stage 26: inventory quantity movements, mirroring LedgerEntry's shape
+    (trace/client, typed entry, idempotency_key unique, account pair,
+    description, created_at). Units move between STATES, so every movement
+    is a double-entry pair: RESERVE (available->reserved), COMMIT
+    (reserved->sold), RELEASE (reserved->available), RESTOCK (sold->available).
+    Quantities are always positive; the sign is implied by entry_type, exactly
+    like amount_minor. merchant_id/sku ride on the row (unlike the money
+    ledger's reference_id->Checkout join) because the oversell gate runs
+    BEFORE any checkout row exists."""
+
+    __tablename__ = "inventory_ledger_entries"
+
+    id: int | None = Field(default=None, primary_key=True)
+    trace_id: str = Field(index=True, max_length=64)
+    client_id: str = Field(index=True, max_length=64)
+    entry_type: InventoryEntryType = Field(
+        sa_column=Column(SQLEnum(InventoryEntryType), nullable=False)
+    )
+    quantity: int = Field(gt=0)
+    merchant_id: str = Field(max_length=64, index=True)
+    sku: str = Field(max_length=128, index=True)
+    reference_id: str = Field(max_length=64, index=True)  # checkout_id
+    account: str = Field(max_length=32)  # "available" | "reserved" | "sold"
+    counterparty_account: str = Field(max_length=32)
+    idempotency_key: str = Field(max_length=160, unique=True, index=True)
+    description: str = Field(max_length=512)
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+
+    __table_args__ = (
+        Index("ix_inventory_ledger_trace_client", "trace_id", "client_id"),
+        Index("ix_inventory_ledger_merchant_sku", "merchant_id", "sku"),
+        Index("ix_inventory_ledger_reference_type", "reference_id", "entry_type"),
+    )
+
+
+class InventoryWriteback(SQLModel, table=True):
+    """Stage 26: platform stock write-back intents + DLQ in one table. A COMMIT
+    inserts a PENDING row (same transaction — exactly-once intent); the sync
+    loop delivers it via the stock adapter's STOCK_WRITE. Failures flip to
+    FAILED (the DLQ: alert raised, retried each tick, attempts counted);
+    adapters with no STOCK_WRITE mark rows SKIPPED (flat files have no write
+    API — never a failure, never an alert)."""
+
+    __tablename__ = "inventory_writebacks"
+
+    id: int | None = Field(default=None, primary_key=True)
+    merchant_id: str = Field(max_length=64, index=True)
+    sku: str = Field(max_length=128, index=True)
+    quantity: int  # SIGNED delta to apply to platform stock (negative = sold)
+    status: InventoryWritebackStatus = Field(
+        default=InventoryWritebackStatus.PENDING,
+        sa_column=Column(SQLEnum(InventoryWritebackStatus), nullable=False),
+    )
+    attempts: int = Field(default=0, ge=0)
+    last_error: str | None = Field(default=None, max_length=1024)
+    idempotency_key: str = Field(max_length=160, unique=True, index=True)
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+    updated_at: datetime = Field(
+        default_factory=_utcnow, sa_column=Column(DateTime, nullable=False)
+    )
+
+    __table_args__ = (
+        Index("ix_inventory_writeback_status", "status"),
+        Index("ix_inventory_writeback_merchant_sku", "merchant_id", "sku"),
     )
 

@@ -66,13 +66,18 @@ class LoginRequest(BaseModel):
 
 
 class CatalogMutation(BaseModel):
-    action: str  # "add" | "update" | "delete"
+    action: str  # "add" | "update" | "delete" | "stock"
     sku: str
     name: str | None = None
     unit_minor: int | None = None
     tags: list[str] | None = None
     related_skus: list[str] | None = None
     description: str | None = None
+    # Stage 26 ("stock" action only): flip per-SKU tracking or move the
+    # low-stock threshold. Lives on the inventory row, not the catalog file,
+    # so it works for platform adapters too.
+    tracked: bool | None = None
+    low_stock_threshold: int | None = None
 
 
 class OrderAction(BaseModel):
@@ -126,6 +131,106 @@ def _now() -> datetime:
 
 def _fail(status: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status, detail={"reason_code": code, "message": message})
+
+
+def _stock_cells(config: Settings, items: list[dict[str, Any]]) -> dict[str, str]:
+    """Stage 26: per-SKU stock cell for /merchant/catalog (the dashboard
+    surface for drift + low-stock). Unmanaged SKUs render muted; tracked rows
+    render available units with LOW / DRIFT badges. Never raises: a missing
+    inventory schema (pre-0012 database) renders every cell unmanaged rather
+    than breaking the console."""
+    cells: dict[str, str] = {}
+    try:
+        from openstore.core.database import get_session
+        from openstore.core.inventory import available_qty
+        from openstore.models import InventoryItem
+
+        mid = merchant_id(config)
+        db = get_session(config)
+        try:
+            rows = {
+                r.sku: r
+                for r in db.exec(
+                    select(InventoryItem).where(InventoryItem.merchant_id == mid)
+                ).all()
+            }
+            for item in items:
+                sku = str(item.get("sku", ""))
+                row = rows.get(sku)
+                if row is None or not row.tracked:
+                    continue
+                if row.drifted:
+                    cells[sku] = "<strong>DRIFT — sales blocked</strong>"
+                    continue
+                avail = available_qty(db, mid, sku)
+                if avail is None:
+                    continue
+                badge = (
+                    f" <strong>LOW (≤ {row.low_stock_threshold})</strong>"
+                    if avail <= row.low_stock_threshold
+                    else ""
+                )
+                cells[sku] = f"{avail} avail{badge}"
+        finally:
+            db.close()
+    except Exception:
+        return cells
+    return cells
+
+
+def _mutate_stock(
+    config: Settings, make_session: Callable[[], Session], body: CatalogMutation
+) -> dict[str, Any]:
+    """Stage 26: upsert one SKU's inventory management row (tracked flag /
+    low-stock threshold). Works for every catalog source — this is merchant
+    intent about sellability, not a catalog-file edit."""
+    from datetime import UTC as _UTC
+    from datetime import datetime as _datetime
+
+    from openstore.models import InventoryItem
+
+    sku = (body.sku or "").strip()
+    if not sku:
+        raise _fail(422, "webhook.invalid_payload", "sku is required")
+    if body.low_stock_threshold is not None and body.low_stock_threshold < 0:
+        raise _fail(422, "webhook.invalid_payload", "low_stock_threshold must be >= 0")
+    db = make_session()
+    try:
+        row = db.exec(
+            select(InventoryItem).where(
+                InventoryItem.merchant_id == merchant_id(config),
+                InventoryItem.sku == sku,
+            )
+        ).first()
+        if row is None:
+            row = InventoryItem(
+                merchant_id=merchant_id(config),
+                sku=sku,
+                tracked=body.tracked if body.tracked is not None else True,
+                low_stock_threshold=(
+                    body.low_stock_threshold
+                    if body.low_stock_threshold is not None
+                    else 5
+                ),
+                last_platform_qty=None,
+                drifted=False,
+                low_stock_notified=False,
+                updated_at=_datetime.now(_UTC).replace(tzinfo=None),
+            )
+            db.add(row)
+        else:
+            if body.tracked is not None:
+                row.tracked = body.tracked
+            if body.low_stock_threshold is not None:
+                row.low_stock_threshold = body.low_stock_threshold
+                row.low_stock_notified = False
+            row.updated_at = _datetime.now(_UTC).replace(tzinfo=None)
+            db.add(row)
+        db.commit()
+        return {"ok": True, "sku": sku, "tracked": row.tracked,
+                "low_stock_threshold": row.low_stock_threshold}
+    finally:
+        db.close()
 
 
 def merchant_router(
@@ -637,11 +742,16 @@ def merchant_router(
 
         label, editable, deep_link = _catalog_source_label()
         items = load_catalog(config)
+        # Stage 26: per-SKU stock state beside the price (read-only display;
+        # this handler owns its session and closes it — no caller transaction
+        # to roll back).
+        stock_cell = _stock_cells(config, items)
         rows = "".join(
             f"<tr><td class='mono'>{_html.escape(i['sku'])}</td>"
             f"<td>{_html.escape(i.get('name', ''))}</td>"
             f"<td>₹{i.get('unit_minor', 0) / 100:.2f}</td>"
-            f"<td class='muted'>{_html.escape(','.join(i.get('tags', [])))}</td></tr>"
+            f"<td class='muted'>{_html.escape(','.join(i.get('tags', [])))}</td>"
+            f"<td>{stock_cell.get(i['sku'], '<span class=muted>unmanaged</span>')}</td></tr>"
             for i in items
         )
         body = (
@@ -670,8 +780,8 @@ def merchant_router(
                 " location.reload();}catch(e){el.textContent='Failed: '+(e.code||e.message);el.className='status err';}});"
                 "</script>"
             )
-            + "<table><tr><th>SKU</th><th>Name</th><th>Price</th><th>Tags</th></tr>"
-            + (rows or "<tr><td colspan=4 class='muted'>No SKUs yet.</td></tr>")
+            + "<table><tr><th>SKU</th><th>Name</th><th>Price</th><th>Tags</th><th>Stock</th></tr>"
+            + (rows or "<tr><td colspan=5 class='muted'>No SKUs yet.</td></tr>")
             + "</table>"
             + ("<script src='/static/js/api.js'></script>" if not editable else "")
         )
@@ -681,6 +791,11 @@ def merchant_router(
     async def merchant_catalog_mutate(request: Request, body: CatalogMutation) -> dict[str, Any]:
         _row, raw = _need_session(request)
         _need_csrf(request, raw)
+        # Stage 26: per-SKU stock management rides the same path but is NOT
+        # a catalog-file edit — platform-adapter merchants manage thresholds
+        # here too, so this action precedes the YAML-editable gate below.
+        if body.action == "stock":
+            return _mutate_stock(config, make_session, body)
         label, editable, _link = _catalog_source_label()
         if not editable:
             raise _fail(

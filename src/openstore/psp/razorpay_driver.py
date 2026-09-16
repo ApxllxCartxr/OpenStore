@@ -540,6 +540,18 @@ def cancel_checkout_by_id(
                 currency=checkout.currency,
                 description="hold_cancel (already-paid/cancelled)",
             )
+            # Stage 26: inventory follows the money RELEASE (guarded no-op
+            # when nothing is outstanding).
+            from openstore.core.inventory import release_checkout_stock
+
+            release_checkout_stock(
+                session,
+                checkout.merchant_id,
+                checkout.id,
+                (checkout.cart_snapshot or {}).get("items", []),
+                trace_id,
+                client_id,
+            )
             checkout.state = OrderState.CANCELLED
             checkout.cancelled_at = datetime.now(UTC)
             checkout.updated_at = datetime.now(UTC)
@@ -689,6 +701,21 @@ def create_refund_entry_local(
         created_at=now,
     )
     session.add_all([revenue_reversal, customer_refund])
+
+    # Stage 26: RESTOCK inventory beside the money REFUND. Guarded on
+    # committed-but-unrestocked units, so a repeated refund cannot restock
+    # twice. (Core refunds via holdcancel.refund_checkout carry their own
+    # hook; this is the PSP-issued path.)
+    from openstore.core.inventory import restock_checkout_stock
+
+    restock_checkout_stock(
+        session,
+        checkout.merchant_id,
+        checkout.id,
+        (checkout.cart_snapshot or {}).get("items", []),
+        trace_id,
+        client_id,
+    )
 
     checkout.state = OrderState.REFUNDED
     checkout.cancelled_at = now
@@ -866,6 +893,19 @@ def _apply_payment_link_paid(
         currency=checkout.currency,
         description=f"Razorpay {event_name}",
     )
+    # Stage 26: COMMIT inventory beside the money CAPTURE. Guarded on the
+    # outstanding reservation, so the webhook path and the hold-loop
+    # reconcile path (both funnel here) cannot double-commit.
+    from openstore.core.inventory import commit_checkout_stock
+
+    commit_checkout_stock(
+        session,
+        checkout.merchant_id,
+        checkout.id,
+        (checkout.cart_snapshot or {}).get("items", []),
+        checkout.trace_id,
+        checkout.client_id,
+    )
     # payment_link.paid moves the checkout to RELEASED (terminal fulfilment state).
     # PAID is the in-band payment confirmation; RELEASED is the order-final state.
     checkout.state = OrderState.RELEASED
@@ -898,6 +938,18 @@ def _apply_payment_link_cancelled(session: Session, payload: dict[str, Any]) -> 
             amount_minor=checkout.amount_minor,
             currency=checkout.currency,
             description="payment_link.cancelled",
+        )
+        # Stage 26: RELEASE inventory beside the money RELEASE (HELD only —
+        # a CREATED checkout holds no reservation to release).
+        from openstore.core.inventory import release_checkout_stock
+
+        release_checkout_stock(
+            session,
+            checkout.merchant_id,
+            checkout.id,
+            (checkout.cart_snapshot or {}).get("items", []),
+            checkout.trace_id,
+            checkout.client_id,
         )
 
     checkout.state = OrderState.CANCELLED
@@ -944,6 +996,18 @@ def _apply_payment_failed(session: Session, payload: dict[str, Any]) -> None:
             amount_minor=checkout.amount_minor or payment.get("amount", 0),
             currency=checkout.currency,
             description="payment.failed",
+        )
+        # Stage 26: RELEASE inventory beside the money RELEASE (HELD only —
+        # mirrors the CREATED guard above: no reservation, no release leg).
+        from openstore.core.inventory import release_checkout_stock
+
+        release_checkout_stock(
+            session,
+            checkout.merchant_id,
+            checkout.id,
+            (checkout.cart_snapshot or {}).get("items", []),
+            checkout.trace_id,
+            checkout.client_id,
         )
     checkout.state = OrderState.CANCELLED
     checkout.cancelled_at = datetime.now(UTC)

@@ -125,6 +125,11 @@ def test_registry_reason_codes_complete():
         "catalog.adapter_empty",
         "catalog.adapter_page_cap",
         "checkout.evidence_not_found",
+        # Stage 26 (DECISION-047): pre-compiler oversell gate. Registered
+        # alongside the implementation (Q-008 sequencing: together, never
+        # before) — raised by core/inventory.py via CommerceError, so
+        # registry_diff.py scans it from this commit on.
+        "inventory.insufficient_stock",
         "policy.not_found",
         "psp.invalid_state",
         "psp.checkout_not_found",

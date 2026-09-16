@@ -2,9 +2,10 @@
 
 Slug: `inventory`. Goal: real stock, no oversell, honest drift handling.
 
-Status: **not started.** See `docs/PLAN-stage-26-27.md` for sequencing and
-for the prerequisites (DECISION-047 and Q-046 are cited below but are not yet
-recorded in `docs/DECISIONS.md` / `docs/OPEN_QUESTIONS.md`).
+Status: **shipped** as `stage(26): inventory` (2026-09-16). See
+`docs/PLAN-stage-26-27.md` for sequencing and for the prerequisites
+(DECISION-047 and Q-046 are recorded in `docs/DECISIONS.md` /
+`docs/OPEN_QUESTIONS.md`).
 
 Depends on Stage 25: stock arrives through `stock_source`, which resolves
 independently of `catalog_source`. A normalized `stock` of `None` means

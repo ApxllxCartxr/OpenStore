@@ -52,6 +52,7 @@ def _paths_match(route_path: str, gated_template: str) -> bool:
 # it does not need to survive a restart.
 _HOLD_RELEASE_INTERVAL_SECONDS = 30
 _CAMPAIGN_EXPIRY_INTERVAL_SECONDS = 60
+_INVENTORY_SYNC_INTERVAL_SECONDS = 300
 _HOLD_WARNING_WINDOW_SECONDS = 120
 
 
@@ -188,6 +189,32 @@ async def _campaign_growth_loop(config: Settings) -> None:
             console_print(f"Warning: campaign growth loop tick failed: {exc}")
 
 
+async def _inventory_sync_loop(config: Settings) -> None:
+    """Stage 26: platform stock truth overlaid with outstanding reservations.
+
+    Same shape as _campaign_expiry_loop — no scheduler dependency, never
+    raises past its own tick. Each pass seeds tracked rows, flags drift
+    (blocks NEW sales via the gate and alerts; never negative, never
+    auto-cancels a paid order — this loop never touches a checkout row),
+    and delivers pending platform write-backs (failures land in the DLQ
+    with an alert, retried next tick).
+    """
+    from openstore.core.database import session_scope
+    from openstore.core.inventory import inventory_sync_tick
+
+    while True:
+        await asyncio.sleep(_INVENTORY_SYNC_INTERVAL_SECONDS)
+        try:
+            with session_scope(config) as session:
+                summary = inventory_sync_tick(config, session)
+            if summary.get("drifted") or summary.get("writebacks_failed"):
+                console_print(f"Inventory sync: {summary}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            console_print(f"Warning: inventory sync loop tick failed: {exc}")
+
+
 def create_app(config: Settings) -> FastAPI:
 
     @asynccontextmanager
@@ -254,6 +281,10 @@ def create_app(config: Settings) -> FastAPI:
         campaign_growth_task: asyncio.Task[None] = asyncio.create_task(
             _campaign_growth_loop(config)
         )
+        # Stage 26: platform stock sync + write-back delivery, alongside.
+        inventory_sync_task: asyncio.Task[None] = asyncio.create_task(
+            _inventory_sync_loop(config)
+        )
 
         yield
 
@@ -277,6 +308,10 @@ def create_app(config: Settings) -> FastAPI:
         campaign_growth_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await campaign_growth_task
+
+        inventory_sync_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await inventory_sync_task
 
         set_main_loop(None)
 
