@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # The four commands from the README's "Running the checks" section, in the
+    # same order a contributor runs them locally. No live credentials: the suite
+    # mocks Razorpay, Discord and the LLM providers and runs on temp SQLite.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        # Pinned by requires-python (>=3.12,<3.13); no version matrix.
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        # --frozen: the lockfile is authoritative, and CI must fail on drift
+        # rather than silently resolving something new.
+        run: uv sync --frozen
+
+      - name: ruff
+        run: uv run ruff check src/ tests/
+
+      - name: mypy
+        run: uv run mypy src/
+
+      - name: registry_diff
+        # AGENTS.md R0.2: identifiers are a closed set. This script MUST print
+        # nothing for a clean build, so an empty exit 0 is not enough — any
+        # output at all is a red build.
+        run: |
+          out="$(uv run python scripts/registry_diff.py 2>&1)"
+          if [ -n "$out" ]; then
+            echo "registry_diff reported identifier drift:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: pytest
+        run: uv run pytest -q
