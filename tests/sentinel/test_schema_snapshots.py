@@ -38,6 +38,9 @@ EXPECTED_COLUMNS = {
         "released_at",
         "cancelled_at",
         "cart_snapshot",
+        # Stage 24 (Q-045): arbitrator share-link bearer token (hash + expiry).
+        "evidence_token_hash",
+        "evidence_token_expires_at",
         "agent_plan",
         "chat_platform",
         "chat_user_id",
@@ -223,6 +226,24 @@ EXPECTED_COLUMNS = {
         "created_at",
         "updated_at",
         "expires_at",
+    },
+    # Stage 24 (Q-044): passkey-bound merchant browsing sessions.
+    "merchant_sessions": {
+        "id",
+        "token_hash",
+        "operator_id",
+        "credential_id",
+        "created_at",
+        "last_seen_at",
+        "expires_at",
+        "revoked_at",
+        "user_agent_hash",
+    },
+    # Stage 24 (DECISION-045): non-secret browser-edited config overlay.
+    "merchant_settings": {
+        "key",
+        "value",
+        "updated_at",
     },
 }
 
