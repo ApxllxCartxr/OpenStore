@@ -6,13 +6,12 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Annotated, Literal
 
 _ENV_VAR_PATTERN = re.compile(r"^\$\{([A-Z_][A-Z0-9_]*)\}$")
 
@@ -270,12 +269,6 @@ class Settings(BaseSettings):
     # manifests and CORS/RP binding. None => same-origin reverse proxy (derive
     # from request). Subdomain deployments MUST set this explicitly.
     public_base_url: str | None = None
-    # Stage 25 (Q-046): discriminated source unions. catalog_source names
-    # the catalog origin; stock_source (optional, independent -- the 25b OMS
-    # shape) names the stock origin and defaults to the catalog adapter.
-    # Legacy catalog_path:/shopify: keep working, normalized at resolution.
-    catalog_source: "CatalogSource | None" = None
-    stock_source: "CatalogSource | None" = None
 
     @model_validator(mode="after")
     def _check_evidence_share_ttl(self) -> Settings:

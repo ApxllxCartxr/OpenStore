@@ -22,11 +22,7 @@ import httpx
 from openstore.config import Settings
 from openstore.surfaces.adapters.base import AdapterCapability, AdapterHealth
 from openstore.surfaces.adapters.errors import AdapterError, not_configured
-from openstore.surfaces.adapters.errors import not_configured
 from openstore.surfaces.adapters.registry import register_adapter
-from openstore.surfaces.adapters.normalize import clean_sku, normalize_tags, normalized_item, parse_stock, price_to_minor, strip_html
-from openstore.surfaces.adapters.cache import AdapterCache
-import httpx
 
 logger = logging.getLogger("openstore.shopify_catalog")
 
@@ -266,6 +262,8 @@ class ShopifyAdapter:
         domain, cid, csec = self._creds()
         if not cid or not csec:
             raise not_configured("shopify", "client credentials")
+        if self._config is None:
+            raise not_configured("shopify", "settings (adapter built without config)")
         max_pages = getattr(self._source, "max_pages", None) or MAX_PAGES
         return load_shopify_catalog(self._config, max_pages=max_pages)
 
