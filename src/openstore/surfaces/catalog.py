@@ -115,9 +115,7 @@ class YamlAdapter:
     """The YAML catalog as an SDK adapter (no special status)."""
 
     name = "yaml"
-    capabilities = frozenset(
-        {AdapterCapability.CATALOG_READ, AdapterCapability.STOCK_READ}
-    )
+    capabilities = frozenset({AdapterCapability.CATALOG_READ, AdapterCapability.STOCK_READ})
 
     def __init__(self, config: Settings, source: Any = None):
         self._config = config
@@ -338,9 +336,7 @@ def _active_in_window_campaigns(session: Any) -> list[Any]:
     ]
 
 
-def _sellable_set(
-    config: Settings, merchant_id: str, items: list[dict[str, Any]]
-) -> set[str]:
+def _sellable_set(config: Settings, merchant_id: str, items: list[dict[str, Any]]) -> set[str]:
     """SKUs the feed may point suggestions at: everything unmanaged (no
     tracked row — unmanaged is distinct from zero) plus tracked SKUs with
     one available unit. Straight-line like active_offers_by_sku above: a
@@ -404,3 +400,53 @@ def serve_catalog_feed(
         "currency": "INR",
         "items": served_items,
     }
+
+
+def cart_resolves_against_catalog(
+    config: Settings,
+    merchant_id: str,
+    items: list[dict[str, Any]],
+    session: Session | None = None,
+) -> bool:
+    """Input to PoAI predicate e6: does every cart line still resolve against
+    this merchant's own serving catalog at the sku, price, and tags it was
+    snapshotted at? (Q-047, option (a).)
+
+    The served attestation itself cannot be replayed at bundle-build time: it is
+    signed over a wall-clock `iat` (serve_catalog_feed) that is neither
+    reproducible nor persisted on the cart, so re-signing here would attest to
+    the catalog as it is at capture, not as it was at cart time — proof theater.
+    Resolution is the strongest property honestly checkable from what is stored,
+    and it is the one that matters: it catches price and tag drift between the
+    cart and the capture.
+
+    Fail-closed (R0.5). An unloadable catalog, an empty cart, an absent SKU, a
+    price or tag drift, or a line belonging to another merchant all answer False
+    rather than asserting a proof that was never checked.
+    """
+    if not items:
+        return False
+
+    try:
+        catalog = {i["sku"]: i for i in load_catalog(config, session)}
+    except (AdapterError, OSError, ValueError, KeyError):
+        # A catalog the sidecar cannot read is not a catalog that attests
+        # anything. The bundle still gets built; e6 is simply False.
+        return False
+
+    for item in items:
+        item_merchant = item.get("merchant_id")
+        if item_merchant and item_merchant != merchant_id:
+            return False
+
+        served = catalog.get(item.get("sku", ""))
+        if served is None:
+            return False
+
+        if int(served["unit_minor"]) != int(item.get("unit_minor", -1)):
+            return False
+
+        if set(served.get("tags", [])) != set(item.get("tags", [])):
+            return False
+
+    return True

@@ -598,3 +598,34 @@
   and the why-stat behind it) lives on the NEW `suggest_related` response
   shape and the merchant why-stat panel only — never retrofitted onto the
   existing item shape.
+
+## DECISION-050 | date: 2026-09-16T00:00:00Z | stage: 25
+- PoAI predicate e6 (`goods.catalog_attestations_valid`) is computed at
+  bundle-build time as **catalog resolution**, not as attestation signature
+  replay (closes Q-047 option (a)). `psp/router.py::_build_and_store_evidence`
+  now calls `surfaces/catalog.py::cart_resolves_against_catalog` and writes the
+  verdict into `goods`, where `poai.py:250` has always read for it.
+- Signature replay was considered and rejected as not honestly available. The
+  served attestation is signed over a wall-clock `iat` (`serve_catalog_feed`,
+  `iat = int(time.time())`) that is neither reproducible nor persisted on the
+  cart: cart lines are `{sku, qty, unit_minor, tags}` and `compute_cart_hash`
+  covers exactly those, so stamping an attestation into the line would move
+  `cart_hash` and break e5's challenge binding. Re-signing at capture would
+  attest the catalog as it is at capture, not as it was at cart time — a proof
+  of the wrong proposition.
+- Resolution is the strongest property checkable from what is stored, and it is
+  the one that carries weight: it detects price and tag drift between cart and
+  capture. Fail-closed (R0.5) — unloadable catalog, empty cart, absent SKU,
+  price drift, tag drift, or a line belonging to another merchant all answer
+  False rather than assert an unchecked proof.
+- No new identifiers (R0.2): `catalog_attestations_valid` already existed in the
+  bundle schema, the PoAI goldens, and `evidence_viewer.html`. The goldens are
+  what hid the gap — `scripts/make_poai_goldens.py:388` hardcodes the key True,
+  so the verifier's fixtures passed a predicate production could never satisfy.
+  Goldens are unchanged and `openstore-verify` stays green; the flag is now
+  earned in production rather than only asserted in fixtures.
+- Residual, recorded as Q-048: offline verifier check 8
+  (`check_catalog_attestations`) still passes vacuously, because production cart
+  lines carry `catalog_attestation: null`. Making check 8 bite requires
+  persisting the served attestation beside the cart, which is a money-path
+  slice of its own.

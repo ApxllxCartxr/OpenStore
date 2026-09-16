@@ -263,6 +263,7 @@ def _build_and_store_evidence(
     from openstore.core.audit import audit_log
     from openstore.core.poai import PoAISigningError, create_poai_bundle
     from openstore.models import IntentPolicy
+    from openstore.surfaces.catalog import cart_resolves_against_catalog
     from openstore.surfaces.wellknown import get_catalog_signing_key
 
     now_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -287,6 +288,16 @@ def _build_and_store_evidence(
         ).first()
 
     cart_snapshot = checkout.cart_snapshot or {}
+    cart_items = cart_snapshot.get("items", [])
+
+    # Q-047: e6 (`goods.catalog_attestations_valid`) read a key nothing ever
+    # wrote, so every bundle scored e6 False regardless of the goods. Computed
+    # here, fail-closed, from the one property that is honestly checkable at
+    # capture time — see cart_resolves_against_catalog for why signature replay
+    # is not available.
+    attestations_valid = cart_resolves_against_catalog(
+        cfg, checkout.merchant_id, cart_items, session
+    )
 
     try:
         bundle = create_poai_bundle(
@@ -308,7 +319,11 @@ def _build_and_store_evidence(
                 else None,
                 "webauthn": {"credential_id": policy.webauthn_credential_id} if policy else None,
             },
-            goods={"items": cart_snapshot.get("items", []), "cart_hash": checkout.cart_hash},
+            goods={
+                "items": cart_items,
+                "cart_hash": checkout.cart_hash,
+                "catalog_attestations_valid": attestations_valid,
+            },
             agent={
                 "client_id": checkout.client_id,
                 "scopes": ["checkout:confirm"],
@@ -351,7 +366,11 @@ def _build_and_store_evidence(
                 else None,
                 "webauthn": {"credential_id": policy.webauthn_credential_id} if policy else None,
             },
-            goods={"items": cart_snapshot.get("items", []), "cart_hash": checkout.cart_hash},
+            goods={
+                "items": cart_items,
+                "cart_hash": checkout.cart_hash,
+                "catalog_attestations_valid": attestations_valid,
+            },
             agent={
                 "client_id": checkout.client_id,
                 "scopes": ["checkout:confirm"],

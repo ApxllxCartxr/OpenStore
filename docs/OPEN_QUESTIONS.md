@@ -1285,3 +1285,12 @@
   Q-045 is the evidence-access model above. Left OPEN deliberately: it is
   orthogonal to stages 26/27 (neither spec needs `e6`), and fixing it here
   would smuggle a bundle-shape change into an inventory stage.
+- CLOSED (2026-09-16) as implemented by DECISION-050. Option (a) taken, in its
+  own slice as the entry asked: `cart_resolves_against_catalog` in
+  `surfaces/catalog.py`, called from `_build_and_store_evidence`, writing
+  `goods.catalog_attestations_valid` fail-closed. Covered by
+  `tests/stage11/test_q047_e6_catalog.py` (10 tests; the two bundle-level ones
+  fail against the pre-fix tree). Bundle bytes gain the key the PoAI goldens
+  already carried — no golden regen, no verifier re-pin, `openstore-verify`
+  green. The numbering slip noted in the original entry (the stage-25 spec's
+  `Q-045` citation for this question) stands corrected here.
