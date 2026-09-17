@@ -25,7 +25,7 @@ RULE: `SPEC.md` + `CONTEXT.md` + ADRs describe the *agreed* system. Plans descri
 
 ## 3. Cross-surface contracts (two-sided edits or it didn't happen)
 
-These six are shared. Changing one side without the mirror side + spec is a broken change, even if tests are green:
+These eight are shared. Changing one side without the mirror side + spec is a broken change, even if tests are green:
 
 | Contract | Owner of definition | Mirror sides | Files to touch together |
 |---|---|---|---|

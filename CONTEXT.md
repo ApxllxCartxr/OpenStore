@@ -25,7 +25,7 @@ The Merchant's money mover — e.g. Justpay, Airpay, Razorpay. Untrusted; never 
 _Avoid_: PSP, gateway, rail, processor
 
 **Stock**:
-The present integer count per SKU, always set and never empty, exposed as `available`.
+The present integer count per Catalogue Item, always set and never empty, carried as `available`. The integer crosses the private trait boundary only; everything agent-facing is an Availability Bucket.
 _Avoid_: null, unmanaged, infinite
 
 **Pending Cart**:
@@ -57,7 +57,7 @@ The byte-stable record of Gate inputs plus per-check results stored with the dec
 _Avoid_: log, trace, history
 
 **Cart Hash**:
-The hash of the canonical cart plus total plus expiry, bound to the Consumer tap.
+The hash the Consumer's tap is bound to, over canonical bytes of the whole order as agreed: the sorted lines, the Quote, the commitments to Destination and Contact Point, the chosen Fulfillment Option, total, currency, Merchant domain, and expiry. The exact preimage is fixed in SPEC §4 and frozen before translators exist — changing anything it covers costs a fresh tap.
 _Avoid_: checksum, cart id
 
 **Attestation**:
