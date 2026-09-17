@@ -1,0 +1,27 @@
+# Secrets — local only, never committed
+.env
+.env.*
+!.env.example
+
+# Local tooling
+.opencode/
+.remember/
+
+# Dependencies / build output
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+.next/
+target/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.mutmut-cache
+htmlcov/
+.coverage
