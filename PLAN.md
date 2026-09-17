@@ -9,6 +9,8 @@ Full spec in `SPEC.md`, glossary in `CONTEXT.md`, decisions in `docs/adr/`. Each
 
 Expanding a plan? Read [`docs/EXPANSION.md`](./docs/EXPANSION.md) first — ladder, contracts table, firewall, and grill rules.
 
+Open spec defects are registered in [`docs/REVIEW-findings.md`](./docs/REVIEW-findings.md) — breaks, gaps, and drift found in the pre-S1 review, each routed to the files it lands in. Clear the ones marked Break before the phase that freezes their bytes.
+
 ## Build order across surfaces
 
 1. Sidecar S1 (skeleton + harness) + trait contract (S2-contract, 9 doors incl. `quote`). The Quote shape and the `cart_hash` preimage are settled here — they are the last thing that can change cheaply, and everything downstream pins their bytes.
@@ -29,4 +31,4 @@ Expanding a plan? Read [`docs/EXPANSION.md`](./docs/EXPANSION.md) first — ladd
 
 ## Explicitly out (phase two, core untouched)
 
-Campaigns/rules/bots/stalled-loops, COD (no prepayment — needs a capture-on-delivery Ledger path), delegated agent-held payment credentials (refused by design, ADR-0013), hosted mall/search/ranking (the permissionless reach doors are specced separately in `PLAN-distribution.md` and are phase two, not never), multi-Merchant tenancy, multi-location, cancellation/restocking fees, store credit, bulk cancel, auto-fulfilment, shipping labels, subscriptions, multi-currency and duties, Consumer accounts and a returns portal, fraud scoring, Merkle batch-anchoring, OMS paths beyond the 9-door trait. Partial refunds are **in** v1 (an amount on the `REFUND` entry, no ninth status).
+Campaigns/rules/bots/stalled-loops, delegated agent-held payment credentials (refused by design, ADR-0013), hosted mall/search/ranking (the permissionless reach doors are specced separately in `PLAN-distribution.md` and are phase two, not never), multi-Merchant tenancy, multi-location, cancellation/restocking fees, store credit, bulk cancel, auto-fulfilment, shipping labels, subscriptions, multi-currency and duties, Consumer accounts and a returns portal, fraud scoring, Merkle batch-anchoring, OMS paths beyond the 9-door trait. Partial refunds are **in** v1 (an amount on the `REFUND` entry, no ninth status).

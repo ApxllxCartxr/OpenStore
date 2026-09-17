@@ -57,8 +57,16 @@ The byte-stable record of Gate inputs plus per-check results stored with the dec
 _Avoid_: log, trace, history
 
 **Cart Hash**:
-The hash the Consumer's tap is bound to, over canonical bytes of the whole order as agreed: the sorted lines, the Quote, the commitments to Destination and Contact Point, the chosen Fulfillment Option, total, currency, Merchant domain, and expiry. The exact preimage is fixed in SPEC §4 and frozen before translators exist — changing anything it covers costs a fresh tap.
+The Merchant-side binding over the whole order as agreed, taken over canonical bytes of the sorted lines, the Quote, the commitments to Destination and Contact Point, the chosen Fulfillment Option, total, currency, Merchant domain, and expiry. The exact preimage is fixed in SPEC §4 and frozen before translators exist. Any change to what it covers produces a fresh Cart Hash; whether it also costs a fresh Authority depends on that Authority's Binding (ADR-0017).
 _Avoid_: checksum, cart id
+
+**Authority**:
+The human permission a spend rests on, recorded as one member of a closed set — `upi-pin`, `passkey`, `confirmed-intent`, `mandate` (ADR-0017) — together with what that member actually bound. A Merchant enables which kinds it accepts. Never held by a Buyer Agent, never implied by a scope, and always named in the Transcript and the receipt, so a reader knows which claim they are being offered rather than assuming the strongest one.
+_Avoid_: tap (as a synonym for the category), consent, approval, 2FA
+
+**Binding**:
+What an Authority actually covered, declared alongside it rather than inferred: *what* was bound (`cart` / `amount` / `none`), *by whom* (`payer-device` / `payer-bank` / `merchant`), and how. Recorded in the Transcript and the receipt and printed by the verifier, so no reader assumes the strongest claim on offer and two rails stay comparable.
+_Avoid_: proof, guarantee, trust level, verification score
 
 **Attestation**:
 A Merchant-signed statement over `{sku, price, tags, digest}` pinned to the Order.
@@ -92,12 +100,16 @@ _Avoid_: shipping address, customer address, PII blob
 The single Consumer email or phone the Merchant notifies about this order. Same storage and hashing rule as Destination.
 _Avoid_: account, customer record, profile
 
+**Payer Handle**:
+The Consumer's payment identifier as the Provider reports it — a UPI VPA in v1. Same storage rule as Destination and Contact Point: plaintext only in the Merchant order row, under the same retention window and erasure action. It reaches evidence only as the per-domain `consumer_id` pseudonym (ADR-0011), never as itself.
+_Avoid_: VPA (in prose), customer id, wallet, account
+
 **Agent Profile**:
 A Buyer Agent's self-published document at a well-known URL carrying its name, contact, and ES256 JWKS, used to verify its signed requests and to admit strangers without prior Merchant action. It admits; it never authorizes a spend.
 _Avoid_: trust tier, verified agent, credential
 
 **Reversal**:
-A Ledger entry recording money taken back by someone other than the Merchant — a Provider-reported dispute or chargeback. Distinct from a Refund, which the Merchant chooses.
+A Ledger entry recording money taken back by someone other than the Merchant, as the Provider reports it — an adjudicated UPI complaint, a post-settlement adjustment, a bank correction, or a card chargeback. Rail-agnostic by construction. Distinct from a Refund, which the Merchant chooses.
 _Avoid_: chargeback fee, dispute case, clawback
 
 **Discount Code**:
@@ -109,8 +121,12 @@ The GST rule deciding whether a line is taxed CGST/SGST or IGST, evaluated per l
 _Avoid_: tax zone, ship-to state, region
 
 **Add-on**:
-A sellable unit that only exists attached to a parent line — gift-wrap, an extra charm. It is a composite supply: its amount folds into the parent line's taxable value and inherits the parent's GST rate, HSN/SAC, and Place of Supply. An Add-on with no parent is refused, never sold alone.
+A sellable unit that only exists attached to a parent line — gift-wrap, an extra charm. It is a cart line like any other — own SKU, own price, own Attestation — and never a Quote Line: as a composite supply its amount folds into the parent's taxable value and inherits the parent's GST rate, HSN/SAC, and Place of Supply. An Add-on with no parent is refused, never sold alone.
 _Avoid_: upsell, bundle, extra, variant
+
+**Quote Line**:
+One priced row inside a Quote, carrying its own taxable value, GST rate, HSN/SAC and Place of Supply. Not the same thing as a cart line: an Add-on is a cart line with its own SKU, price and Attestation but never a Quote Line, because its amount folds into its parent's. The Gate's subtotal identity is checked over cart lines and therefore holds across the fold.
+_Avoid_: line item, row, basket line
 
 **Availability Bucket**:
 What a Buyer Agent is told about stock — `in-stock`, `low-stock`, or `sold-out`, cut at the Merchant's own low-stock threshold. Exact counts stay inside the Merchant system and the sidecar.

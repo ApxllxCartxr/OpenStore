@@ -30,7 +30,7 @@ These eight are shared. Changing one side without the mirror side + spec is a br
 | Contract | Owner of definition | Mirror sides | Files to touch together |
 |---|---|---|---|
 | 9-door Merchant trait (doors, shapes, codes) | Sidecar S2 | Merchant-site M3 | `SPEC.md` §5 + both plan phases + trait conformance suite |
-| Quote shape + `cart_hash` preimage | Sidecar S3 | Merchant-site M3 (door 9), buyer-chat B3 (verbatim render) | `SPEC.md` §4 + ADR-0010 + all three plan spots + golden vectors |
+| Quote shape + `cart_hash` preimage | Sidecar S2 (defined; frozen before S3) | Merchant-site M3 (door 9), buyer-chat B3 (verbatim render) | `SPEC.md` §4 + ADR-0010 + all three plan spots + golden vectors |
 | Agent admission (Profile, signed requests, tiers) | Sidecar S4 | Buyer-chat B2 (self-registration) | `SPEC.md` §7 + ADR-0012 + both plan phases |
 | Order statuses + transitions (8 canonical) | Sidecar S4 | Merchant-site M1/M3 (rows), buyer-chat B4 (messaging) | `SPEC.md` §6 + all three plan spots + mapping table |
 | Protocol envelopes (MCP/UCP/ACP/AP2) | Sidecar S6 | Buyer-chat B5 (toggle + replays) | `SPEC.md` §9 + both plan phases + golden fixtures |
