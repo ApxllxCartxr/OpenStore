@@ -1,0 +1,7 @@
+# Merchant signing keys: custody, rotation, and what a lost key means
+
+The sidecar holds the Merchant's ES256 signing key so a sale needs no human signature (SPEC §8), which makes key loss and key compromise operational events the spec previously had no answer for.
+
+Keys are generated in the sidecar, never leave it, and are recoverable only from the Merchant's own encrypted export taken at enrollment — there is no vendor escrow, because a single-Merchant deploy has no vendor. Every key gets a `kid`, a `not_before`, and an optional `revoked_at`; the JWKS publishes all non-expired keys so receipts signed by a rotated key keep verifying, and each bundle's JWKS snapshot (ADR-0009) means even a purged key verifies offline forever. Rotation is additive: new receipts use the newest key, history is never re-signed.
+
+Consequences: revocation is `revoked_at` plus a reason on the JWKS entry, and the verifier reports `untrusted-key` (exit 2) for a bundle whose signing key was revoked *before* the bundle's timestamp, while bundles signed before the revocation stay valid — compromise invalidates the future, not the past. Losing the key without an export means the Merchant can sign no new receipts and must enroll a fresh key; every historical bundle still verifies against its own snapshot. The Consumer's passkey is unaffected either way: enrollment is per Merchant domain (ADR-0008), not per Merchant key.

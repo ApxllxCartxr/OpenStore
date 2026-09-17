@@ -1,0 +1,17 @@
+# Reach is earned permissionlessly; native in-agent completion is not bought with authority
+
+A correct sidecar nobody's agent can see is not a product. The reach problem is real and it is not solved by more protocol conformance: agentic discovery today is a small set of bilateral integrations, and a merchant behind OpenStore can be perfectly UCP-conformant and still receive zero agent traffic.
+
+There are two kinds of door, and we treat them differently.
+
+**Permissionless doors are the whole v-next strategy.** Product feeds in Google Merchant Center attribute names and schema.org `Product`/`ProductGroup`/`Offer` markup are ingested by shopping and AI surfaces without anyone's approval; an MCP server added by URL is reachable by every MCP client without an application, a tier review, or a partner agreement. Both are already implied by SPEC §3 and the 9-door trait. Finishing them is engineering we control end to end, and they are the doors where ADR-0012's "any Buyer Agent, no pre-registration" stops being a principle and starts being distribution.
+
+**Gated doors are business development wearing a protocol costume, and they have a price.** Native in-agent completion on the large assistant surfaces runs on delegated payment credentials — a token the Consumer issues once that an agent later spends without them present. That is precisely the authority ADR-0008 removed from agents, and ADR-0013 refuses it. We can be present on those surfaces as redirect-completion, which converts worse and which the conformance badge already names as a deviation (SPEC §9). We accept the worse conversion. We do not accept the token.
+
+Two things make that less of a sacrifice than it reads as.
+
+First, the deviation is narrower than "we are not conformant": everything up to payment is native, and only the spend leaves the agent. A buyer taps once, on the merchant's own domain, for a `cart_hash` they can see.
+
+Second — and this needs a real legal read before it is relied on, not our assertion — the Indian payments regime appears to run *with* this grain rather than against it. Card-not-present spending attracts an additional-factor-of-authentication requirement; card-on-file credentials are subject to tokenisation rules; and a UPI PIN is by construction entered by the payer in the payer's own PSP app and cannot be handed to a third party to replay. A delegated-credential flow that completes inside a foreign assistant has to answer all three. A per-spend WebAuthn tap with user verification, bound to the cart and performed by the human, is a plausible additional factor by construction. Where a competitor must obtain a regulatory accommodation to complete in-agent, our design may simply already comply. That asymmetry, if counsel confirms it, is the strongest reason to treat always-tap as a feature in this market rather than a concession — but the sequencing decision here does not depend on it.
+
+Consequences: `PLAN-distribution.md` carries the permissionless doors as phase-two work, sequenced after the install gate (`PLAN.md` step 7), because a surface that sends agents to a store nobody can install wastes the only first impression available. Gated surfaces are pursued only with live merchants behind us, and only ever as redirect-completion. Any future proposal to accept a delegated credential — even as a per-merchant opt-in — reopens ADR-0008 and ADR-0013 together and needs its own ADR and an Indian regulatory opinion, not a configuration flag.
