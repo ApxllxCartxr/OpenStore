@@ -13,6 +13,9 @@ Every change lands in exactly the layers it touches — never just the plan file
 | New behavior or rule | `SPEC.md` section first, then the owning surface's plan phases |
 | New phase/step inside one surface | That surface's plan only, provided §2 holds |
 | New DONE WHEN assertion | Add freely; weakening or deleting one needs a grill round + ADR note |
+| External fact from a regulator, rail, or third-party spec | The document that relies on it, carrying a **dated citation**: circular/section number, issuing body, date, and URL — never a remembered figure |
+
+RULE (citations): a cap, threshold, limit, well-known path, or version number sourced from outside this repo is written with its source and date, so a later revision is a diff against a named document rather than against somebody's memory. This rule exists because two review passes in a row proposed changing the same figure — once from a wrong number, once back to the right one — with neither side having opened the source (`docs/REVIEW-remediation.md` item #1).
 
 RULE: `SPEC.md` + `CONTEXT.md` + ADRs describe the *agreed* system. Plans describe *how to build it*. A plan may never promise what the spec forbids, and a spec change without its plan phases updated is unfinished.
 
@@ -36,7 +39,7 @@ These eight are shared. Changing one side without the mirror side + spec is a br
 | Protocol envelopes (MCP/UCP/ACP/AP2) | Sidecar S6 | Buyer-chat B5 (toggle + replays) | `SPEC.md` §9 + both plan phases + golden fixtures |
 | Auth material (passkey binding, OAuth scopes, token shapes) | Sidecar S4 | Buyer-chat B3/B4 (modals, resume) | `SPEC.md` §7 + both plan phases |
 | Discovery card + seed-list format | Sidecar S2 | Buyer-chat B2 (reader, contacts) | `SPEC.md` §3 + both plan phases + example file |
-| Mount paths (`/`, `/.well-known`, `/agent`, `/agentic`) | Sidecar S7 | Merchant-site M5, buyer-chat B4 (approve/resume URLs) | `SPEC.md` §10 + all three plan spots + compose file |
+| Mount paths (`/`, `/.well-known`, `/agent`, `/agentic`) | Sidecar S7 | Merchant-site M5, buyer-chat B4 (approve/resume URLs) | `SPEC.md` §10 + all three plan spots + compose file + Fly demo topology (ADR-0019) |
 
 RULE: the conformance suite / golden fixture for a contract is updated in the *same pass* as the contract text. Text-first-fixture-later is how drift starts.
 
