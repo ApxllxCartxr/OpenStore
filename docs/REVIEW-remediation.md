@@ -209,7 +209,17 @@ SPEC §10's "the sidecar sends no email or SMS" was written correctly for *Consu
 
 ---
 
-## 11. Model Reserve Pay's real production failure modes before building `upi-block` — **P0, promoted 2026-09-19**
+## 11. ~~Model Reserve Pay's real production failure modes before building `upi-block`~~ — RESOLVED 2026-09-19 by cutting the path
+
+**Grill outcome:** Reading 1 (strict) carried, on four independent points in the circular — the feature is defined as a standing reserve funding multiple debits; payment counts only on a debit initiated by "customer action on merchant's platform"; fixed-amount goods must be debited before delivery; and one block per customer per merchant at a time, which is incoherent for a per-order hold and natural for a standing reserve.
+
+`upi-block` is cut. COD is unaffected and stays in on the cash path — the enabler was always the stock/money disentangling, not the rail. The money-guarantee-at-order capability is recorded in ADR-0018 as an open problem with three named candidates rather than silently dropped, and the repeat-purchase use of Reserve Pay — the genuinely valuable thing the circular does offer — is taken up by **ADR-0024**, together with the correction that tap-every-time is a testability constraint rather than a permanent principle.
+
+Landed in: ADR-0018 (rewritten), ADR-0017, ADR-0020, SPEC §6/§13, `PLAN-sidecar.md` S3 (one DONE WHEN deleted, with the ADR note EXPANSION §1 requires), new ADR-0024, COUNSEL-BRIEF Q4 (reframed to three acquirer questions).
+
+Original analysis retained below.
+
+## ~~11 (original).~~ **P0, promoted 2026-09-19**
 
 **Finding:** PSP-2 — understated. This is now the most serious open item in the register.
 

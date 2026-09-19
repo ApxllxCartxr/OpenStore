@@ -30,11 +30,13 @@ Currently unaddressed anywhere in the spec (REG-7). The answer depends on Q2: th
 
 For each of grievance-officer designation and contact display, return/refund/exchange timeline disclosure, and country-of-origin / importer disclosure: (a) does the obligation sit with the merchant alone, or does the software publisher or a self-hosted deployment attract any of it; (b) is a stated return/refund *turnaround time* mandatory such that it must be displayed at the point of sale and on the receipt — this one is a product design decision for us, not just a form field, because SPEC §6 currently models that refunds happen but not when.
 
-## Q4 — NPCI Reserve Pay: acquirer question, not counsel
+## Q4 — NPCI Reserve Pay: acquirer questions, not counsel
 
-Not a legal question, but it travels with the same engagement because it goes to the same payment counterparty. NPCI/UPI/OC-228/2025-26 (8 October 2025) requires, for fixed-amount goods, that "delivery of goods and service should only be after the confirmation of successful debit," with a post-delivery debit exception only where the amount is not fixed. ADR-0018 designs `upi-block` as capture-at-delivery for fixed-amount baskets, which reads as the thing the circular excludes.
+Not legal questions, but they travel with the same engagement because they go to the same payment counterparty. The capture-at-delivery question that originally sat here is **closed**: NPCI/UPI/OC-228/2025-26 (8 October 2025) makes clear that Reserve Pay is a standing reserve debited at the customer's own purchase action, not an authorize-then-capture hold, so ADR-0018 cut that path rather than asking about it. Three questions remain, in priority order:
 
-Put to the acquirer directly: can a merchant on Reserve Pay debit a fixed-amount block at delivery rather than at order placement, and if not, does Reserve Pay have any COD use at all? The answer decides whether ADR-0018's `upi-block` path exists. See ADR-0018, "Unresolved."
+1. **Repeat purchase.** Can a merchant offer the standing-reserve shape as intended — one block, multiple instant debits at the customer's purchase action over the block's life — through your self-serve APIs today, or does it need a bespoke arrangement? This is the shape ADR-0024 wants.
+2. **Eligibility.** The circular restricts Reserve Pay "to begin with" to "online verified merchants with low ticket and high frequency transactions." What does your onboarding actually apply that to, and would a single-merchant D2C store qualify?
+3. **Block as evidence.** Is it acceptable to create a block purely to prove a funding instrument is real and funded, and then release it without ever debiting — a stronger substitute for a ₹1 verification (ADR-0017's `upi-verify`)? The circular does not contemplate this use, so we will not build it on our own reading.
 
 ## What we are not asking
 
