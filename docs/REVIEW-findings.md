@@ -73,6 +73,8 @@ ADR-0007 (one sidecar, one Merchant, self-hosted) makes a container per merchant
 
 The Indian payment providers have already shipped the money leg on assistant surfaces. What is not taken, and what this spec set actually has, is merchant-side correctness: GST-correct quoting, deterministic refusals, and a disputable audit artifact. That is a real wedge and it is compatible with both paths — but the paths are different companies, and D5 ("gated surfaces, only with merchants behind us") is where the choice stops being deferrable.
 
+**Narrowed 2026-09-19 by ADR-0025, not closed.** This fork assumed centralisation means operating merchants' deployments. It does not have to: the agentic payment rails admit *enrolled participants*, and an entity can enrol as the accountable party while operating no store, holding no keys and touching no funds (ADR-0024, ADR-0025). So the choice is now "hosted platform, Registrar, or neither" rather than "hosted platform or nothing" — and notably the Registrar option does not trip this fork's strongest argument, since under a rail-held mandate the amortised buyer identity lives in the bank rather than in an operator's RP ID, leaving ADR-0008 untouched. The hosted-mode question itself is unchanged and still open.
+
 Take it as an ADR before D5, not during it. Either write `hosted-mode` as an explicitly-not-v1 decision that preserves the shape — multi-tenant scoping, RP ID on the operator's domain, and what that does to ADR-0004's dual identity — or state that self-hosted is the product and that the reach ceiling in ADR-0016 is accepted permanently. Both are defensible. Drifting into the question with three live merchants is not.
 
 ---
