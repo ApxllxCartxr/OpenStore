@@ -4,6 +4,40 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · Hour 0 — contracts frozen
+
+All seven steps of §12's hour-0 checklist, in order. `uv run pytest -q` → **74 passed**; `ruff check`, `ruff format --check` and `mypy --strict` clean.
+
+### What landed
+
+1. **Skeleton.** `src/openstore/sidecar/{core,trait,gate,ledger,authority,admission,provider,evidence,protocols,console,verify}/`, plus `tests/`, `scripts/`, `design/`, `lists/`. `pyproject.toml` adapted from `main`: dropped `discord.py`, `langgraph`, `typer`/`click` and `rich` (no surface in the rebuild uses them), dropped `[project.scripts]` (an entry point naming a module that does not exist is a broken install — `openstore up` arrives with A7), dropped `main`'s `[tool.mutmut]` block (it lists money-path modules that do not exist yet). Added `jsonschema` for step 5. `uv.lock` committed; nothing upgrades mid-build.
+2. **`core/codes.py`** — 17 closed sets, 32 reason codes, and the reason-code → HTTP-status table. §6.4 listed eleven sets; the other six were named in prose and registered nowhere, which is precisely the drift the registry exists to stop.
+3. **`scripts/registry_diff.py`** — generates `docs/CODES.md` from the enums, `--check` diffs it. Direction reversed from `main`, which diffed source against a hand-maintained `REGISTRY.json`: there is no hand-maintained file left to drift. `--prose` additionally scans the normative files for backticked identifiers in no closed set.
+4. **`tests/GOLDEN/cart_hash/vectors.json`** — three vectors, hashes pinned. `mixed-basket` reproduces §16.11's worked example to the paise (shipping 3955/5945, IGST 15827, CGST/SGST 11894/11894, total 259700) and the test recomputes it rather than trusting the literal.
+5. **Door and Quote JSON Schemas** in `trait/schema/`. Shapes only.
+6. **`.env.example`** per §16.1, every variable named, no values.
+7. **The D1 amendment** — Next.js → SvelteKit in `SPEC.md §1`, `PLAN-merchant-site.md` and `PLAN.md`.
+
+### Added to §6.4 under standing rule 1 (registry and spec in the same commit)
+
+- **`cancel-order` + `cancel-not-allowed`** — closes `docs/REVIEW-findings.md` R4, decided by the operator before step 2 rather than laddered. Scope `start-checkout`, own orders only, pre-money only, `RELEASE` where a hold exists, refusing at or past `paid`. Without it an agent that built a basket could only abandon it, holding a Quote for 24h and held stock until the payment window lapsed — an inventory-denial path open to any self-registered stranger, which is the same reasoning that time-boxed `confirmed` in the first place.
+- **`dispatch-not-allowed`** — ADR-0020 bounds dispatch to `confirmed` onward.
+- **`untrusted-key`** — PLAN-sidecar S8's DONE WHEN already refused a post-revocation signature with it, and it was in no set. Found by the prose scanner on its first run, which is the whole argument for having one.
+- **Six unregistered closed sets** promoted out of prose: trait doors, gate checks, provider operations, availability buckets, ceremony, discount visibility, protocols, tool names. The gate-check names are written into the Transcript, so they were frozen bytes living in a bulleted list.
+
+### OPEN — h0 (ladder step 4)
+
+- **Destination and Contact field shapes.** §16.5 pins the two demo addresses as prose and never names the object. Frozen as `{line1, line2?, city, state, postal_code, country}` and `{email?, phone?}` — these feed `destination_hash` / `contact_hash`, so they are preimage bytes now. Reversible only by regenerating the vectors, which means before A3.
+- **Scopes for `order-status`, `cancel-order`, `request-refund`.** Both plans group them as "reads, and scoped" without naming a scope. Conservative reading taken: the read takes `search`, the two that change an order's fate take `start-checkout`.
+- **Canonical PII bytes.** §6.3 says "canonical PII bytes" without defining them. Taken as the same canonical JSON as everything else (sorted keys, no whitespace, UTF-8 unescaped) so there is one canonicalization in the system rather than two.
+
+### Two prose fixes the tooling forced
+
+- `set-status` → `orders.set-status` across SPEC §5/§6 and two plans. It was shorthand for door 8, and shorthand is how a closed set stops being closed.
+- `F12` (tax-invoice series) marked **half closed** in `REVIEW-findings.md`: ADR-0020 supplies the series, credit notes for partial refunds remain open and still need counsel.
+
+---
+
 ## 2026-09-20 · Verification pass on the fetched specs — all claims hold, four refinements
 
 The step-0 findings were committed on the strength of page summaries. Re-fetched against raw sources asking for **verbatim quotes** rather than paraphrase, because those claims are now pinned authority that translators will be built from.

@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openstore.dev/schema/quote.schema.json",
+  "title": "Quote",
+  "description": "The Merchant's priced answer for one basket at one Destination (SPEC §4, SPECS/PLAN.md §6.2). Computed behind door 9, never by the sidecar. Carries no validity of its own: the sidecar owns both expiry clocks, so no clock-derived value appears here — a fulfillment ETA is a day count, never a date, or midnight turns every re-quote into a spurious price-changed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "currency",
+    "subtotal_minor",
+    "lines",
+    "discount_lines",
+    "fulfillment_options",
+    "fulfillment_chosen",
+    "tax_lines",
+    "round_off_minor",
+    "total_minor",
+    "tax_inclusive"
+  ],
+  "properties": {
+    "currency": {
+      "const": "INR",
+      "description": "There is no second currency and no conversion anywhere in v1."
+    },
+    "subtotal_minor": {
+      "$ref": "#/$defs/nonNegativeMinor",
+      "description": "Sum of line inclusive totals, before fulfillment."
+    },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/quoteLine" }
+    },
+    "discount_lines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/discountLine" }
+    },
+    "fulfillment_options": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fulfillmentOption" }
+    },
+    "fulfillment_chosen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "cost_minor"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "cost_minor": { "$ref": "#/$defs/nonNegativeMinor" }
+      }
+    },
+    "tax_lines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/taxLine" }
+    },
+    "round_off_minor": {
+      "type": "integer",
+      "const": 0,
+      "description": "Always 0 in v1: the seeded Merchant does not round to the rupee. A non-zero value is a bug, not a feature (§16.11 step 7)."
+    },
+    "total_minor": {
+      "$ref": "#/$defs/nonNegativeMinor",
+      "description": "subtotal + fulfillment + discounts (negative) + round_off. This is what the Consumer authorizes — the delivered total, not the item total."
+    },
+    "tax_inclusive": {
+      "type": "boolean",
+      "description": "true means tax is already inside the prices and every tax line is informational. Getting this backwards double-charges every order."
+    }
+  },
+  "$defs": {
+    "nonNegativeMinor": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Paise. Integers only — a float in a money path rounds silently."
+    },
+    "sku": { "type": "string", "minLength": 1 },
+    "stateCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "description": "Place of Supply, per line: the Destination state for goods, the place of performance for a service sold at the premises."
+    },
+    "quoteLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sku",
+        "qty",
+        "unit_price_minor",
+        "line_total_minor",
+        "hsn_sac",
+        "gst_rate_bp",
+        "place_of_supply",
+        "addons"
+      ],
+      "properties": {
+        "sku": {
+          "$ref": "#/$defs/sku",
+          "description": "A Catalogue Item — one resolved variant. A Product Group here refuses variant-required."
+        },
+        "qty": { "type": "integer", "minimum": 1 },
+        "unit_price_minor": { "$ref": "#/$defs/nonNegativeMinor" },
+        "line_total_minor": {
+          "$ref": "#/$defs/nonNegativeMinor",
+          "description": "qty × unit_price plus every Add-on folded into this line."
+        },
+        "hsn_sac": { "type": "string", "minLength": 1 },
+        "gst_rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "place_of_supply": { "$ref": "#/$defs/stateCode" },
+        "addons": {
+          "type": "array",
+          "description": "Composite supply: an Add-on folds into this line's taxable value and inherits its rate, HSN/SAC and Place of Supply. It is a cart line with its own SKU and Attestation, and never a Quote Line of its own. An orphan refuses addon-without-parent.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sku", "amount_minor"],
+            "properties": {
+              "sku": { "$ref": "#/$defs/sku" },
+              "amount_minor": { "$ref": "#/$defs/nonNegativeMinor" }
+            }
+          }
+        }
+      }
+    },
+    "discountLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "code", "amount_minor"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A Merchant Discount Code, validated and consumed by the Merchant and never interpreted by the sidecar."
+        },
+        "amount_minor": {
+          "type": "integer",
+          "exclusiveMaximum": 0,
+          "description": "Negative: the sign is intrinsic, never applied by a reader."
+        }
+      }
+    },
+    "fulfillmentOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "cost_minor", "eta_days"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "cost_minor": { "$ref": "#/$defs/nonNegativeMinor" },
+        "eta_days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "A day count, never a date. A date is a clock, and no clock-derived value may cross door 9."
+        }
+      }
+    },
+    "taxLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "label", "rate_bp", "amount_minor", "informational"],
+      "properties": {
+        "kind": { "enum": ["CGST", "SGST", "IGST"] },
+        "label": { "type": "string", "minLength": 1 },
+        "rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "amount_minor": { "$ref": "#/$defs/nonNegativeMinor" },
+        "informational": {
+          "type": "boolean",
+          "description": "true means the tax is already inside the subtotal and must not be added again."
+        }
+      }
+    }
+  }
+}

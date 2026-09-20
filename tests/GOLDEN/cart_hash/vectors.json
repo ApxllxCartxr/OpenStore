@@ -1,0 +1,317 @@
+{
+  "vectors": [
+    {
+      "name": "minimal",
+      "note": "one line, destination A, odd-paise CGST/SGST split",
+      "inputs": {
+        "lines": [
+          {
+            "sku": "SD-STICKERS",
+            "qty": 1,
+            "price_minor": 19900
+          }
+        ],
+        "quote": {
+          "currency": "INR",
+          "subtotal_minor": 19900,
+          "lines": [
+            {
+              "sku": "SD-STICKERS",
+              "qty": 1,
+              "unit_price_minor": 19900,
+              "line_total_minor": 19900,
+              "hsn_sac": "4911",
+              "gst_rate_bp": 1800,
+              "place_of_supply": "KA",
+              "addons": []
+            }
+          ],
+          "discount_lines": [],
+          "fulfillment_options": [
+            {
+              "id": "karnataka",
+              "label": "Karnataka",
+              "cost_minor": 4900,
+              "eta_days": 2
+            }
+          ],
+          "fulfillment_chosen": {
+            "id": "karnataka",
+            "cost_minor": 4900
+          },
+          "tax_lines": [
+            {
+              "kind": "CGST",
+              "label": "CGST 9%",
+              "rate_bp": 900,
+              "amount_minor": 1891,
+              "informational": true
+            },
+            {
+              "kind": "SGST",
+              "label": "SGST 9%",
+              "rate_bp": 900,
+              "amount_minor": 1892,
+              "informational": true
+            }
+          ],
+          "round_off_minor": 0,
+          "total_minor": 24800,
+          "tax_inclusive": true
+        },
+        "destination": {
+          "line1": "4th Cross, Indiranagar",
+          "city": "Bengaluru",
+          "state": "KA",
+          "postal_code": "560038",
+          "country": "IN"
+        },
+        "contact": {
+          "email": "demo@spoiledduckie.test",
+          "phone": "+919000000001"
+        },
+        "order_salt_hex": "00112233445566778899aabbccddeeff",
+        "fulfillment_option_id": "karnataka",
+        "merchant_domain": "spoiledduckie.localhost",
+        "expiry_utc": "2026-09-21T12:00:00Z"
+      },
+      "expected": {
+        "quote_hash": "921a68dcd07c6a9d761edc9915315000eecc6beec2a9194e6111a07afd4a5a2f",
+        "destination_hash": "4f53e943cda08af92a583e4619b8fb8e96820740fab7376d7ce3538a24cefa2f",
+        "contact_hash": "baf7a3dda9ca00273b35cfacbda6a94efd4ff6f8b4da17060c70f8663b512afe",
+        "cart_hash": "2243e60deede08d782114a3cadf4dd8604fa8bae947d189ccbb315d14c374b2e"
+      }
+    },
+    {
+      "name": "mixed-basket",
+      "note": "SPECS/PLAN.md §16.11 worked example — IGST and CGST/SGST in one Quote",
+      "inputs": {
+        "lines": [
+          {
+            "sku": "SD-TOTE-BLK-M",
+            "qty": 1,
+            "price_minor": 89900
+          },
+          {
+            "sku": "SD-GIFTWRAP",
+            "qty": 1,
+            "price_minor": 9900
+          },
+          {
+            "sku": "SD-CHARMBAR-SEAT",
+            "qty": 1,
+            "price_minor": 150000
+          }
+        ],
+        "quote": {
+          "currency": "INR",
+          "subtotal_minor": 249800,
+          "lines": [
+            {
+              "sku": "SD-TOTE-BLK-M",
+              "qty": 1,
+              "unit_price_minor": 89900,
+              "line_total_minor": 99800,
+              "hsn_sac": "4202",
+              "gst_rate_bp": 1800,
+              "place_of_supply": "MH",
+              "addons": [
+                {
+                  "sku": "SD-GIFTWRAP",
+                  "amount_minor": 9900
+                }
+              ]
+            },
+            {
+              "sku": "SD-CHARMBAR-SEAT",
+              "qty": 1,
+              "unit_price_minor": 150000,
+              "line_total_minor": 150000,
+              "hsn_sac": "999799",
+              "gst_rate_bp": 1800,
+              "place_of_supply": "KA",
+              "addons": []
+            }
+          ],
+          "discount_lines": [],
+          "fulfillment_options": [
+            {
+              "id": "rest-of-india",
+              "label": "Rest of India",
+              "cost_minor": 9900,
+              "eta_days": 5
+            }
+          ],
+          "fulfillment_chosen": {
+            "id": "rest-of-india",
+            "cost_minor": 9900
+          },
+          "tax_lines": [
+            {
+              "kind": "IGST",
+              "label": "IGST 18%",
+              "rate_bp": 1800,
+              "amount_minor": 15827,
+              "informational": true
+            },
+            {
+              "kind": "CGST",
+              "label": "CGST 9%",
+              "rate_bp": 900,
+              "amount_minor": 11894,
+              "informational": true
+            },
+            {
+              "kind": "SGST",
+              "label": "SGST 9%",
+              "rate_bp": 900,
+              "amount_minor": 11894,
+              "informational": true
+            }
+          ],
+          "round_off_minor": 0,
+          "total_minor": 259700,
+          "tax_inclusive": true
+        },
+        "destination": {
+          "line1": "Dadar West",
+          "city": "Mumbai",
+          "state": "MH",
+          "postal_code": "400028",
+          "country": "IN"
+        },
+        "contact": {
+          "email": "demo@spoiledduckie.test",
+          "phone": "+919000000001"
+        },
+        "order_salt_hex": "00112233445566778899aabbccddeeff",
+        "fulfillment_option_id": "rest-of-india",
+        "merchant_domain": "spoiledduckie.localhost",
+        "expiry_utc": "2026-09-21T12:00:00Z"
+      },
+      "expected": {
+        "quote_hash": "70a258f636187066c2c22467ed178726544e9d93a05d2f78defd082a9336fd57",
+        "destination_hash": "0154829df0756d5f7615b10811c2c42ccc1044a725057a5277fd927974a120bb",
+        "contact_hash": "baf7a3dda9ca00273b35cfacbda6a94efd4ff6f8b4da17060c70f8663b512afe",
+        "cart_hash": "659db3d67d8632eb8936db0eddc0aa6c63f56e13f50e98901c5386788486c88b"
+      }
+    },
+    {
+      "name": "with-discount",
+      "note": "SPOILED10 across two GST rates, largest-remainder on discount and shipping",
+      "inputs": {
+        "lines": [
+          {
+            "sku": "SD-TOTE-BLK-M",
+            "qty": 1,
+            "price_minor": 89900
+          },
+          {
+            "sku": "SD-PHONECHARM",
+            "qty": 1,
+            "price_minor": 44900
+          }
+        ],
+        "quote": {
+          "currency": "INR",
+          "subtotal_minor": 134800,
+          "lines": [
+            {
+              "sku": "SD-TOTE-BLK-M",
+              "qty": 1,
+              "unit_price_minor": 89900,
+              "line_total_minor": 89900,
+              "hsn_sac": "4202",
+              "gst_rate_bp": 1800,
+              "place_of_supply": "KA",
+              "addons": []
+            },
+            {
+              "sku": "SD-PHONECHARM",
+              "qty": 1,
+              "unit_price_minor": 44900,
+              "line_total_minor": 44900,
+              "hsn_sac": "7117",
+              "gst_rate_bp": 300,
+              "place_of_supply": "KA",
+              "addons": []
+            }
+          ],
+          "discount_lines": [
+            {
+              "label": "Launch code",
+              "code": "SPOILED10",
+              "amount_minor": -10000
+            }
+          ],
+          "fulfillment_options": [
+            {
+              "id": "karnataka",
+              "label": "Karnataka",
+              "cost_minor": 4900,
+              "eta_days": 2
+            }
+          ],
+          "fulfillment_chosen": {
+            "id": "karnataka",
+            "cost_minor": 4900
+          },
+          "tax_lines": [
+            {
+              "kind": "CGST",
+              "label": "CGST 9%",
+              "rate_bp": 900,
+              "amount_minor": 6597,
+              "informational": true
+            },
+            {
+              "kind": "SGST",
+              "label": "SGST 9%",
+              "rate_bp": 900,
+              "amount_minor": 6598,
+              "informational": true
+            },
+            {
+              "kind": "CGST",
+              "label": "CGST 1.5%",
+              "rate_bp": 150,
+              "amount_minor": 629,
+              "informational": true
+            },
+            {
+              "kind": "SGST",
+              "label": "SGST 1.5%",
+              "rate_bp": 150,
+              "amount_minor": 629,
+              "informational": true
+            }
+          ],
+          "round_off_minor": 0,
+          "total_minor": 129700,
+          "tax_inclusive": true
+        },
+        "destination": {
+          "line1": "4th Cross, Indiranagar",
+          "city": "Bengaluru",
+          "state": "KA",
+          "postal_code": "560038",
+          "country": "IN"
+        },
+        "contact": {
+          "email": "demo@spoiledduckie.test",
+          "phone": "+919000000001"
+        },
+        "order_salt_hex": "00112233445566778899aabbccddeeff",
+        "fulfillment_option_id": "karnataka",
+        "merchant_domain": "spoiledduckie.localhost",
+        "expiry_utc": "2026-09-21T12:00:00Z"
+      },
+      "expected": {
+        "quote_hash": "cdefce7cd638cd94b2a01c24c32d681a72e9a29ff1beedfed2d2e719fbbf787e",
+        "destination_hash": "4f53e943cda08af92a583e4619b8fb8e96820740fab7376d7ce3538a24cefa2f",
+        "contact_hash": "baf7a3dda9ca00273b35cfacbda6a94efd4ff6f8b4da17060c70f8663b512afe",
+        "cart_hash": "3bd1da104cd888130ad0ce6c06af6e60a8b80c096afabc49122d495e9f8e677a"
+      }
+    }
+  ]
+}

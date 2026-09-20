@@ -29,7 +29,10 @@ Severity:
 
 *F4–F8 and F11 cleared into SPEC §4/§5/§7/§14, ADR-0011, ADR-0017 and the plan phases. One left, and it is the one that needs a lawyer as much as an engineer.*
 
-### F12 — No tax-invoice series and no credit notes, despite the legal-invoice claim
+### F12 — No tax-invoice series and no credit notes, despite the legal-invoice claim — **half closed**
+
+*The series exists: ADR-0020 puts a gapless, financial-year-scoped `invoice_number` on the Merchant order row, assigned at dispatch rather than at `paid` because CGST §31(1)(a) ties a goods invoice to removal. **Credit notes remain open** — partial refunds are in v1 and nothing yet issues the instrument that reverses a taxable supply, which needs its own series linked to the original invoice. That half still goes to counsel with the e-invoicing/IRN question. The original finding follows.*
+
 
 `PLAN-sidecar.md` S3 justifies the Gate's arithmetic checks by saying otherwise "a legal invoice and a verifiable one stop being the same document". Nothing in the spec set issues an invoice. There is no invoice number series (sequential, unique, per financial year), no invoice issuance point, and — with partial refunds in v1 — no credit note, which under GST is the instrument that reverses a taxable supply and carries its own series linked to the original invoice.
 
@@ -57,7 +60,10 @@ Read the UCP agent-profile shape and either adopt it or carry ours *inside* it a
 
 The feed attributes fixed in `SPEC.md` §3 cover identity, price and availability. Agent surfaces rank and render on more than that — review signal, return window, delivery estimate — and an item with none of them loses the slot regardless of how correct its GST is. D1 should carry the additional attributes as far as the Merchant actually has the data, and M1 should own where the data comes from. Absent review data, say so and treat it as a known ranking handicap rather than discovering it after the first live feed.
 
-### R4 — No agent-initiated cancel in the closed action set
+### R4 — No agent-initiated cancel in the closed action set — **CLOSED at hour 0**
+
+*Resolved: `cancel-order` is in the action set at scope `start-checkout`, bounded pre-money and to the agent's own orders, refusing `cancel-not-allowed` at or past `paid`. Landed in `core/codes.py`, SPECS/PLAN.md §6.4, SPEC §6, PLAN-buyer-chat B1 and PLAN-sidecar S4. The original finding follows.*
+
 
 `SPEC.md` §6 reaches `cancelled` by Consumer walk-away or shop reject. `PLAN-buyer-chat.md` B1's action set has `order-status` and `request-refund` and no cancel, so an agent that built a `pending` basket cannot abandon it except by letting it expire — which holds a Quote for 24h and, after a tap, holds stock until the payment window lapses. Add a cancel action bounded like F9 (own orders, pre-money only, `RELEASE` where a hold exists), or state in §6 that abandonment is expiry-only and accept the hold.
 

@@ -3,7 +3,7 @@
 Full spec in `SPEC.md`, glossary in `CONTEXT.md`, decisions in `docs/adr/`. Each surface has its own plan file with phases, interfaces, and DONE WHEN gates. No phase starts until its dependencies below are green.
 
 - [`PLAN-sidecar.md`](./PLAN-sidecar.md) — `src/openstore/sidecar/`: the product. Gate, Ledger, receipt, authority, protocols, `/agentic` console, install + operations.
-- [`PLAN-merchant-site.md`](./PLAN-merchant-site.md) — `demo/merchant-site/`: SpoiledDuckie Next.js + Postgres demo accessory shop proving a Merchant can operate it.
+- [`PLAN-merchant-site.md`](./PLAN-merchant-site.md) — `demo/merchant-site/`: SpoiledDuckie SvelteKit + Postgres demo accessory shop proving a Merchant can operate it.
 - [`PLAN-buyer-chat.md`](./PLAN-buyer-chat.md) — `demo/buyer-chat/`: Ollama chat stranger proving the Consumer flow end to end.
 - [`PLAN-distribution.md`](./PLAN-distribution.md) — phase two, not a surface: the permissionless doors that make the three above reachable. Starts only after step 7 below is green.
 

@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openstore.dev/schema/doors.schema.json",
+  "title": "The nine doors of the Merchant-truth trait",
+  "description": "Shapes only — no implementation (SPECS/PLAN.md §6.1). All over HTTP on the private network, POST, JSON in/out, HMAC-SHA256 over the raw body in X-OpenStore-Signature, replay window 60s with a nonce. Every mutating door takes Idempotency-Key: order_id:attempt, except orders.create, which produces the order_id and therefore keys on cart_id:attempt. Every refusal is the error envelope below — never a 500, never a coerced default.",
+  "type": "object",
+  "$defs": {
+    "sku": { "type": "string", "minLength": 1 },
+    "orderId": { "type": "string", "minLength": 1 },
+    "nonNegativeMinor": { "type": "integer", "minimum": 0 },
+
+    "error": {
+      "title": "The refusal envelope",
+      "description": "The HTTP status is derived from the reason code by the one table in core/codes.py and is never chosen at the call site.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "detail"],
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "A member of ReasonCode. Generated into docs/CODES.md; a code outside it is a red build."
+            },
+            "detail": { "type": "string", "description": "Human-readable, naming the exact fix." },
+            "fields": { "type": "object" }
+          }
+        }
+      }
+    },
+
+    "availabilityBucket": {
+      "enum": ["in-stock", "low-stock", "sold-out"],
+      "description": "Everything agent-facing. Exact counts cross door 2 only, on the private network."
+    },
+
+    "line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sku", "qty"],
+      "properties": {
+        "sku": { "$ref": "#/$defs/sku" },
+        "qty": { "type": "integer", "minimum": 1 },
+        "parent": {
+          "$ref": "#/$defs/sku",
+          "description": "Present only on an Add-on line. Absent on an Add-on refuses addon-without-parent."
+        }
+      }
+    },
+
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line1", "city", "state", "postal_code", "country"],
+      "properties": {
+        "line1": { "type": "string", "minLength": 1 },
+        "line2": { "type": "string" },
+        "city": { "type": "string", "minLength": 1 },
+        "state": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "postal_code": { "type": "string", "pattern": "^[0-9]{6}$" },
+        "country": { "const": "IN" }
+      }
+    },
+
+    "contact": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string", "pattern": "^\\+91[0-9]{10}$" }
+      }
+    },
+
+    "catalog.read": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "since": { "type": "string", "format": "date-time" } }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["groups", "items"],
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "slug", "name", "option_axes", "tags", "status"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "slug": { "type": "string", "minLength": 1 },
+                "name": { "type": "string", "minLength": 1 },
+                "description": { "type": "string" },
+                "media": { "type": "array", "items": { "type": "string" } },
+                "option_axes": {
+                  "type": "object",
+                  "description": "Axis name to allowed values. Presentation only: a group is never sellable and never a cart line.",
+                  "additionalProperties": { "type": "array", "items": { "type": "string" } }
+                },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "status": { "enum": ["active", "archived"] }
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sku",
+                "group_id",
+                "options",
+                "name",
+                "price_minor",
+                "tags",
+                "status",
+                "low_stock_threshold",
+                "hsn_sac",
+                "gst_rate_bp"
+              ],
+              "properties": {
+                "sku": { "$ref": "#/$defs/sku" },
+                "group_id": { "type": "string", "minLength": 1 },
+                "options": {
+                  "type": "object",
+                  "description": "This item's resolved values on the group's axes. A later rename of an axis cannot rewrite what was bought — the Attestation pins these.",
+                  "additionalProperties": { "type": "string" }
+                },
+                "name": { "type": "string", "minLength": 1 },
+                "price_minor": { "$ref": "#/$defs/nonNegativeMinor" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "media": { "type": "array", "items": { "type": "string" } },
+                "status": { "enum": ["active", "archived"] },
+                "low_stock_threshold": { "type": "integer", "minimum": 0 },
+                "hsn_sac": { "type": "string", "minLength": 1 },
+                "gst_rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "stock.read": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["skus"],
+        "properties": {
+          "skus": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sku" } }
+        }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stock"],
+        "properties": {
+          "stock": {
+            "type": "object",
+            "description": "Exact integers, private network only. Always int >= 0, never null; missing or negative fails catalog load loud.",
+            "additionalProperties": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "reserve": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id", "lines"],
+        "properties": {
+          "order_id": { "$ref": "#/$defs/orderId" },
+          "lines": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/line" } },
+          "discount_code": { "type": "string", "minLength": 1 }
+        }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reserved"],
+        "properties": { "reserved": { "const": true } },
+        "description": "Atomic compare-and-set (WHERE available >= qty), never negative-proof by test. Also holds the Discount Code under the same idempotency key, so a single-use code cannot be spent twice."
+      }
+    },
+
+    "commit": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id"],
+        "properties": { "order_id": { "$ref": "#/$defs/orderId" } }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["committed"],
+        "properties": { "committed": { "const": true } }
+      }
+    },
+
+    "release": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id"],
+        "properties": { "order_id": { "$ref": "#/$defs/orderId" } }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["released"],
+        "properties": { "released": { "const": true } },
+        "description": "Releasing a hold that was never taken refuses no-hold. A sold-out failure closes no hold, because none was taken."
+      }
+    },
+
+    "restock": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id", "lines"],
+        "properties": {
+          "order_id": { "$ref": "#/$defs/orderId" },
+          "lines": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/line" } }
+        }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["restocked"],
+        "properties": { "restocked": { "const": true } }
+      }
+    },
+
+    "orders.create": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cart_id", "lines", "destination", "contact", "fulfillment_option_id"],
+        "properties": {
+          "cart_id": { "type": "string", "minLength": 1 },
+          "lines": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/line" } },
+          "destination": { "$ref": "#/$defs/destination" },
+          "contact": { "$ref": "#/$defs/contact" },
+          "fulfillment_option_id": { "type": "string", "minLength": 1 },
+          "agent_id": { "type": "string" },
+          "consumer_id": { "type": "string" }
+        }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id", "order_salt_hex", "status"],
+        "properties": {
+          "order_id": { "$ref": "#/$defs/orderId" },
+          "order_salt_hex": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "description": "128-bit, Merchant-generated, returned HERE AND IN NO OTHER RESPONSE EVER (§6.3a). The sidecar holds it in request memory for the length of the decision and never writes it to any table, cache or log. Erasure deletes the row and the salt with it, and the evidence commitments become permanently unopenable."
+          },
+          "status": { "const": "pending" }
+        }
+      }
+    },
+
+    "orders.read": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id"],
+        "properties": { "order_id": { "$ref": "#/$defs/orderId" } }
+      },
+      "response": {
+        "type": "object",
+        "description": "The order row. order_salt is never present here. tracking_number, carrier, dispatched_at and invoice_number are Merchant-set pass-throughs — the sidecar computes none of them (ADR-0020) — and invoice_number is dropped by the agent-facing serializer, because a gapless sequence is a dispatch-volume oracle (SPEC §6).",
+        "required": ["order_id", "status", "lines", "total_minor"],
+        "properties": {
+          "order_id": { "$ref": "#/$defs/orderId" },
+          "status": {
+            "enum": [
+              "pending",
+              "confirmed",
+              "paid",
+              "cancelled",
+              "expired",
+              "failed",
+              "refunded",
+              "completed"
+            ]
+          },
+          "lines": { "type": "array", "items": { "$ref": "#/$defs/line" } },
+          "total_minor": { "$ref": "#/$defs/nonNegativeMinor" },
+          "refunded_minor": {
+            "$ref": "#/$defs/nonNegativeMinor",
+            "description": "Full vs partial is derived from this, never given a ninth status."
+          },
+          "tracking_number": { "type": ["string", "null"] },
+          "carrier": { "type": ["string", "null"] },
+          "dispatched_at": { "type": ["string", "null"], "format": "date-time" },
+          "invoice_number": { "type": ["string", "null"] },
+          "expires_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      }
+    },
+
+    "orders.set-status": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id", "status"],
+        "properties": {
+          "order_id": { "$ref": "#/$defs/orderId" },
+          "status": {
+            "enum": [
+              "pending",
+              "confirmed",
+              "paid",
+              "cancelled",
+              "expired",
+              "failed",
+              "refunded",
+              "completed"
+            ]
+          },
+          "reason": { "type": "string" }
+        }
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order_id", "status"],
+        "properties": {
+          "order_id": { "$ref": "#/$defs/orderId" },
+          "status": { "type": "string" }
+        },
+        "description": "Same key, same result. This is the serialization point for tap vs expiry vs shop-reject — the sidecar owns both expiry clocks and the Merchant never self-expires."
+      }
+    },
+
+    "quote": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lines", "destination"],
+        "properties": {
+          "lines": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/line" } },
+          "destination": { "$ref": "#/$defs/destination" },
+          "fulfillment_option_id": { "type": "string", "minLength": 1 },
+          "discount_code": { "type": "string", "minLength": 1 }
+        }
+      },
+      "response": {
+        "$ref": "https://openstore.dev/schema/quote.schema.json",
+        "description": "Read-only, side-effect-free, byte-identical for identical inputs against unchanged state. Not time-invariant, deliberately: a price edit or an exhausted code changes the answer, which is what quote-fresh exists to catch."
+      }
+    }
+  }
+}
