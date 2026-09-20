@@ -112,16 +112,18 @@ The protocol toggle is the clearest statement of "one core, many envelopes," and
 
 - **MCP** — live and spoken by the demo chat. No completion model of its own, so no deviation beyond the redirect handoff.
 - **UCP** — its totals breakdown maps 1:1 onto the Quote, so the translator carries no pricing logic. Foreign direct-checkout-inside-AI maps to our same-domain approve handoff, which is **UCP's own buyer-escalation path**, not a departure from it.
-- **ACP** — built around a **delegated payment credential** (a shared payment token) handed to the agent. That is exactly the authority ADR-0008 and ADR-0013 removed from agents, so the translator accepts the whole ACP flow and **refuses the delegated-credential completion step with a named code, redirecting to the approve ceremony instead**. Refused on purpose, not unimplemented — and the badge says which.
-- **AP2** — mandate-based. Its **human-present** mode, where the buyer approves the cart in real time, maps cleanly onto our approve ceremony and the `cart_hash` binding. Its **human-not-present** mode rests on a pre-signed intent mandate, which is our `mandate` Authority kind: defined, registered in `docs/CODES.md`, recorded, and **refused in v1** (ADR-0017). So AP2 works for the mode we support and refuses the one we do not, by name.
+- **ACP** (spec `2026-04-17`, Stripe + OpenAI + Meta) — five checkout-session endpoints that map almost 1:1 onto our core, with native `Idempotency-Key` headers and OAuth 2.0 delegate authentication we already implement. Its `POST /checkout_sessions/{id}/complete` hands the merchant a **delegated payment credential** — exactly the authority ADR-0008 and ADR-0013 removed from agents. The other four operations work normally; **that one refuses with a named code and returns the approve URL.** Refused on purpose, not unimplemented, and the badge says which. Full endpoint and schema map in §16.12.
+- **AP2** — **not a fourth envelope.** The specification states it "operates as a security feature within a Commerce Protocol," puts catalogue and checkout APIs outside its own scope, and is "designed explicitly to be compatible with the Universal Commerce Protocol." So AP2 ships as a **mandate layer over the UCP translator**, not as a sibling of it. Its **Direct (human-present)** mode — where the agent presents mandates to a Trusted Surface for the user to review and sign — is our approve ceremony, and its `checkout_hash` binding a signed mandate to a merchant-signed Checkout JWT is structurally the same primitive as our `cart_hash` binding an Authority to a merchant-signed Quote. Its **Autonomous (human-not-present)** mode rests on pre-approved constraints, which is our `mandate` Authority kind: registered, recorded, **refused in v1** (ADR-0017).
 
-Two protocols where the refusal *is* the product beat is worth more on stage than two greyed tabs, and it makes the conformance badge do real work across four envelopes instead of two.
+Three envelopes and one security layer, where two of the four refuse a completion step **on purpose** — that is worth more on stage than four tabs that all say yes, and it makes the conformance badge do real work.
 
 **Cost and how it is funded, stated honestly:** A6 goes 2h → 4h (+2.0). Paid for by taking **cut #2 up front** (the `/agentic` Attribution and Health tabs, −1.0) and making the console's **Exposure tab read-only over seeded values** (−0.5). Net **+0.5h on Track P, which moves it from −0.5h to −1.0h against the day.** It is not free and this document is not going to pretend it is.
 
 Where that hour comes from, in order: the rehearsal block is 1.5h and can compress to 1.0h; failing that, A6's own step-0 escape hatch recovers the full 2h automatically — **if either spec cannot be fetched, that protocol downgrades to declared-and-refused and the badge says so**, which means the risk here is self-limiting rather than open-ended. See §12.
 
-**Hard prerequisite, and it is not optional:** ACP and AP2 are young specifications and nobody on this build has their wire formats memorised. **Fetch the published specs before writing either translator, pin the version you read in `LOGS.md`, and map against the document — never against a remembered shape.** §0's "never invent an identifier" rule applies with full force to foreign envelope fields. A translator built from memory is a conformance claim that is not true, which is the one failure this product cannot survive.
+**The specs were fetched before hour 0 and are pinned in §16.12** — ACP `2026-04-17` with machine-readable OpenAPI and JSON Schema, AP2 `main` @ 2026-09-20. That fetch immediately overturned two things this plan had asserted from memory: AP2 is a layer rather than an envelope, and its mandates are two (Checkout, Payment) rather than the three the launch announcement described. **Both errors would have been discovered at hour 19 instead.**
+
+The rule stands for everything deeper: §0's "never invent an identifier" applies with full force to foreign envelope fields. Validate ACP against its published JSON Schema rather than hand-transcribing; read AP2's claim names out of the specification. A translator built from memory is a conformance claim that is not true, which is the one failure this product cannot survive.
 
 ### D4 — COD is in
 
@@ -501,18 +503,18 @@ So whoever writes the verifier writes the signer, in the same sitting, against t
 
 ### A6 · Protocols — 4h *(all four live; was 2h for two — see D3)*
 
-> **STEP 0, BEFORE ANY CODE.** Fetch the published ACP and AP2 specifications, and the UCP spec. Record in `LOGS.md`: the URL, the version or date read, and the exact capability/endpoint names each one defines. **Map against those documents, never against a remembered shape.** If a spec cannot be fetched, log it under `## BLOCKED — A6`, ship that protocol as declared-and-refused with the badge saying exactly that, and move on — a translator built from memory is a false conformance claim, which is the one failure this product cannot survive.
+> **STEP 0 IS DONE.** The specs were fetched on 2026-09-20 and the results are pinned in **§16.12** — read it before writing a line of this phase. ACP is spec `2026-04-17` with machine-readable OpenAPI and JSON Schema; AP2 is `main` @ 2026-09-20 and is **a security layer over UCP, not a fourth envelope**. Validate ACP against its published JSON Schema rather than transcribing field names by hand, and take AP2's claim names from its specification. Anything §16.12 does not answer comes from the documents it links, never from memory.
 
 - `protocols/mcp.py` — live. `tools/list`, tool schemas and envelope ported from `main`; every body rewired to the new core. Least-privilege per tool, scope-checked.
 - `protocols/ucp.py` — live. UCP's totals breakdown maps 1:1 onto the Quote, so the translator carries **no pricing logic**. Direct-checkout-inside-AI maps to our approve handoff, which is UCP's own buyer-escalation path.
-- `protocols/acp.py` — live. Accepts the ACP flow end to end and **refuses the delegated-payment-credential completion step** with a named code, handing back the approve URL instead. This is ADR-0008 and ADR-0013 enforced at the envelope boundary rather than an unimplemented gap, and the badge says so in those words.
-- `protocols/ap2.py` — live. **Human-present** mode maps onto the approve ceremony and the `cart_hash` binding. **Human-not-present** rests on a pre-signed intent mandate, which is the `mandate` Authority kind — registered, recorded, and refused in v1 with `authority-kind-not-enabled` (ADR-0017).
-- `protocols/registry.py` — one place naming all four, their live/refused capabilities, and their deviation text. The header toggle and the badge both read from it, so a protocol cannot be live in one and stale in the other.
+- `protocols/acp.py` — live. Implements the five checkout-session operations in §16.12 against the published OpenAPI: `create` / `update` / `get` / `cancel` map onto Pending Cart, quote, cart read and `cancelled`; **`POST /checkout_sessions/{id}/complete` refuses the delegated-payment-credential step** with a named code and returns the approve URL. ADR-0008 and ADR-0013 enforced at the envelope boundary, not an unimplemented gap. Honour ACP's native `Idempotency-Key` and `API-Version` headers — the first maps straight onto our per-attempt keys.
+- `protocols/ap2.py` — live, and **it is a layer on `ucp.py`, not a peer of it** (§16.12). Verify the Checkout Mandate JWT, confirm our merchant-signed Checkout artifact hashes to its `checkout_hash` claim, honour the `vct` schema version, and return a Checkout Receipt JWT. **Direct / human-present** completes through the approve ceremony. **Autonomous / human-not-present** refuses `authority-kind-not-enabled` — that mode is the `mandate` kind (ADR-0017). Reuse A4c's and A4's ES256 verification; do not write a second JWT verifier.
+- `protocols/registry.py` — one place naming every protocol, whether it is an **envelope** (MCP, UCP, ACP) or a **layer** (AP2), its live/refused capabilities, and its deviation text. The header toggle and the badge both read from it, so a protocol cannot be live in one and stale in the other.
 - **Conformance badge** names its deviations inline, per protocol: capability supported, redirect-only completion, which payment instruments this Merchant has enabled, and **which completion step this envelope wanted that we refuse and why**. A golden replay asserts the deviation text is present for every protocol. This is what keeps "conformant" from becoming a lie.
-- Header toggle `[MCP | UCP | ACP | AP2]` replays the same flow through the selected envelope.
-- **DONE WHEN**: one golden end-to-end replay **per protocol** (search → allow → cart → tap → fake-UPI → receipt → verify) with the **core Transcript pinned byte-identical across all four** — envelopes differ, core decision bytes do not, and that assertion is the single most valuable test in this phase; an ACP delegated-credential completion attempt refuses with its named code and returns an approve URL; an AP2 human-not-present mandate refuses `authority-kind-not-enabled` while human-present completes; `main`'s MCP and UCP conformance goldens still pass; the badge's per-protocol deviation text is asserted; every spec URL and version is recorded in `LOGS.md`.
+- Header toggle `[MCP | UCP | UCP+AP2 | ACP]` replays the same flow. AP2 appears as a layer on UCP because that is what it is — a fourth peer tab would be a nicer-looking lie.
+- **DONE WHEN**: one golden end-to-end replay **per protocol** (search → allow → cart → tap → fake-UPI → receipt → verify) with the **core Transcript pinned byte-identical across all four** — envelopes differ, core decision bytes do not, and that assertion is the single most valuable test in this phase; an ACP `complete` carrying a delegated credential refuses with its named code and returns an approve URL while the other four operations succeed; an AP2 Checkout Mandate whose `checkout_hash` does not match our Checkout artifact is rejected, a matching one completes through the approve ceremony, and an autonomous-mode mandate refuses `authority-kind-not-enabled`; `main`'s MCP and UCP conformance goldens still pass; the badge's per-protocol deviation text is asserted; every spec URL and version is recorded in `LOGS.md`.
 
-**Scope boundary, so this does not become six hours:** ACP and AP2 are **request-path live and golden-replay proven — there is no client integration for either.** You can POST a correct envelope and get a correct response including the named refusal. Only MCP has a live client (the demo chat). That is genuinely live rather than stubbed, and it is what the 4h buys.
+**Scope boundary, so this does not become six hours:** ACP and AP2 are **request-path live and golden-replay proven — there is no client integration for either.** You can POST a correct envelope, or a signed mandate, and get a correct response including the named refusal. Only MCP has a live client (the demo chat). That is genuinely live rather than stubbed, and it is what the 4h buys. ACP's published JSON Schema does a large part of the validation work for free, which is why five endpoints fit inside this budget.
 
 ### A7 · `/agentic` console — 1.0h *(2.5h less cut #2 and a read-only Exposure tab — funding A6's four protocols, see D3)*
 
@@ -844,7 +846,7 @@ Written for **Option B** (two builders, cuts 5 and 4a taken at hour 0). Under Op
 |---|---|---|
 | 14–15.5 | **A4c agent signing kit** *(files land in `demo/buyer-chat/`; same sitting as A4's verifier)* | C1 continues: chat UI, session DB, tool loop, model seam |
 | 15.5–17.5 | A5 evidence + verifier | C1 finishes *(consumes A4c's identity module)*, then C2 starts |
-| 17.5–21 | **A6 protocols — all four + badge** *(step 0: fetch the ACP and AP2 specs and log their versions before writing either translator; if one is unfetchable, downgrade it to declared-and-refused and reclaim the time)* | C2 finishes by 17.5 → **C3 shopping flow** starts |
+| 17.5–21 | **A6 protocols — MCP, UCP, ACP + AP2 layer + badge** *(step 0 is done; specs pinned in §16.12 — read it first)* | C2 finishes by 17.5 → **C3 shopping flow** starts |
 | **21–21.5** | **★ Integration 2** *(both tracks, 30 min — needs C2 green, which it is)* | |
 | 21.5–22.5 | A7 `/agentic` console *(trimmed — cut #2 taken up front)* | C3 continues |
 | 22.5–24 | A8 mount + install + feed | C3 finishes → C4 starts |
@@ -916,7 +918,7 @@ Note that cuts 1–3 are all Track P, which has the margin — so the first thre
 
 7. **Cash on delivery**, which is ~60% of Indian ecommerce and the thing every competitor's demo quietly omits. Same basket, choose COD: the sidecar calls no provider, writes no Ledger entry, and holds the stock anyway. Dispatch it from admin — a gapless invoice number lands while the order is still `confirmed`, before `paid` exists — then Record collection and watch a `CAPTURE` appear with no `RESERVE` in front of it. Say out loud that **the Merchant asserts the cash and nothing here can check it**, that this is correct because it is their money and their Ledger, and that what `confirmed-intent` bought them is evidence the basket was committed to by someone holding a real funding instrument, not a phone number. *(75s)*
 
-7b. **Four envelopes, one core.** Flip the header toggle through `[MCP | UCP | ACP | AP2]` and replay the same basket. The conformance badge changes with each, naming what that protocol wanted and what this Merchant refuses: **ACP** wanted a delegated payment token handed to the agent — refused, here is the approve URL instead; **AP2** human-not-present wanted a pre-signed mandate — refused, registered, named; human-present completes normally. Then show the CI assertion that the **core Transcript bytes are identical across all four**. *(60s — this is the architecture beat. If the room remembers one thing, make it this.)*
+7b. **Four envelopes, one core.** Flip the header toggle through `[MCP | UCP | ACP | AP2]` and replay the same basket. The conformance badge changes with each, naming what that protocol wanted and what this Merchant refuses: **ACP** wanted a delegated payment token at `/complete` — refused, here is the approve URL instead, and its other four operations work fine; **AP2** rides on UCP as a security layer, its human-present mandates verify against our Quote, and its autonomous mode refuses by name. Worth pointing out that AP2's `checkout_hash` and our `cart_hash` are structurally the same primitive, arrived at independently. Then show the CI assertion that the **core Transcript bytes are identical across all four**. *(60s — this is the architecture beat. If the room remembers one thing, make it this.)*
 
 **If there is an eighth minute**, show a refusal: `SD-PLUSH-MINI` already carries a 2-per-order cap (§16.4), so try for three and watch `cap-exceeded` fire — evaluated at the Product Group, so taking one of each variant cannot walk around it either. That is the whole thesis in one refusal.
 
@@ -944,7 +946,7 @@ Note that cuts 1–3 are all Track P, which has the margin — so the first thre
 
 Beyond the D-decisions in §2, and unchanged from `SPEC.md §13`: campaigns, rules engines, bots, hosted mall/search/ranking, multi-Merchant tenancy, multi-location, cancellation and restocking fees, store credit, bulk cancel, auto-fulfilment, shipping labels, subscriptions, multi-currency and duties, Consumer accounts, a self-serve returns portal, fraud scoring, abandoned-cart recovery, Merkle batch-anchoring, OMS write paths beyond the 9-door trait, and preorder/backorder (which is not a cut but a consequence: stock is `int ≥ 0` with a `CHECK`, and selling against future stock needs a second inventory model, not a flag).
 
-And one exclusion that is the product rather than a gap: **delegated agent-held payment credentials** — Shop Pay tokens, ACP shared payment tokens — are refused on purpose. They are exactly the authority we removed from agents. It costs us native in-agent completion on the gated surfaces and we pay it. Say so on stage, with the reason, before anyone asks.
+And one exclusion that is the product rather than a gap: **delegated agent-held payment credentials** — Shop Pay tokens, ACP Shared Payment Tokens and `vt_…` vault tokens — are refused on purpose. They are exactly the authority we removed from agents. It costs us native in-agent completion on the gated surfaces and we pay it. Say so on stage, with the reason, before anyone asks.
 
 Distribution — the permissionless doors that make any of this reachable — is phase two and is specced in `PLAN-distribution.md`. It starts after the install gate, not before. Reach earned before install is reach wasted.
 
@@ -1150,16 +1152,53 @@ Demo basket, **destination B (Mumbai, 400028)**, no discount code. This is the �
 
 Both GST splits in one Quote, which is the point of the basket. If your implementation produces any other number, it is wrong — not the table.
 
-### 16.12 Protocol specifications — fetch, do not remember
+### 16.12 Protocol specifications — fetched 2026-09-20, pinned here
 
-Four envelopes ship (D3). **MCP and UCP have working references on `main`**; ACP and AP2 do not, and neither is old enough for anyone's memory to be trusted with its field names.
+**These were fetched before hour 0, not remembered.** Anything deeper than what is recorded here comes from the documents below, never from this plan.
 
-Before writing `protocols/acp.py` or `protocols/ap2.py`, fetch the published specification and record in `LOGS.md`: the URL, the version or date read, the capability and endpoint names it defines, and the exact name of the completion step being refused. Map against the document.
+| Protocol | Source of truth | Version read | Licence |
+|---|---|---|---|
+| ACP | `github.com/agentic-commerce-protocol/agentic-commerce-protocol`, `agenticcommerce.dev` | **spec `2026-04-17`** | Apache 2.0 |
+| AP2 | `github.com/google-agentic-commerce/AP2`, `docs/ap2/specification.md` | `main` @ 2026-09-20 | open, Google-led |
+| UCP | as carried on `main` + its published manifest | as on `main` | — |
+| MCP | as carried on `main` | as on `main` | — |
 
-- **ACP** — the completion step hands the agent a delegated payment credential. Our refusal of that is ADR-0008 and ADR-0013, enforced at the envelope boundary with a named code plus an approve URL.
-- **AP2** — mandate-based, with human-present and human-not-present modes. Human-present maps onto the approve ceremony; human-not-present is the `mandate` Authority kind, refused in v1 per ADR-0017.
+#### ACP — five endpoints, and it fits us better than expected
 
-Those two sentences are the *shape* of each deviation and are safe to rely on. **Every field name, envelope key and endpoint path comes from the fetched document, not from this plan.** If a spec cannot be retrieved, that protocol ships declared-and-refused with the badge saying exactly why, and A6 reclaims its time — this is a designed escape, not a failure.
+Maintained by **Stripe, OpenAI and Meta** (not OpenAI + Stripe alone — the plan said that and it is now out of date). Machine-readable: OpenAPI at `spec/2026-04-17/openapi/openapi.agentic_checkout.yaml` and `openapi.delegate_payment.yaml`, JSON Schema at `spec/2026-04-17/json-schema/`. **Validate against the schema; do not hand-transcribe field names.**
+
+| ACP operation | Path | Maps onto |
+|---|---|---|
+| `createCheckoutSession` | `POST /checkout_sessions` | Pending Cart + door 9 `quote` |
+| `updateCheckoutSession` | `POST /checkout_sessions/{checkout_session_id}` | line edits, Destination, Contact, fulfillment choice, re-quote |
+| `getCheckoutSession` | `GET /checkout_sessions/{checkout_session_id}` | cart read |
+| `completeCheckoutSession` | `POST /checkout_sessions/{checkout_session_id}/complete` | **the refusal point** |
+| `cancelCheckoutSession` | `POST /checkout_sessions/{checkout_session_id}/cancel` | `cancelled`, pre-money |
+
+Required headers: `Authorization` (Bearer), `Content-Type`, `Idempotency-Key`, `API-Version`. Top-level schemas: `CheckoutSessionCreateRequest`, `CheckoutSessionUpdateRequest`, `CheckoutSessionCompleteRequest`, `CheckoutSession`, `CheckoutSessionWithOrder`, `CancelSessionRequest`, `Error`.
+
+Two things fall out that are worth saying aloud: **ACP has native `Idempotency-Key`**, which maps directly onto our per-attempt idempotency discipline rather than needing a shim; and its *Delegate authentication* building block is OAuth 2.0, which is already our allowlisted-agent admission route (ADR-0012).
+
+`completeCheckoutSession` is where the buyer's delegated credential (Stripe's Shared Payment Token, or a `vt_…` vault token under OpenAI's Delegate Payment spec) is handed to the merchant. **That is the step we refuse**, with a named code and the approve URL in the response. ADR-0008 and ADR-0013 enforced at the envelope boundary — the other four operations work normally.
+
+#### AP2 — **not a fourth envelope. A security layer, and it rides on UCP.**
+
+This is the finding that justified fetching before building. The specification says plainly that **"AP2 operates as a security feature within a Commerce Protocol"**, that catalog APIs and checkout updates are **outside AP2's scope**, and that it is **"designed explicitly to be compatible with the Universal Commerce Protocol (UCP)"**.
+
+So AP2 is not a sibling of MCP/UCP/ACP and must not be built as one. It is a mandate layer **over** our UCP translator.
+
+Also corrected: the launch-era three mandates (Intent / Cart / Payment) are **not** what the current spec defines. It defines **two**:
+
+- **Checkout Mandate** — proves the Shopping Agent is authorized to purchase this checkout. Carries a `checkout_hash` claim binding it to a merchant-signed Checkout JWT. Versioned by `vct`, e.g. `mandate.checkout.open.1`.
+- **Payment Mandate** — proves authorization to pay. Carries `checkout_hash`, `transaction_id`, and a `cnf` claim holding the agent public key in autonomous mode. Versioned by `vct`, e.g. `mandate.payment.1`.
+
+Merchant obligations: create a signed Checkout JWT; receive and verify the Checkout Mandate; validate it against the Agent Authorization verification rules; **confirm the hash of your Checkout JWT matches the mandate's `checkout_hash`**; check conformance to any open mandate's constraints; return a Checkout Receipt JWT.
+
+**Direct (human present)** — the mode we support: agent gets a closed Checkout JWT from the merchant, builds both mandates, **presents them to a Trusted Surface for the user to review and sign** (this is the only human step), forwards the signed Payment Mandate to the Credential Provider, and returns with a payment credential plus the Checkout Mandate; the merchant verifies the checkout matches and initiates payment.
+
+**Autonomous (human not present)** — the user pre-approves *constraints*, and agent-signed closed mandates are checked against user-signed open mandates. **This is our `mandate` Authority kind: registered, recorded, refused in v1** (ADR-0017).
+
+**The convergence worth putting on a slide:** AP2's `checkout_hash` binding a signed mandate to a merchant-signed Checkout JWT is structurally the same primitive as our `cart_hash` binding an Authority to a merchant-signed Quote (§6.3). We arrived at it independently, and their Trusted Surface is our approve page. Say "structurally the same primitive," not "identical" — the field sets differ and the claim should survive someone opening both specs.
 
 ### 16.13 What is deliberately not pinned
 

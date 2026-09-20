@@ -4,6 +4,47 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · A6 STEP 0 DONE — specs fetched, and AP2 was not what we assumed
+
+Pulled the ACP and AP2 specifications before hour 0 rather than at hour 17.5. **It immediately overturned two things this plan had asserted from memory.** This is the step-0 gate working exactly as intended, one day early and at zero cost.
+
+### Versions pinned (the §0 requirement)
+
+| Protocol | Source | Version read | Licence |
+|---|---|---|---|
+| ACP | `github.com/agentic-commerce-protocol/agentic-commerce-protocol`, `agenticcommerce.dev` | spec **`2026-04-17`** | Apache 2.0 |
+| AP2 | `github.com/google-agentic-commerce/AP2`, `docs/ap2/specification.md` | `main` @ 2026-09-20 | open, Google-led |
+
+### Correction 1 — AP2 is a security layer, not an envelope
+
+The plan had AP2 as a fourth sibling translator beside MCP, UCP and ACP. The specification says otherwise, plainly: **"AP2 operates as a security feature within a Commerce Protocol"**, catalogue and checkout APIs are **outside its scope**, and it is **"designed explicitly to be compatible with the Universal Commerce Protocol (UCP)."**
+
+So `ap2.py` is now a **mandate layer over `ucp.py`**, and the header toggle reads `[MCP | UCP | UCP+AP2 | ACP]`. A fourth peer tab would have been a nicer-looking lie. Building it as a sibling would have meant discovering at hour 19 that we had written a standalone envelope for a thing that explicitly is not one.
+
+### Correction 2 — two mandates, not three
+
+The plan said Intent / Cart / Payment, which is the September 2025 launch-announcement description. The current spec defines **two**: **Checkout Mandate** (`vct` e.g. `mandate.checkout.open.1`, carrying a `checkout_hash` claim) and **Payment Mandate** (`vct` e.g. `mandate.payment.1`, carrying `checkout_hash`, `transaction_id`, and a `cnf` claim holding the agent public key in autonomous mode). Both are JWTs bound to a merchant-signed Checkout JWT.
+
+Direct (human-present) is the mode we support — the agent presents mandates to a **Trusted Surface** for the user to review and sign, which is our approve page. Autonomous (human-not-present) pre-approves constraints, which is our `mandate` Authority kind: registered, recorded, refused in v1.
+
+### ACP fits better than budgeted
+
+Maintained by **Stripe, OpenAI and Meta** — the plan said OpenAI + Stripe and was out of date. Five checkout-session endpoints, all mapping close to 1:1 onto our core, and crucially it ships **machine-readable OpenAPI and JSON Schema**, so validation is generated rather than hand-transcribed.
+
+`POST /checkout_sessions/{id}/complete` is the single refusal point — it carries the delegated credential (Stripe Shared Payment Token, or a `vt_…` vault token under OpenAI's Delegate Payment spec). The other four operations work normally. Two pleasant surprises: ACP has **native `Idempotency-Key` headers** mapping straight onto our per-attempt discipline, and its *Delegate authentication* building block is **OAuth 2.0**, which is already our allowlisted-agent admission route from ADR-0012.
+
+### The finding worth putting on a slide
+
+AP2's `checkout_hash` — a signed mandate bound to the hash of a merchant-signed Checkout JWT — is **structurally the same primitive as our `cart_hash`**, a signed Authority bound to a merchant-signed Quote (§6.3). We arrived at it independently, and their Trusted Surface is our approve page.
+
+Written into the plan as "structurally the same primitive," deliberately not "identical" — the field sets differ and the claim has to survive someone opening both specs in front of you.
+
+### Budget unchanged
+
+A6 stays at 4h. ACP's published JSON Schema pays for the five endpoints; AP2-as-a-layer is cheaper than AP2-as-an-envelope would have been, and it reuses A4/A4c's ES256 verification rather than adding a second JWT verifier. Track P remains at −1.0h.
+
+---
+
 ## 2026-09-20 · D3 REVISED — all four protocols live (ACP and AP2 promoted)
 
 Operator asked for the ACP and AP2 translators. D3 previously shipped them declared-and-refused. They are now real translators alongside MCP and UCP.
