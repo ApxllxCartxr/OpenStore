@@ -4,6 +4,51 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · Pre-hour-0 validation — four defects found and fixed
+
+Last pass before the build starts. Cross-checked §16 against §6, §8 and §13, and checked whether hour 0 is executable as written. Four things were wrong.
+
+### 1 — The item count was wrong, and the way it was wrong was dangerous
+
+Claimed "exactly 16 Catalogue Items." The §8 table sums to **15** (tote 3 + cap 2 + ten singles), and §16.3 has 16 *rows* because one of them is `SD-TOTE-BLK-L`, the deliberately-absent combination.
+
+An agent building the seeder from a 16-row table told to produce 16 items would have seeded `SD-TOTE-BLK-L` — with zero stock or a null price — and broken **two** gates at once: "seed loads with zero null-stock rows" and "the unavailable combination renders as unavailable." The whole point of that row is that it does not exist.
+
+Corrected to **15** everywhere. The row is now struck through and labelled **DO NOT SEED**, with a sentence above the table saying it has 16 rows of which you seed 15, and why. Also fixed a broken markdown row in §8 that had swallowed the following paragraph into a table cell.
+
+### 2 — `core/codes.py` was assigned to two different hours
+
+Hour 0 said to commit it; A1 said to write it. Worse, hour 0 would have been writing into `src/openstore/sidecar/core/` before A1 created that layout.
+
+Hour 0 is now an **ordered seven-step checklist** where each step needs the one before: repo skeleton and `pyproject` first, then `codes.py` (**here, explicitly not in A1**), then `registry_diff.py` and the generated `docs/CODES.md`, then the `cart_hash` golden vectors, then the door and Quote JSON Schemas, then `.env.example`, then the D1 amendment. A1 now *wires codes.py into CI* rather than creating it.
+
+Added: **Track S does not wait for hour 0.** The `design/` import and app scaffolds depend on none of it, so an overrunning hour 0 does not idle the track that has no margin.
+
+### 3 — Inclusive-price arithmetic was unpinned, and it is the one place the money core eats itself
+
+§16 said prices are tax-inclusive but never said whether **shipping and discounts** are, never gave the inclusive-tax extraction formula, and — the real trap — never said how to split an **odd-paise tax into CGST and SGST**.
+
+The Merchant computes the Quote (B2) and the Gate re-checks it (A3). If they round differently by one paise, `quote-consistent` fires on a *correct* quote, and that presents as a bug in the money core rather than as a missing paragraph here. It would have been a genuinely miserable thing to debug at 3am.
+
+New **§16.11** pins the whole order of operations: fold Add-ons, apply discounts to inclusive amounts, apportion shipping by line inclusive total, largest-remainder with ties broken by SKU ascending, extract tax as `ROUND_HALF_UP(inclusive × rate_bp / (10000 + rate_bp))` in exact decimal, and split odd paise as `CGST = tax // 2, SGST = tax − CGST` — **SGST takes the odd paise**, stated once, never re-decided. `round_off_minor` is always `0` in v1, which removes a whole class of ambiguity.
+
+It closes with a **worked example**, computed and verified rather than illustrative: the demo basket to destination B gives subtotal 249800, shipping apportioned 3955 / 5945 (the leftover paise going to the larger fraction), IGST 15827 on the tote line, CGST 11894 / SGST 11894 on the service line, **total 259700 = ₹2,597.00**, with both GST splits in one Quote. That is now the first fixture, the Integration-1 expected output, and the demo's beat-4 number.
+
+### 4 — Shipping and discount inclusivity, marked where the values live
+
+`incl. GST` now appears on both shipping rows and `off the inclusive total` on both discount codes, because a value read in §16.5 is read without §16.11 open beside it.
+
+### Verified correct, not assumed
+
+- Demo basket clears every seeded policy limit: ₹2,597 against a ₹25,000 cap, 3 lines against a 10-line limit.
+- `SD-PLUSH-MINI` cap of 2 matches the §13 eighth-minute refusal beat; stock 10 supports it.
+- `SD-RECALLED` carries the `recalled` tag and §16.4 blocks that tag — the blocked check has something to refuse.
+- Both demo destinations avoid the `19xxxx` unserviceable range; 560038 matches the KA zone, 400028 the rest-of-India zone.
+- `SD-CHARMBAR-SEAT` at POS Karnataka against a Karnataka-registered Merchant yields CGST/SGST while the tote to Maharashtra yields IGST — the two-split basket works as claimed.
+- Three distinct GST rates (3 / 12 / 18%) are present in the seed, so apportionment is exercised rather than trivially correct.
+
+---
+
 ## 2026-09-20 · Unattended-run hardening — §0 rewritten, §16 added
 
 Requirement: the build runs overnight with nobody awake, so **no hour may contain a question**. Two problems, both fixed.
