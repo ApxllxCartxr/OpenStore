@@ -1,0 +1,63 @@
+{
+  "note": "Shared between the sidecar's verifier and the chat's signer (A4c). Both suites assert against this file, so a change to either end fails on both.",
+  "private_jwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "YP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Y",
+    "y": "eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk",
+    "kid": "chat-k1",
+    "alg": "ES256",
+    "use": "sig",
+    "d": "ya-p2EW6dRZrXCFXZ7HWk05Qw9s26JsSe4piKxIPZyE"
+  },
+  "public_jwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "YP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Y",
+    "y": "eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk",
+    "kid": "chat-k1",
+    "alg": "ES256",
+    "use": "sig"
+  },
+  "cases": [
+    {
+      "name": "search",
+      "method": "POST",
+      "target_uri": "https://spoiledduckie.localhost/agent/search",
+      "body": "{\"query\":\"black tote\"}",
+      "created": 1789900000,
+      "expires": 1789900030,
+      "nonce": "nonce-search",
+      "key_id": "chat-k1",
+      "content_digest": "sha-256=:LhrCBbozmxiAiCDujEXh6LegR9usRwd5PMFmsVEnOC4=:",
+      "signature_base": "\"@method\": POST\n\"@target-uri\": https://spoiledduckie.localhost/agent/search\n\"content-digest\": sha-256=:LhrCBbozmxiAiCDujEXh6LegR9usRwd5PMFmsVEnOC4=:\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\");created=1789900000;expires=1789900030;keyid=\"chat-k1\";alg=\"ecdsa-p256-sha256\";nonce=\"nonce-search\"",
+      "signature": "PFTl7r6Kw2enZKGRjXp7E2a5KZomY6dRWN1vYiEAkTmbKGpfZw4EECQPmBhhPw1IIhR2QTfgMtsG/ejt4gkz5Q=="
+    },
+    {
+      "name": "empty-body",
+      "method": "POST",
+      "target_uri": "https://spoiledduckie.localhost/agent/tools/list",
+      "body": "",
+      "created": 1789900000,
+      "expires": 1789900030,
+      "nonce": "nonce-empty-body",
+      "key_id": "chat-k1",
+      "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+      "signature_base": "\"@method\": POST\n\"@target-uri\": https://spoiledduckie.localhost/agent/tools/list\n\"content-digest\": sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\");created=1789900000;expires=1789900030;keyid=\"chat-k1\";alg=\"ecdsa-p256-sha256\";nonce=\"nonce-empty-body\"",
+      "signature": "+/uXhipdfr6/TrSL4QhVbCjxUDMCrjScL3nlYiId3/hXhiW96X6en+fFabvR/3qkBX+dlmIj9+uLqndjZoewcg=="
+    },
+    {
+      "name": "unicode",
+      "method": "POST",
+      "target_uri": "https://spoiledduckie.localhost/agent/search",
+      "body": "{\"query\":\"\u092c\u0947\u0902\u0917\u0932\u0941\u0930\u0941\"}",
+      "created": 1789900000,
+      "expires": 1789900030,
+      "nonce": "nonce-unicode",
+      "key_id": "chat-k1",
+      "content_digest": "sha-256=:YXIMpwyqoGz4rF2cQN8WQBOJzO0dCqUgte9lQax2rEA=:",
+      "signature_base": "\"@method\": POST\n\"@target-uri\": https://spoiledduckie.localhost/agent/search\n\"content-digest\": sha-256=:YXIMpwyqoGz4rF2cQN8WQBOJzO0dCqUgte9lQax2rEA=:\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\");created=1789900000;expires=1789900030;keyid=\"chat-k1\";alg=\"ecdsa-p256-sha256\";nonce=\"nonce-unicode\"",
+      "signature": "Ay7t1sytbMoNLK0bJ2KNOtPqo9TRkCz3RuxydctgE536DMej8YW0huz6V07S5INjOuRRdvOAjIWCzBsi6N8+CQ=="
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+/* Claude-shaped: a centred 68ch column, message rows, streaming text.
+   `--accent-2` is primary here so chat and shop never look like the same app
+   (§4). Same tokens, different weighting. */
+@import '../../../design/tokens.css';
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); }
+
+.mono, code, .price, .sku { font-family: 'Iosevka Term SS08', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums; }
+.chat-name { font-family: 'EB Garamond', Georgia, serif; }
+
+.thread { max-width: 68ch; margin: 0 auto; padding: 1.5rem 1rem 8rem; }
+.row { margin-bottom: 1.5rem; }
+.row[data-who='consumer'] { text-align: right; }
+.bubble { display: inline-block; text-align: left; max-width: 90%; padding: 0.75rem 1rem;
+  border: 1px solid var(--line); background: var(--raised); }
+.row[data-who='consumer'] .bubble { background: var(--bg-sunken); }
+
+/* Tool-call cards expand to the exact request JSON — the Consumer can always
+   see precisely what was asked for, which is the difference between a tool call
+   and a black box. */
+.tool { border: 1px solid var(--line); background: var(--bg-sunken); padding: 0.5rem 0.75rem; }
+.tool summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.tool pre { overflow-x: auto; font-size: 0.8125rem; }
+
+.modal-scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: 1rem; }
+.modal { background: var(--raised); border: 1px solid var(--line); padding: 1.25rem; max-width: 40rem; width: 100%; }
+
+button, .button { min-height: 44px; padding: 0 1rem; border: 1px solid var(--line);
+  background: var(--accent-2); color: var(--paper); font: inherit; cursor: pointer; }
+button.secondary { background: var(--raised); color: var(--ink); }
+button[disabled] { background: var(--bg-sunken); color: var(--comment); cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+
+.pill { display: inline-block; padding: 0.125rem 0.5rem; border: 1px solid var(--line); font-size: 0.8125rem; }
+.pill[data-b='sold-out'] { color: var(--comment); }
+.pill[data-b='low-stock'] { color: var(--accent); }
+.pill[data-b='in-stock'] { color: var(--ok); }
+
+.quote-line { display: flex; justify-content: space-between; gap: 1rem; }
+.quote-total { border-top: 1px solid var(--line); padding-top: 0.5rem; margin-top: 0.5rem; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

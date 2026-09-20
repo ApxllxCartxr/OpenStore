@@ -399,3 +399,77 @@ def test_a_rate_limit_refusal_does_not_count_down() -> None:
     with pytest.raises(TraitError) as exc:
         limiter.check("code-attempt", "ord_1", now=100.0)
     assert "remaining" not in exc.value.detail
+
+
+# ── A4c: the shared vectors, from the verifier's end ─────────────────────────
+
+
+def _vectors() -> dict[str, object]:
+    import json
+    from pathlib import Path
+
+    return json.loads(Path("tests/GOLDEN/rfc9421/vectors.json").read_text(encoding="utf-8"))
+
+
+def test_the_shared_vectors_verify_here_too() -> None:
+    """The **same fixture** `demo/buyer-chat/tests/signature-vectors.test.ts`
+    asserts against.
+
+    A4c's whole point: the signer and the verifier were written in one sitting
+    against one set of vectors, so a drift on either end fails on both. Without
+    a shared fixture the two halves agree only until somebody edits one.
+    """
+    from openstore.sidecar.admission.signatures import content_digest, signature_base
+
+    data = _vectors()
+    jwks = {"keys": [data["public_jwk"]]}
+    for case in data["cases"]:  # type: ignore[union-attr]
+        body = str(case["body"]).encode()
+        assert content_digest(body) == case["content_digest"], case["name"]
+        assert (
+            signature_base(
+                method=str(case["method"]),
+                target_uri=str(case["target_uri"]),
+                content_digest_value=str(case["content_digest"]),
+                created=int(case["created"]),  # type: ignore[arg-type]
+                expires=int(case["expires"]),  # type: ignore[arg-type]
+                nonce=str(case["nonce"]),
+                key_id=str(case["key_id"]),
+            ).decode()
+            == case["signature_base"]
+        ), case["name"]
+
+        SignatureVerifier().verify(
+            jwks=jwks,
+            method=str(case["method"]),
+            target_uri=str(case["target_uri"]),
+            body=body,
+            content_digest_header=str(case["content_digest"]),
+            signature_b64=str(case["signature"]),
+            created=int(case["created"]),  # type: ignore[arg-type]
+            expires=int(case["expires"]),  # type: ignore[arg-type]
+            nonce=str(case["nonce"]),
+            key_id=str(case["key_id"]),
+            now=int(case["created"]),  # type: ignore[arg-type]
+        )
+
+
+def test_a_corrupted_vector_is_rejected_with_a_named_code() -> None:
+    """A4c's gate from this end: the chat asserts the same refusal."""
+    data = _vectors()
+    case = data["cases"][0]  # type: ignore[index]
+    with pytest.raises(SignatureRefused, match="does not verify"):
+        SignatureVerifier().verify(
+            jwks={"keys": [data["public_jwk"]]},
+            method=str(case["method"]),
+            # The redirected target — same signature, different request.
+            target_uri="https://spoiledduckie.localhost/agent/place-order",
+            body=str(case["body"]).encode(),
+            content_digest_header=str(case["content_digest"]),
+            signature_b64=str(case["signature"]),
+            created=int(case["created"]),
+            expires=int(case["expires"]),
+            nonce=str(case["nonce"]),
+            key_id=str(case["key_id"]),
+            now=int(case["created"]),
+        )

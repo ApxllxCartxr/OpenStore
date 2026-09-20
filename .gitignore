@@ -30,3 +30,5 @@ htmlcov/
 node_modules/
 .svelte-kit/
 demo/*/build/
+demo/*/data/
+demo/buyer-chat/*.db
