@@ -38,7 +38,7 @@ _Avoid_: cart, ticket, hold
 
 **Catalogue Item**:
 The sellable unit: one resolved combination of options — black tote in size M — owning its own SKU, price, stock, low-stock threshold, HSN/SAC, and GST rate. This is what a cart line, a reservation, and an Attestation all refer to. Truth lives with the Merchant.
-_Avoid_: product, listing, style, parent
+_Avoid_: product, listing (a Listing is a directory record, never a Catalogue Item), style, parent
 
 **Product Group**:
 A presentation-only grouping of Catalogue Items sharing a page, gallery, copy, and option axes (colour, size). Never sellable, never reserved, never a cart line; Policy caps are evaluated at this level so two colours of one limited item cannot walk through a per-order cap.
@@ -139,3 +139,19 @@ _Avoid_: channel, marketplace, platform, mall
 **Product Feed**:
 The read-only export of the exposed catalogue in Google Merchant Center product-data attribute names, one entry per Catalogue Item grouped by `item_group_id`, served at a stable public URL for a registry to fetch on a schedule. Advertised prices only — the Quote remains the authoritative number, and drift between them surfaces as `price-changed`.
 _Avoid_: catalogue dump, sync, listing export
+
+**Listing**:
+A Merchant's own signed, self-published directory record — name, category, region, sidecar URL, public key, protocols, `verified_as_of` — emitted by its sidecar and carried verbatim by any Index. A record of a *store*, never of a product: a Catalogue Item is never a Listing. Its `region` is where the store is, and is never a Place of Supply — the two words touch nothing in common.
+_Avoid_: entry, profile, product listing, storefront record
+
+**Index**:
+A queryable store of Listings, filtered by category and region only and returned verbatim and unranked (ADR-0022). Ranking is the Directory Client's job, never the Index's, and no Index is privileged over any other.
+_Avoid_: mall, marketplace, search engine, directory service
+
+**Mirror**:
+An independently-run Index built from the published Listing format and feed with no coordination with anyone. The Reference Index OpenStore runs is one Mirror among any number and holds no feature the rest cannot have.
+_Avoid_: replica, cache, partner index, secondary
+
+**Directory Client**:
+Whoever queries an Index — a Buyer Agent or a human — and who does all the ranking the Index refuses to do.
+_Avoid_: search client, index consumer, crawler
