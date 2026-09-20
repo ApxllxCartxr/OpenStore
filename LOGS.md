@@ -4,6 +4,45 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · Unattended-run hardening — §0 rewritten, §16 added
+
+Requirement: the build runs overnight with nobody awake, so **no hour may contain a question**. Two problems, both fixed.
+
+### Problem 1 — §0 literally instructed the executor to stop and ask
+
+The old protocol said "stop and ask" under rule 1 and "3. Ask." under *When blocked*. That is exactly the 3am wake-up, written into the plan as policy.
+
+§0 now opens with **"never ask, decide by the ladder"**, a four-step resolution order that always terminates in action:
+
+1. §16 Pinned values → 2. `SPEC.md` + its ADR → 3. §6 + phase text → 4. **take the most conservative option that keeps the gates reachable, log it under `## OPEN — <phase>`, continue.**
+
+Conservative is defined rather than left to taste: fail loud over coerce, refuse over allow, narrower over wider, existing identifier over new one.
+
+**"Blocked" is now narrowed to one case only** — a gate that cannot go green without changing a frozen §6 contract. Everything else is a decision, not a block. Even then the instruction is: log it, build the rest of the phase, commit, **move to the next phase**. Never wait.
+
+Rule 1 also softened in the right direction: adding a genuinely missing code **to the registry and §6 in one commit** is now explicitly allowed and logged, because the old wording ("stop and ask") turned a five-minute registry edit into a stalled track. Inventing one at a call site is still a red build.
+
+Added alongside: **overrun rule** (a phase more than 50% over budget takes the next §12 cut rather than grinding), **commit at every phase boundary even if cut short** (a run that dies at hour 19 should leave 18 committed hours, not an uncommitted tree), and a **morning report** spec for `LOGS.md` — phases with gate output pasted, every `## OPEN —`, every `## BLOCKED —`, every cut with its hour. Gate output is now required every time, not "if in doubt": an unattended run's claim that something passed is worth exactly what the pasted output under it is worth.
+
+### Problem 2 — the real blocker was unpinned values, not the ask rule
+
+Sweeping for open decisions turned up the larger issue: **the seed named 16 items and priced none of them.** No GST rates, no HSN codes, no stock counts, no thresholds, no GSTIN, no registered state, no addresses, no discount codes, no rate-limit numbers, no COD delivery window, no DB names or roles, no admin credentials, no scripted-driver transcript. An agent at hour 2.5 would have invented all of it — and then the golden vectors, the two-GST-split test and the demo script would all have rested on values nobody chose.
+
+New **§16 Pinned values**, 11 subsections: infrastructure and ports, merchant tax identity, the full 16-item catalogue with prices/HSN/GST/stock/thresholds, seeded policy, shipping zones and the two demo destinations, discount codes, every timing, every rate limit, the `scripted` driver's exact tool-call sequence, fake-provider behaviour, and an explicit list of what is deliberately *not* pinned (copy, images, component structure).
+
+Choices worth recording:
+
+- **Three GST rates** (3% / 12% / 18%) rather than one, so apportionment and largest-remainder rounding are actually exercised instead of trivially correct.
+- **Karnataka (29) as the registered state**, destinations Bengaluru 560038 (intra) and Mumbai 400028 (inter). `SD-CHARMBAR-SEAT` is a service fixed at Place of Supply Karnataka regardless of destination — that single row is what makes a two-place-of-supply basket possible, and both the Integration-1 smoke test and demo beat 4 depend on it.
+- **Tax-inclusive pricing** (Indian MRP), so tax lines are `informational: true` and must not be added again. The inverted case is still seeded and tested, because getting it backwards double-charges every order.
+- **GSTIN `29AABCS1429B1ZQ` is fabricated** — correct in shape, belonging to nobody, and marked as such in place so it is never presented as real.
+- **No invented version numbers.** Dependencies are resolved by `pnpm add` / `uv add` at hour 0 and pinned by committed lockfiles. This covers `http-message-signatures` and the B3 table primitive.
+- All 128-bit values come from `secrets.token_bytes(16)` / `crypto.randomBytes(16)` — stated because "unguessable" without a named source is how a demo ends up seeding from a timestamp.
+
+Cross-references added at every point where a value was previously left open: B1's seed points at §16.3 as authoritative, A7's console tabs name their seeded values, A4's rate limits point at §16.8, A1's `.env.example` at §16.1, D7 at §16.9, and the demo script and Integration-1 command now name the exact SKUs, destinations and codes they use.
+
+---
+
 ## 2026-09-20 · CONFIGURATION DECIDED — Option B, two builders, no third
 
 The §12 hour-0 decision is made and closed. **Option B: two builders, cuts 5 and 4a in force from hour 0.** Anyone or anything executing the plan takes this as given and does not re-open it.

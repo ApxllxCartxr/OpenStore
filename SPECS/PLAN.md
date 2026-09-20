@@ -2,7 +2,9 @@
 
 One document, start to end. Scope is the whole product spine across all three surfaces, built in two days, reusing what already works on `main`. `SPEC.md` is the law this implements; `CONTEXT.md` is the vocabulary; `docs/adr/` are the settled decisions. Where this plan departs from `SPEC.md`, the departure is named in §2 with a reason — nowhere else.
 
-Read order for anyone picking this up cold: §0 (how to execute) → §1 (what ships) → §2 (decisions) → §3 (reuse map) → §6 (frozen contracts) → your surface (§7/§8/§9) → §12 (schedule).
+Read order for anyone picking this up cold: §0 (how to execute) → §1 (what ships) → §2 (decisions) → §3 (reuse map) → §6 (frozen contracts) → **§16 (every pinned constant)** → your surface (§7/§8/§9) → §12 (schedule).
+
+**Running this unattended?** §0 is binding and §16 is where every value lives. The plan is written so that nothing has to be asked mid-run.
 
 ---
 
@@ -10,34 +12,50 @@ Read order for anyone picking this up cold: §0 (how to execute) → §1 (what s
 
 This section binds anyone executing the plan — human or agent. It exists because the expensive failures in a 48-hour build are not hard problems; they are small ambiguities resolved silently in the wrong direction.
 
+### The first rule: never ask, decide by the ladder
+
+**This build runs unattended. Nobody is awake. There is no one to ask.**
+
+Every question you can hit has an answer somewhere in this document, and §16 pins every constant the build needs — ports, credentials, prices, GST rates, addresses, timings, rate limits. When something still seems undecided, you resolve it yourself by this ladder, in order, and **keep going**:
+
+1. **§16 Pinned values.** If the thing is a constant, it is there. Use it exactly.
+2. **`SPEC.md`, then the ADR it points to.** These are law and they are specific.
+3. **§6 frozen contracts**, then the phase text.
+4. **Still undecided → take the most conservative option that keeps the DONE WHEN gates reachable, write it in `LOGS.md` under `## OPEN — <phase>` with the reasoning, and continue.** Conservative means: fail loud over coerce, refuse over allow, narrower scope over wider, existing identifier over new one.
+
+**Never stop and wait. Never leave a phase half-built pending an answer.** A decision logged and moved past can be reversed in the morning in five minutes; a track stalled at 3am cannot be recovered at all.
+
+The one exception: if resolving it would require **changing a frozen contract in §6** (the nine doors, the Quote, the `cart_hash` preimage, the closed sets), do not change it. Build everything else in the phase, log it under `## BLOCKED — <phase>`, and move to the next phase. Frozen contracts are frozen because everything downstream pins their bytes.
+
 ### Three standing rules
 
-1. **Never invent an identifier.** Reason codes, statuses, scopes, ledger kinds, door names, field names, and route paths come from §6 or from `core/codes.py`. If the thing you need is not there, **stop and add it to §6 and the enum in the same commit**, or stop and ask. A code invented at a call site is a red build by design — that is the guardrail working, not an obstacle to route around.
-2. **Never widen scope to make a test pass.** If a DONE WHEN gate fails, the fix is in the code under test or the gate was wrong. If the gate was wrong, say so in `LOGS.md` and change it deliberately. Deleting a gate, loosening an assertion, or adding a special case to satisfy one is the one move that makes the remaining hours worthless.
-3. **When two parts of this document disagree, `SPEC.md` wins, then §6, then the phase text.** Record the disagreement in `LOGS.md`. Do not pick the more convenient reading and move on.
+1. **Never invent an identifier.** Reason codes, statuses, scopes, ledger kinds, door names, field names, and route paths come from §6 or from `core/codes.py`. If the thing you need genuinely is not there, **add it to §6 and the enum in the same commit and log it** — do not add it at a call site, and do not wait for permission. A code invented at a call site is a red build by design; a code added to the registry is a decision, which is allowed.
+2. **Never widen scope to make a test pass.** If a DONE WHEN gate fails, the fix is in the code under test, or the gate was wrong. If the gate was wrong, say so in `LOGS.md` and change it deliberately. Deleting a gate, loosening an assertion, or adding a special case to satisfy one is the single move that makes the remaining hours worthless.
+3. **When two parts of this document disagree, `SPEC.md` wins, then §16, then §6, then the phase text.** Record the disagreement in `LOGS.md`. Do not pick the more convenient reading and move on silently.
 
 ### Order of work
 
 Phases run in the order given in §12 and **not in parallel within a track**. A phase is not started until the previous phase's DONE WHEN gates are green, because every gate downstream assumes them.
 
+**If a phase overruns its budget by more than 50%**, do not keep grinding: take the next available cut from §12's list, log it, and move on. Finishing eight phases and cutting two beats finishing six perfectly.
+
 ### Commit discipline
 
-- One commit per phase minimum, more if the phase has natural seams. Conventional prefixes (`feat:`, `fix:`, `test:`, `docs:`, `chore:`).
+- One commit per phase minimum, more if the phase has natural seams. Conventional prefixes (`feat:`, `fix:`, `test:`, `docs:`).
 - The commit message names the phase (`feat(A3): gate decide/settle + ledger invariants`).
 - **Never `git add .`** — stage the files the phase names.
 - A commit whose CI is red is not a finished phase.
+- **Commit at every phase boundary even if the phase was cut short.** An unattended run that dies at hour 19 should leave eighteen hours of committed work, not an uncommitted tree.
 
-### When blocked
+### The morning report
 
-Blocked means: a DONE WHEN gate cannot be made green without either changing a frozen contract in §6 or guessing at something this document does not say. When blocked:
-
-1. Write what is blocking into `LOGS.md` with the phase and the exact gate.
-2. Do everything else in the phase that does not depend on the answer.
-3. Ask. Do not guess at a frozen contract, and do not invent an identifier to get moving.
+At the end of the run, `LOGS.md` must contain, in this order: every phase with its gates green or not, every `## OPEN —` decision taken by ladder step 4, every `## BLOCKED —` item, and every cut taken with the hour it was taken at. That file is the handover. Write it as you go, not at the end.
 
 ### What "done" means
 
-A phase is done when its DONE WHEN gates are green, its files exist, CI is green, and it is committed. Not when the code is written. **Never report a phase complete without running its gates** — paste the output into `LOGS.md` if there is any doubt about it.
+A phase is done when its DONE WHEN gates are green, its files exist, CI is green, and it is committed. Not when the code is written. **Never report a phase complete without running its gates** — paste the output into `LOGS.md` every time, not only when in doubt. An unattended run's claim that something passed is worth exactly what the pasted output under it is worth.
+
+**Blocked** means one thing only: a DONE WHEN gate cannot be made green without changing a frozen contract in §6. Everything else is a decision, and the ladder resolves it. When genuinely blocked: log it under `## BLOCKED — <phase>` with the exact gate, build everything else in the phase, commit, and **move to the next phase**. Never wait.
 
 ---
 
@@ -115,7 +133,7 @@ The Merchant site owns customer comms (`SPEC.md §10`) and in the MVP it "sends"
 
 ### D7 — The buyer chat's model seam defaults to a deterministic planner
 
-Ollama has no models pulled on this machine and a 5GB download mid-demo is a failure mode we choose not to have. The seam is real (`plan(messages, tools) -> ToolCall[]`) with three drivers: `scripted` (deterministic, the demo default and what CI runs), `ollama` (any tool-calling model, `qwen2.5:7b` recommended), and `anthropic` (Claude, if a key is in `.env`). The chat *looks* identical across all three because the model only ever proposes — deterministic code validates against real Merchant data before anything renders (`PLAN-buyer-chat.md B1`). The scripted driver is therefore not a fake demo; it is the same path with the proposer pinned.
+Ollama has no models pulled on this machine and a 5GB download mid-demo is a failure mode we choose not to have. The seam is real (`plan(messages, tools) -> ToolCall[]`) with three drivers pinned in §16.9: `scripted` (deterministic, the demo default and what CI runs, with its exact tool-call sequence written out), `ollama` (`qwen2.5:7b`), and `anthropic` (`claude-sonnet-5`). Neither of the latter two is ever required for the demo or for CI. The chat *looks* identical across all three because the model only ever proposes — deterministic code validates against real Merchant data before anything renders (`PLAN-buyer-chat.md B1`). The scripted driver is therefore not a fake demo; it is the same path with the proposer pinned.
 
 ### D8 — TLS and DNS are out; the origin contract is in
 
@@ -399,7 +417,7 @@ The Transcript is byte-stable and stored with the decision. Every check's result
 - `core/codes.py`: every closed set from §6.4 as a Python enum. `scripts/registry_diff.py` generates `docs/CODES.md` and CI diffs it.
 - Money lint (paise integers, no float anywhere in a money path) and time lint (UTC, no naive datetimes) as AST checks over `sidecar/`.
 - Import-firewall test: walks all four roots, asserts no cross-root import in runtime, types, or tests, and asserts `design/` holds only asset extensions.
-- `.env.example` fresh: provider keys, webhook secret, RP ID + origin (= the Merchant domain), signing key path, OAuth credentials, `OPENSTORE_DEV_PROFILE_HOSTS` (empty, documented in place as the SSRF exception it is), `DEPLOY_PSEUDONYM_KEY`.
+- `.env.example` fresh, with **every variable named in §16.1**: provider keys, webhook secret, RP ID + origin (= the Merchant domain), signing key path, OAuth credentials, DB URLs and roles, `ADMIN_SEED_PASSWORD`, `OPENSTORE_DEV_PROFILE_HOSTS` (empty, documented in place as the SSRF exception it is), `DEPLOY_PSEUDONYM_KEY`. Secrets are generated by `openstore_up.py`, never hand-written.
 - **DONE WHEN**: app boots behind the proxy split; harness goes red on three planted violations (unregistered code, float money, cross-root import) and green otherwise.
 
 ### A2 · Trait client + conformance fake — 2h
@@ -429,7 +447,7 @@ The Transcript is byte-stable and stored with the decision. Every check's result
   - **One path has no payer handle**: a COD order authorized by the `passkey` mechanism never touches a payment rail, so there is no VPA to derive from. There, the **passkey credential ID** is the handle source, and the Transcript records which source was used (`payer-handle` or `credential-id`) so the derivation is never ambiguous to a verifier. Leaving this unstated would produce a null `consumer_id` on exactly the path where attribution matters most.
 - `admission/` — two routes, one authority. OAuth client-credentials for allowlisted agents; self-registration for strangers: fetch the Agent Profile from its well-known URL, pin its ES256 JWKS, verify RFC 9421 signatures (method, target, `Content-Digest` per RFC 9530, `created`, `expires`, nonce, short window) on every call, `agent_id` = RFC 7638 thumbprint, issue a short token on the spot.
 - **The profile fetcher is an SSRF sink and is hardened as one**: HTTPS only, public IPs only, loopback / RFC1918 / link-local / `169.254.169.254` refused, resolve-then-pin against DNS rebinding, no cross-host redirects, hard size and timeout caps, its own registration rate limit. The dev exception (`OPENSTORE_DEV_PROFILE_HOSTS`) admits **named hosts only, never a CIDR**, **permits `http` for exactly those entries** (§10.1 — without this the demo's own chat is refused by our own hardening), keeps the metadata address refused unconditionally, logs every use, flags it in health output and the `/agentic` banner, and **refuses to boot alongside live provider keys**. A bypass that is silent, broad, or bootable in production is how bypasses reach production.
-- Rate limits: per-tier (self-registered low, allowlisted high) and per-IP on every `/agent/*` route, with separate throttles on tap-token issuance, approve attempts, and discount-code attempts. Every wrong code refuses as the same `code-invalid` with **no message and no timing tell** — otherwise door 9 answers "is this a code?" all day.
+- Rate limits **per §16.8**: per-tier (self-registered low, allowlisted high) and per-IP on every `/agent/*` route, with separate throttles on tap-token issuance, approve attempts, and discount-code attempts. Every wrong code refuses as the same `code-invalid` with **no message and no timing tell** — otherwise door 9 answers "is this a code?" all day.
 - `/agentic/approve?t=<one-time, 5-min, single-use>` — the tap page. Optional `Have a code?` field for `private` codes: applying one re-calls door 9, re-renders the total, and rebinds the ceremony to the post-application `cart_hash` **before anything is signed**, so the code never transits the agent. Auto-return via a resume URL carrying an **unguessable, single-use, session-bound** token that resolves to `order_id` + `chat_thread_id` server-side — never those two as bare URL parameters, which would hand anyone with the link someone else's checkout.
 - Order lifecycle through the trait, **8 statuses on both paths**: `pending` (24h, ₹0, **no stock held** — that window is the Quote's validity, not an inventory hold) → `confirmed` (stock held by door 3) → `paid` / `cancelled` / `expired` / `failed` / `refunded` / `completed`. Tap, expiry, shop-reject, and COD collection all serialize on one `set-status` key.
   - **Prepaid**: `confirmed` means the Consumer initiated payment; it is time-boxed to the payment link's own expiry, default 15 min and never longer than the Provider's lifetime, because an abandoned tap must not hold stock.
@@ -478,9 +496,9 @@ So whoever writes the verifier writes the signer, in the same sitting, against t
 Instrument-panel styling per §4. Tabs:
 
 - **Keys** — enroll / rotate (additive by `kid`, never re-signs history) / revoke (invalidates the future, not the past) / export. First run refuses to continue until the encrypted export is acknowledged as saved.
-- **Policy** — window / count / qty / blocked / tags / caps, CRUD, with caps evaluated at the Product Group stated in the UI so nobody wonders.
-- **Provider** — adapter, enabled method subset, webhook status, link lifetime.
-- **Authority** — which kinds this Merchant accepts.
+- **Policy** — window / count / qty / blocked / tags / caps, CRUD, with caps evaluated at the Product Group stated in the UI so nobody wonders. **Seeded values in §16.4.**
+- **Provider** — adapter, enabled method subset, webhook status, link lifetime. **Seeded: `fake`, methods `upi` + `cash-on-delivery`, link lifetime 15 min (§16.4, §16.7).**
+- **Authority** — which kinds this Merchant accepts. **Seeded: `upi-pin`, `passkey`, `confirmed-intent`; mechanisms `upi-verify` + `passkey` (§16.4).**
 - **Exposure** — which policies are public to agents.
 - **Agents** — allowlist, blocklist, tier, `agent_id`, last seen, revoke.
 - **Receipts** — list, open, verify-in-browser.
@@ -522,7 +540,7 @@ Instrument-panel styling per §4. Tabs:
 
 Why one `stock` row per **item** and not per group: one count for "the tote" would let black selling out mark red sold out, and would point `reserve`'s compare-and-set at the wrong row.
 
-**Seed — 12 Product Groups → exactly 16 Catalogue Items.** Counted, not estimated, because the seeder is a checklist and "~20" is how a seed ends up with a group that has no sellable item in it:
+**Seed — 12 Product Groups → exactly 16 Catalogue Items.** Counted, not estimated, because the seeder is a checklist and "~20" is how a seed ends up with a group that has no sellable item in it. **§16.3 carries the authoritative table with every price, HSN, GST rate, stock count and threshold — build the seed from that, not from this summary**, and §16.2/16.4/16.5/16.6 carry the tax identity, policy, zones and codes:
 
 | # | Product Group | Axes | Items | Note |
 |---|---|---|---|---|
@@ -813,7 +831,7 @@ Each is a hard gate. If it does not pass, the tracks do not move on — they fix
 ```
 make up
 uv run pytest tests/trait_conformance -k real_store   # A2's suite, pointed at Postgres not the fake
-uv run python scripts/smoke_quote.py                  # mixed basket: tote + charm-bar seat
+uv run python scripts/smoke_quote.py                  # SD-TOTE-BLK-M + SD-CHARMBAR-SEAT → destination B (§16.5)
 ```
 Expect: conformance green against the real store; the quote shows **CGST/SGST on one line and IGST on the other**; `reserve` under 50-way concurrency on 5 units yields exactly 5; two identical `quote` calls are byte-identical and contain **no date**.
 
@@ -858,13 +876,13 @@ Note that cuts 1–3 are all Track P, which has the margin — so the first thre
 1. **`spoiledduckie.localhost`** — a real shop. Scroll the home page. Open the tote. Pick black, size M; watch the price and the stock pill resolve to *that* variant. Note the JSON-LD in view-source. *(60s)*
 2. **`chat.localhost`** — a chat that has never heard of this shop. Paste the URL. It fetches the card, pins the key, publishes its own Profile, and is admitted with no Merchant action. Show the `/agentic` Agents tab gaining a row, live. *(60s)*
 3. **Shop by conversation.** "Find me a black tote and gift-wrap it." Permission modal shows the exact JSON — `Allow once`. Result cards. Picker resolves the variant. Gift-wrap attaches to the tote line. Add the charm-bar seat too — *this basket now carries two places of supply*. *(90s)*
-4. **Address and quote.** Type a Karnataka address, then a Maharashtra one; watch CGST/SGST become IGST. The chat renders the Merchant's signed Quote verbatim and sums nothing. Countdown starts. *(60s)*
-5. **The tap.** `Place order` → same-domain approve page → enter the private discount code *here, never in the chat* → total re-renders and rebinds → approve the fake UPI collect → auto-return with the thread exactly as it was. Receipt. *(60s)*
+4. **Address and quote.** Type destination **A** (Bengaluru, 560038), then destination **B** (Mumbai, 400028) — both in §16.5; watch CGST/SGST become IGST on the tote while the charm-bar seat stays CGST/SGST, because a service is taxed where it is performed. The chat renders the Merchant's signed Quote verbatim and sums nothing. Countdown starts. *(60s)*
+5. **The tap.** `Place order` → same-domain approve page → enter the private code `DUCK-7F3K-9QWX` (§16.6) *here, never in the chat* → total re-renders and rebinds → approve the fake UPI collect → auto-return with the thread exactly as it was. Receipt. *(60s)*
 6. **The proof.** `openstore verify bundle.json` → green, printing the Authority kind and its Binding rather than an unqualified "verified." Flip one byte → red, naming the exact link. Then open admin, refund half, and show v2 appended while v1 stays verifiable. *(60s)*
 
 7. **Cash on delivery**, which is ~60% of Indian ecommerce and the thing every competitor's demo quietly omits. Same basket, choose COD: the sidecar calls no provider, writes no Ledger entry, and holds the stock anyway. Dispatch it from admin — a gapless invoice number lands while the order is still `confirmed`, before `paid` exists — then Record collection and watch a `CAPTURE` appear with no `RESERVE` in front of it. Say out loud that **the Merchant asserts the cash and nothing here can check it**, that this is correct because it is their money and their Ledger, and that what `confirmed-intent` bought them is evidence the basket was committed to by someone holding a real funding instrument, not a phone number. *(75s)*
 
-**If there is an eighth minute**, show a refusal: set a 2-per-order cap on the plush mini, try to buy one of each colour, and watch `cap-exceeded` fire because caps evaluate at the Product Group. That is the whole thesis in one refusal.
+**If there is an eighth minute**, show a refusal: `SD-PLUSH-MINI` already carries a 2-per-order cap (§16.4), so try for three and watch `cap-exceeded` fire — evaluated at the Product Group, so taking one of each variant cannot walk around it either. That is the whole thesis in one refusal.
 
 **If someone asks about RTO** — and in an Indian room someone will — hit Record RTO instead: `cancelled`, reason `rto`, every line restocked, and an empty Ledger, because nothing ever moved.
 
@@ -893,3 +911,174 @@ Beyond the D-decisions in §2, and unchanged from `SPEC.md §13`: campaigns, rul
 And one exclusion that is the product rather than a gap: **delegated agent-held payment credentials** — Shop Pay tokens, ACP shared payment tokens — are refused on purpose. They are exactly the authority we removed from agents. It costs us native in-agent completion on the gated surfaces and we pay it. Say so on stage, with the reason, before anyone asks.
 
 Distribution — the permissionless doors that make any of this reachable — is phase two and is specced in `PLAN-distribution.md`. It starts after the install gate, not before. Reach earned before install is reach wasted.
+
+---
+
+## 16. Pinned values — every constant the build needs
+
+**Nothing in this section is a suggestion.** It exists so that an unattended run never has to invent a price, a port, a tax rate or a timeout. If a value is here, use it exactly; if you need one that is not here, take ladder step 4 in §0 and log it.
+
+All money is **paise** (integer). All time is **UTC**. Currency is **INR** everywhere; there is no second currency and no conversion anywhere in v1.
+
+### 16.1 Infrastructure
+
+| Thing | Value |
+|---|---|
+| Browser origin, shop | `http://spoiledduckie.localhost` |
+| Browser origin, chat | `http://chat.localhost` |
+| WebAuthn RP ID | `spoiledduckie.localhost` |
+| Caddy | `:80`, two site blocks |
+| store | `:3000`, SvelteKit + `adapter-node` |
+| sidecar | `:8000`, FastAPI + uvicorn |
+| buyer-chat | `:3001`, SvelteKit + `adapter-node` |
+| postgres | `:5432`, image `postgres:17-alpine` |
+| Merchant DB / role | database `spoiledduckie`, role `sd_app` |
+| Sidecar DB / role | database `sidecar`, role `sc_app` |
+| Cross-grant | **none** — a test asserts `sc_app` cannot `SELECT` any `spoiledduckie` table |
+| Chat DB | SQLite at `/data/chat.db` in its own volume |
+| Python | 3.12 (`requires-python = ">=3.12,<3.13"`, as `main`) |
+| Node | 26.x (the version on this machine — pin it in `.nvmrc` and `engines`) |
+| Package managers | `uv` for Python, `pnpm` for both SvelteKit roots |
+
+**Dependency versions:** do not invent version numbers. At hour 0, `pnpm add` / `uv add` each dependency, **commit the lockfiles**, and never upgrade mid-build. The lockfile is the pin. This applies to `http-message-signatures` (A4c) and to the headless table primitive (B3).
+
+**Secrets** are generated by `scripts/openstore_up.py` into `.env` at first boot — never hand-written, never committed. Demo admin login is seeded as `operator@spoiledduckie.test` with the password written to `.env` as `ADMIN_SEED_PASSWORD` and printed once by the install script. All 128-bit values (`order_salt`, `receipt_id`, tap tokens, resume tokens) come from `secrets.token_bytes(16)` / `crypto.randomBytes(16)` — never from `random`, never from a timestamp.
+
+### 16.2 Merchant tax identity
+
+| Field | Value |
+|---|---|
+| Legal name | SpoiledDuckie Accessories |
+| GSTIN | `29AABCS1429B1ZQ` — **fabricated for the demo**, correct in shape (state `29` + PAN + entity `1` + `Z` + check char) and belonging to nobody. Never present it as real. |
+| Registered state | **Karnataka (29)** — this is the "home state" every intra/inter decision compares against |
+| Price display | **tax-inclusive** (`tax_inclusive: true`) — Indian MRP convention, so seeded prices already contain GST and tax lines are `informational: true` |
+| Invoice series | `SD/2026-27/0001`, incrementing, gapless, financial year **1 April – 31 March** |
+
+### 16.3 The seed catalogue — 12 groups, 16 Catalogue Items
+
+Prices are MRP (GST inside). Three distinct GST rates are deliberate: they make the apportionment and largest-remainder rounding rules actually exercise.
+
+| SKU | Group | Options | Price | HSN/SAC | GST | Stock | Low-stock |
+|---|---|---|---|---|---|---|---|
+| `SD-TOTE-BLK-M` | Tote | black / M | ₹899 (89900) | 4202 | 18% | 12 | 3 |
+| `SD-TOTE-BLK-L` | — | *(black / L never made — row absent)* | — | — | — | — | — |
+| `SD-TOTE-RED-M` | Tote | red / M | ₹899 (89900) | 4202 | 18% | 7 | 3 |
+| `SD-TOTE-RED-L` | Tote | red / L | ₹999 (99900) | 4202 | 18% | 4 | 3 |
+| `SD-CAP-S` | Cap | S | ₹649 (64900) | 6505 | 12% | 9 | 3 |
+| `SD-CAP-M` | Cap | M | ₹649 (64900) | 6505 | 12% | 2 | 3 |
+| `SD-STICKERS` | Sticker pack | — | ₹199 (19900) | 4911 | 18% | 40 | 5 |
+| `SD-KEYCHAIN` | Keychain | — | ₹299 (29900) | 8308 | 18% | 25 | 5 |
+| `SD-HAIRCLIPS` | Hair clips | — | ₹349 (34900) | 9615 | 18% | 18 | 3 |
+| `SD-PHONECHARM` | Phone charm | — | ₹449 (44900) | 7117 | 3% | 15 | 3 |
+| `SD-PINSET` | Pin set | — | ₹399 (39900) | 7117 | 3% | 11 | 3 |
+| `SD-PLUSH-MINI` | Plush mini | — | ₹1,299 (129900) | 9503 | 12% | 10 | 2 |
+| `SD-CHARMBAR-SEAT` | Charm-bar seat | — | ₹1,500 (150000) | SAC 999799 | 18% | 10 | 2 |
+| `SD-GIFTWRAP` | Gift-wrap | — | ₹99 (9900) | *(inherits parent)* | *(inherits)* | 100 | 10 |
+| `SD-EXTRACHARM` | Extra charm | — | ₹149 (14900) | *(inherits parent)* | *(inherits)* | 60 | 10 |
+| `SD-RECALLED` | Recalled item | — | ₹499 (49900) | 4202 | 18% | 5 | 3 |
+
+**Tags:** `SD-PLUSH-MINI` carries `limited`. `SD-RECALLED` carries `recalled`. `SD-GIFTWRAP` and `SD-EXTRACHARM` carry `addon`. `SD-CHARMBAR-SEAT` carries `service`.
+
+**`SD-CHARMBAR-SEAT` is a service and its Place of Supply is always Karnataka (29)** — where it is performed — regardless of the Destination. That is the line that makes a two-place-of-supply basket possible, and the demo depends on it.
+
+**Add-ons** (`SD-GIFTWRAP`, `SD-EXTRACHARM`) never stand alone: they fold into a named parent line and inherit its rate, HSN/SAC and Place of Supply. Gift-wrap on the tote is taxed as goods at 18%; gift-wrap on the charm-bar seat is taxed as that service. An orphan refuses `addon-without-parent`.
+
+### 16.4 Policy (seeded into `/agentic`)
+
+| Setting | Value |
+|---|---|
+| Per-order cap | ₹25,000 (2500000) |
+| Per-order line count | 10 |
+| Per-Product-Group qty | 5, except `SD-PLUSH-MINI` at **2** |
+| Blocked tags | `recalled` |
+| Enabled payment methods | `upi`, `cash-on-delivery` |
+| Enabled Authority kinds | `upi-pin`, `passkey`, `confirmed-intent` |
+| Enabled `confirmed-intent` mechanisms | `upi-verify`, `passkey` |
+| Exposure | all policies public to agents |
+
+### 16.5 Shipping zones and test destinations
+
+| Zone | Matches | Cost | ETA |
+|---|---|---|---|
+| Karnataka (intra-state) | state `KA` | ₹49 (4900) | 2 days |
+| Rest of India (inter-state) | any other Indian state | ₹99 (9900) | 5 days |
+| Unserviceable | postal codes `19xxxx` | — | refuses `destination-unserviceable` |
+
+ETAs are **day counts, never dates** — a date in a Quote turns midnight into a spurious `price-changed`.
+
+**The two demo destinations**, which every golden vector and the demo script use:
+
+- **A — intra-state (CGST/SGST):** `4th Cross, Indiranagar, Bengaluru, Karnataka, 560038`
+- **B — inter-state (IGST):** `Dadar West, Mumbai, Maharashtra, 400028`
+- **Contact Point:** `+91 90000 00001`, `demo@spoiledduckie.test`
+
+A basket of `SD-TOTE-BLK-M` + `SD-CHARMBAR-SEAT` shipped to **B** carries IGST on the tote and CGST/SGST on the seat, in one Quote. That is the §13 beat-4 moment and the Integration-1 smoke test.
+
+### 16.6 Discount codes
+
+| Code | Visibility | Value | Max uses |
+|---|---|---|---|
+| `SPOILED10` | public | −₹100 (−10000) | 50 |
+| `DUCK-7F3K-9QWX` | private | −₹250 (−25000) | 1 |
+
+The private code is high-entropy on purpose: B3's minimum-entropy check refuses guessable private codes at creation, and **seeding is not a licence to seed `TEST1`.** The public code may be entered in the chat; the private code is refused there and accepted only on the approve page, where it re-quotes and rebinds before anything is signed.
+
+### 16.7 Timings
+
+| Clock | Value | Note |
+|---|---|---|
+| `pending` order (Quote validity) | 24h | `time-limit-reached`, no stock held, nothing to return |
+| `confirmed` payment window (prepaid) | 15 min | `payment-window-elapsed` + `RELEASE`; never longer than the provider link's own lifetime |
+| COD delivery window | 7 days | `delivery-window-elapsed` — **alerts the Merchant, never auto-cancels** |
+| Approve/tap token | 5 min, single-use | |
+| Resume token | 30 min, single-use, session-bound | |
+| Agent access token | 15 min | |
+| Trait HMAC replay window | 60s + nonce | |
+| RFC 9421 signature window | 60s + nonce | |
+| Expiry sweeper interval | 60s | |
+| Provider reconciler poll | 5 min | |
+| WebAuthn challenge TTL | 120s | as `main` |
+
+### 16.8 Rate limits
+
+| Surface | Self-registered | Allowlisted |
+|---|---|---|
+| `/agent/*` per agent | 30 req/min | 300 req/min |
+| `/agent/*` per IP | 120 req/min | 120 req/min |
+| Profile registration per IP | 5/hour | — |
+| Tap-token issuance per session | 5/min | 5/min |
+| Approve attempts per order | 10/hour | 10/hour |
+| Discount-code attempts per order | 5/hour | 5/hour |
+| Quantity-refusal oracle per agent | 20/hour | 20/hour |
+
+Every wrong discount code refuses as the same `code-invalid` with **no message and no timing tell**. Exceeding any limit refuses `rate-limited`.
+
+### 16.9 The `scripted` model driver
+
+The demo's default driver (D7). It is not a fake — it is the same code path with the proposer pinned, and CI runs it. It emits exactly this tool-call sequence, and deterministic code validates every one against real Merchant data before anything renders:
+
+```
+1  search                {"query": "black tote"}
+2  read-item             {"group": "tote"}
+3  add-line              {"sku": "SD-TOTE-BLK-M", "qty": 1}
+4  add-line              {"sku": "SD-GIFTWRAP", "qty": 1, "parent": "SD-TOTE-BLK-M"}
+5  add-line              {"sku": "SD-CHARMBAR-SEAT", "qty": 1}
+6  set-destination       {destination B — Mumbai, 400028}
+7  set-contact           {+91 90000 00001, demo@spoiledduckie.test}
+8  choose-fulfillment    {"id": "rest-of-india"}
+9  start-checkout        {}
+10 place-order           {}          → returns an approve URL, never an order
+11 order-status          {polled until paid}
+```
+
+`ollama` (`qwen2.5:7b`) and `anthropic` (`claude-sonnet-5`) are alternative drivers, used only if their key or model is present; **neither is ever required for the demo or for CI.**
+
+### 16.10 Fake provider behaviour
+
+`provider/fake.py` declares every method and is the demo default. `make-link` returns a link to a local page with **Approve** and **Decline**; Approve fires a correctly-HMAC'd webhook after 2s, Decline fires a failure webhook immediately. Link lifetime is 15 min, matching §16.7. `razorpay.py` declares `upi` only and **refuses to boot with a live (non-`rzp_test_`) key**.
+
+### 16.11 What is deliberately not pinned
+
+Copy, microcopy, and empty-state wording — write them in the voice §4 describes. Product images — generated placeholders in the design palette; no scraping. Exact component structure inside a phase. Anything §12 lists as a cut.
+
+If you find yourself wanting a constant that is not in this section, that is ladder step 4 in §0: take the conservative option, log it under `## OPEN —`, keep building.
