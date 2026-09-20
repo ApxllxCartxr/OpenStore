@@ -1,0 +1,9 @@
+# PaaS demo hosting: three Fly apps, not one
+
+The reference install (`openstore up <domain>`, SPEC §14) targets a VM running docker-compose behind Caddy (ADR-0007, SPEC §10). The public demo needs to run on a PaaS instead (Fly.io), and the mount-path contract — one origin serving `/` (store) and `/.well-known + /agent + /agentic` (sidecar) — has to hold there too, since that's what agent discovery and passkey RP ID both depend on (SPEC §3, ADR-0008).
+
+Fly's `[processes]` section can run store, sidecar, and an edge process (Caddy) as separate Machines inside one app, joined by 6PN. We reject that shape: Fly secrets are set at the app level and injected into every Machine in the app regardless of process group, so one app would put the sidecar's provider keys and signing key into the store process's environment even though store code never reads them. That's a real breach of the isolation ADR-0007 requires (no shared volumes/DB, separate containers/deploys), not a cosmetic one.
+
+Decision: three Fly apps in one org — `edge`, `store`, `sidecar` — joined by 6PN. Only `edge` (Caddy) holds a public `[http_service]`; it proxies `/` to `store.internal:PORT` and `/.well-known/*`, `/agent`, `/agentic` to `sidecar.internal:PORT` using Fly's internal DNS. Each app gets only its own secrets. Demo domain is a Fly-issued subdomain (`*.fly.dev`); custom-domain binding is deferred (no product consequence — WebAuthn RP ID is domain-scoped by spec regardless of host, so this was never free either way, per the domain-change conversation).
+
+Consequences: three `fly.toml`s and three `fly deploy`s instead of one, in exchange for actually exercising the same secret/process boundary the self-hosted install has, rather than demoing around it. `openstore up` itself is unaffected — it still targets docker-compose/VM; a `openstore up --fly` equivalent, if ever built, should generate this three-app shape rather than the single-app one.
