@@ -4,6 +4,42 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · CONFIGURATION DECIDED — Option B, two builders, no third
+
+The §12 hour-0 decision is made and closed. **Option B: two builders, cuts 5 and 4a in force from hour 0.** Anyone or anything executing the plan takes this as given and does not re-open it.
+
+### What is now out of scope
+
+- **Cut 5 — no direct storefront cart or checkout.** The store browses and hands off to an agent; it never creates an order itself. The `site_carts` table and its 30-minute-hold sweeper are **not built** — they existed only to hold stock for that cart. A **Buy via agent** panel carrying the sidecar card URL replaces it on every group page, and that is the surface the demo actually uses.
+- **Cut 4a — admin trimmed, not gutted.** Out: CSV export, bulk archive, and the pricing-setup CRUD. Shipping zones, GST identity and discount codes are **seeded in B1 and changed by re-seeding**. In, unchanged: dashboard, catalogue create/edit, variant matrix, stock, price, inventory moves, orders + Timeline, dispatch + invoice, refund dialog, Record collection, Record RTO.
+
+The line held deliberately: everything on the *operating* path stays, only the *setup-once* screens go, so Surface 2's claim — "a Merchant can operate it" — survives intact. The blunter read-only-admin cut would have bought the same ninety minutes and taken that claim with it.
+
+### Budgets after the decision
+
+| | before | after |
+|---|---|---|
+| B1 schema + seed + storefront | 6.0h | **4.5h** |
+| B3 shop-ops admin | 3.0h | **1.5h** |
+| Track S phase subtotal | 26.5h | **23.5h** |
+| Track S total (incl. 3 integration windows + polish) | 29.5h | **26.5h** vs 26.0 available |
+
+Both tracks now sit at 26.5h against 26.0. The −0.5h is absorbed by the polish pass, budgeted 1.5h and scheduled 0.5h.
+
+### The change that mattered most for an agent-executed build
+
+Recording the decision in §12 alone would not have been enough. The phase bodies in §8 still described **full** scope, so an agent building B1 would have built the direct checkout and an agent building B3 would have built the pricing CRUD — the schedule says one thing, the instructions another, and the instructions are what gets read at the point of work.
+
+So both cuts are now stated **as blockquote banners at the top of B1 and B3**, the removed scope is struck through in place with its full text kept for a later phase, and the DONE WHEN gates are rewritten to match what is actually being built. §1's deliverable and §2's D9 trim list were corrected to match.
+
+One contradiction surfaced while doing this and is fixed: B1's new gate first read "no route anywhere in the store creates an order," which would have forbidden **door 7 `orders.create`** — implemented by the store in B2 and called by the sidecar over the private network. Corrected to "no **public storefront** route creates an order; door 7 is the only path that does."
+
+### Option A kept on the record
+
+Option A (a third builder takes Surface C — 11.5h, lifting out cleanly since B and C share no state, code or database) is retained in §12 as the path **not** taken, so that if a third pair of hands appears mid-build the restoration is mechanical rather than a redesign. Under it, cuts 5 and 4a would both be restored.
+
+---
+
 ## 2026-09-20 · Track S re-budget — three changes applied
 
 Prompted by a question about Track S, which turned into a second look at the schedule. Audit #1 fixed the schedule's *arithmetic*; this fixes its *estimates*, which were a separate and larger error.
