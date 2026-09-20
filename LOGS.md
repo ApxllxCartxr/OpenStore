@@ -4,6 +4,38 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-21 · The agent surface and the approve page
+
+**442 Python tests.** A6 built four translators and never mounted the request path; this is that path. `/.well-known/*`, `/agent/*` and `/agentic/approve` are live and served through Caddy.
+
+### The card states its refusals up front
+
+A stranger fetching `/.well-known/agent-commerce.json` learns, before it writes a line of integration code, that completion is redirect-only, that delegated payment credentials are **refused** rather than unimplemented, which methods this Merchant actually enabled, and — per protocol — **which completion step is refused and why**, with `ACP 2026-04-17` named.
+
+That is kinder than finding out at the last step, and it is the difference between a deviation and a surprise.
+
+### `place-order` returns a link, never an order
+
+The one route on this surface that could betray the whole posture is handled explicitly and tested explicitly: the response carries an `approve_url`, carries **no** `order_id`, and says in its own note that the agent cannot complete the purchase itself.
+
+### The approve page is the page of record
+
+Every figure on it comes from the Merchant-signed Quote — the tote line with gift-wrap folded in, the charm-bar seat, IGST and CGST/SGST separately, the delivery ETA as a **day count**. The page says in as many words that nothing on it was calculated by the agent that built the basket.
+
+It offers the private-code field (the code never transits the agent), shows only the methods this Merchant enabled, and carries a live countdown — because "this expires" with no number is a sentence nobody acts on.
+
+It is reachable **without the Merchant session**, and a test asserts the request carries no cookie. A Consumer approving a spend is not the Merchant.
+
+### One design note recorded rather than discovered later
+
+`FastAPI` refused the approve route because it returns HTML on the happy path and a JSON refusal envelope otherwise, and it cannot build one response model from both. `response_model=None` is the fix, with a comment saying why — the next person to add a dual-shape route will hit the same thing.
+
+### `make up`
+
+One command: build, start, wait for the shop, seed, then print the four URLs and the `*.localhost` warning from §10.1 — browsers resolve it to loopback and containers do not, which the plan calls the single most likely way to lose an afternoon.
+
+---
+
 ## 2026-09-21 · Mount and end-to-end — five services, one origin
 
 **The whole stack runs.** `docker compose up -d` brings up caddy, sidecar, store, buyer-chat and postgres; the merchant seeds through the real flow; and the sidecar's conformance suite passes **12/12 against the containerised store**, including 50 concurrent reserves on 5 units against real Postgres.

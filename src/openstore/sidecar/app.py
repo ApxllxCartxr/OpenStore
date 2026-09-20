@@ -14,10 +14,12 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from openstore.sidecar.console.approve import router as approve_router
 from openstore.sidecar.console.merchant_actions import router as merchant_actions_router
 from openstore.sidecar.console.routes import router as console_router
 from openstore.sidecar.core.settings import Settings, get_settings
 from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
+from openstore.sidecar.protocols.agent_routes import router as agent_router
 from openstore.sidecar.verify.checks import verify
 
 app = FastAPI(
@@ -29,8 +31,12 @@ app = FastAPI(
 )
 
 
-# Merchant actions BEFORE the console router: the console's /agentic/{tab}
-# catch-all would otherwise swallow /agentic/refund and answer "no console tab".
+# Order matters: the console's /agentic/{tab} catch-all would otherwise swallow
+# every sibling route and answer "no console tab". The approve page in
+# particular is authenticated by its one-time token and NOT by the Merchant
+# session, so it must reach its own handler.
+app.include_router(agent_router)
+app.include_router(approve_router)
 app.include_router(merchant_actions_router)
 app.include_router(console_router)
 
