@@ -4,6 +4,52 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · A4 — Authority, admission, order lifecycle
+
+**299 tests pass**; ruff, mypy --strict and all four guardrails clean.
+
+### Authority as data, not as an `if`
+
+`authority/kinds.py` holds §6.5's table: each kind declares what it binds, by whom, and **when it lands**. That last part is why the table is data — a caller that could say "my authority landed early" could say it about `upi-pin`, and then a spend would pass check 1 on a ceremony that has not happened yet.
+
+`mandate` is present with `live=False` rather than absent. Defined, registered and refused is a different claim from "we never thought about it", and a reader of the registry can see which one this is.
+
+An OTP is refused **at the enum**: `IntentMechanism("otp")` raises. It cannot be configured, which is stronger than being validated away, and the reason is in the docstring — it proves control of a phone number, which is exactly what RTO fraud already defeats.
+
+### The `consumer_id` gap the plan flagged, closed
+
+A COD order authorized by the `passkey` mechanism never touches a payment rail, so there is no VPA to derive a pseudonym from. The derivation now takes a `HandleSource` (`payer-handle` or `credential-id`) and **folds it into the HMAC**, so the two sources cannot collide and a verifier can tell which was used. An empty handle raises rather than producing a null id — on exactly the path where attribution matters most.
+
+### Tokens
+
+A tap token is what makes "a hold cannot be created without spending an approve token" true. It is single-use, 5 minutes, bound to one `cart_hash`, and carries a `rendered_digest` of what the approve page actually showed — so a **Destination edit after render invalidates it even though the total did not move**. That is the gap hashes alone leave, closed on display rather than on hashes.
+
+A resume token is session-bound and resolves both ids server-side. A stranger presenting someone else's token gets `not-found` and not "that belongs to another session" — the second answer is the oracle the token exists to close.
+
+### The SSRF sink
+
+Refusals happen **before any packet leaves the box**: scheme, then the metadata address, then resolve-and-check. The metadata check runs on what the host *resolves to*, not what it is called, and it is consulted before the allowlist, so no configuration can reach it.
+
+§10.1's scheme carve-out is implemented and tested: `http://buyer-chat:3001` is admitted when named, and a *different* host in the same private range is refused on both dimensions — scheme first, address second. The allowlist is names, never a CIDR, because a range is not an exception.
+
+### RFC 9421
+
+The signature base is written once, here, with a Python signer alongside the verifier. A4c's real signer is the chat's in TypeScript; having both ends against one set of vectors before the chat exists is what stops the signature base being debugged twice by two people who each think the other side is wrong.
+
+One design point worth keeping: **a failed verification does not burn the nonce.** Remembering a nonce from an unverified request would let anyone burn nonces they never signed, which is a denial of service dressed as replay protection. The test asserts the real request still succeeds afterwards.
+
+### Lifecycle
+
+One `expires_at` column, three deadlines, and the COD one **alerts rather than acting**: a parcel that is late is not a parcel that is lost, and only the Merchant knows which. The payment window is `min(15 min, provider link lifetime)` — a hold outliving the link it was taken for is stock nobody can pay for.
+
+Transitions encode that `cancelled` is pre-money only and `refunded` post-money only, which is what keeps "status flip alone never moves money" true. An RTO is `cancelled` + `rto`, not a ninth status.
+
+### OPEN — A4
+
+- **The approve page and `/agent/*` routes are not wired yet.** A4's building blocks (tokens, admission, rate limits, lifecycle) are complete and tested as units; mounting them as HTTP routes lands with A5's console and A6's protocol surface, which is where the request path actually gets built. The DONE WHEN items that require an end-to-end HTTP flow — a stranger transacting with no prior Merchant action, an abandoned `confirmed` releasing at link expiry — are asserted at the unit level here and re-asserted end to end there.
+
+---
+
 ## 2026-09-20 · A3 — Gate, Ledger, provider
 
 **DONE WHEN met.** `uv run pytest -q` → **222 passed**; ruff, mypy --strict and all four guardrails clean. Every gate in the phase text has a test named after it.
