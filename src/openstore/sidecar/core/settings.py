@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     sidecar_database_url: str = ""
     merchant_database_url: str = ""
 
-    # The 9-door trait.
+    # The 9-door trait. `trait_base_url` is the Merchant's ORIGIN — the client
+    # appends `/trait/<door>` itself.
     trait_base_url: str = ""
     trait_hmac_secret: str = ""
 
@@ -116,6 +117,20 @@ class Settings(BaseSettings):
                 "exception for the compose demo and must never be reachable from a "
                 "deployment that can take money (ADR-0012)."
             )
+        if self.trait_base_url.rstrip("/").endswith("/trait"):
+            raise BootRefused(
+                f"TRAIT_BASE_URL is {self.trait_base_url!r}, which already ends in /trait. "
+                f"It is the Merchant's origin; the client appends the door path itself, "
+                f"and this would produce /trait/trait/<door> — every call refused, with "
+                f"nothing in the logs saying why."
+            )
+        if self.trait_base_url and not self.trait_hmac_secret:
+            raise BootRefused(
+                "TRAIT_BASE_URL is set and TRAIT_HMAC_SECRET is not. Both sides of the "
+                "trait need the same secret; without it every door refuses and the shop "
+                "looks empty rather than broken."
+            )
+
         for host in self.dev_profile_hosts:
             if "/" in host:
                 raise BootRefused(

@@ -60,8 +60,13 @@ class AgentSurface:
     limiter: RateLimiter = field(default_factory=RateLimiter)
     fetcher: ProfileFetcher = field(default_factory=ProfileFetcher)
     jwks: dict[str, Any] = field(default_factory=lambda: {"keys": []})
-    catalog: Any = None
-    """Set by the app to a callable returning (groups, items, stock)."""
+    trait: Any = None
+    """A `TraitClient`. The feed is built from Merchant truth read fresh through
+    doors 1 and 2 — the sidecar holds no catalogue of its own (ADR-0001)."""
+    exposed: set[str] | None = None
+    """Which SKUs the Merchant exposes to agents. `None` means every active
+    item, which is the demo's configuration — not a default that quietly
+    publishes something unexposed."""
 
 
 _surface = AgentSurface()
@@ -267,16 +272,31 @@ async def mcp_call(request: Request) -> JSONResponse:
 
 
 @router.get("/agent/feed.json")
-def feed() -> JSONResponse:
+async def feed() -> JSONResponse:
     """The Product Feed, in Merchant Center attribute names.
 
-    Only exposed items, and **never an exact count** — a feed is the easiest
+    Built from Merchant truth read **fresh** through doors 1 and 2 — the sidecar
+    keeps no catalogue of its own, so a feed cannot go stale in a way the
+    Merchant cannot see.
+
+    Only exposed items, and **never an exact count**: a feed is the easiest
     place in the system to leak inventory, because it is designed to be read by
-    strangers.
+    strangers. Door 2 hands back integers over the private network and
+    `build_feed` turns every one into a bucket before it is serialized.
     """
-    if _surface.catalog is None:
+    if _surface.trait is None:
+        # An empty feed rather than a fabricated one. A sidecar that cannot
+        # reach its Merchant has nothing true to publish.
         return JSONResponse({"items": []})
-    groups, items, stock = _surface.catalog()
+
+    catalog = await _surface.trait.catalog_read()
+    stock = await _surface.trait.stock_read([item.sku for item in catalog.items])
     return JSONResponse(
-        build_feed(groups, items, stock, base_url=f"https://{_surface.merchant_domain}")
+        build_feed(
+            catalog.groups,
+            catalog.items,
+            stock,
+            base_url=f"https://{_surface.merchant_domain}",
+            exposed=_surface.exposed,
+        )
     )

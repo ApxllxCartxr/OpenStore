@@ -32,7 +32,12 @@ services:
       WEBAUTHN_RP_NAME: SpoiledDuckie
       SIDECAR_DATABASE_URL: postgresql+psycopg://sc_app:sc_app_dev@postgres:5432/sidecar
       STORE_INTERNAL_URL: http://store:3000
-      TRAIT_BASE_URL: http://store:3000/trait
+      # The ORIGIN, not the /trait prefix: the client appends `/trait/<door>`
+      # itself, and doubling it produces /trait/trait/catalog.read.
+      TRAIT_BASE_URL: http://store:3000
+      # Both sides of the trait need the same secret. Setting it on the store
+      # alone gives the sidecar nothing to sign with, and every door refuses.
+      TRAIT_HMAC_SECRET: conformance-secret
       PAYMENT_PROVIDER: fake
       OPENSTORE_DEMO_MODE: "true"
       # The SSRF exception, for the compose demo's own chat and nothing else

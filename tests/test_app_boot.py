@@ -149,3 +149,31 @@ def test_env_example_and_settings_agree() -> None:
     assert not (
         declared - fields - _OTHER_SURFACES
     ), f"in .env.example, not in Settings: {sorted(declared - fields - _OTHER_SURFACES)}"
+
+
+def test_a_trait_url_that_already_ends_in_trait_refuses_to_boot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Found in integration: the client appends `/trait/<door>` itself, so an
+    origin already ending in `/trait` produces `/trait/trait/<door>` — every
+    call refused, with nothing in the logs saying why. The shop looks empty
+    rather than broken, which is the worst failure mode there is."""
+    monkeypatch.setenv("TRAIT_BASE_URL", "http://store:3000/trait")
+    monkeypatch.setenv("TRAIT_HMAC_SECRET", "s")
+    with pytest.raises(BootRefused, match="already ends in /trait"):
+        Settings()
+
+
+def test_a_trait_url_with_no_secret_refuses_to_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Also found in integration: compose set the secret on the store and not
+    the sidecar, so the sidecar had nothing to sign with."""
+    monkeypatch.setenv("TRAIT_BASE_URL", "http://store:3000")
+    monkeypatch.delenv("TRAIT_HMAC_SECRET", raising=False)
+    with pytest.raises(BootRefused, match="both sides of the trait|Both sides"):
+        Settings()
+
+
+def test_a_correct_trait_config_boots(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRAIT_BASE_URL", "http://store:3000")
+    monkeypatch.setenv("TRAIT_HMAC_SECRET", "s")
+    assert Settings().trait_base_url == "http://store:3000"

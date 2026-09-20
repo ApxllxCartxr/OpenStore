@@ -4,6 +4,31 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-21 · The install gate, and three bugs only a clean run could find
+
+`make down && make up` on an empty machine reaches a working shop with **zero hand-edited files**, and `make demo` passes 12/12 against it. **445 tests.**
+
+### A deadlock in my own install gate
+
+`make up` waited for `/` to return 200 before seeding. `/` cannot return 200 until the catalogue is seeded. So the wait always ran its full sixty iterations and then seeded anyway — the gate "passed" only because the timeout expired. It waits on `/healthz` now, which needs a database connection and nothing more, and it **checks `/` renders after seeding** so a broken shop fails loudly instead of quietly.
+
+Worth naming as a class: a readiness check that waits for a *product* of the step it precedes will always look like a slow success.
+
+### Two configuration bugs the unit tests could not see
+
+- **`TRAIT_BASE_URL` was `http://store:3000/trait`**, and the client appends `/trait/<door>` itself — producing `/trait/trait/catalog.read`. Every door refused, and the shop looked *empty* rather than broken, which is the worst failure mode there is.
+- **The HMAC secret was set on the store and not the sidecar**, so the sidecar had nothing to sign with.
+
+Both now **refuse at boot** with an error that says what is wrong and why, and both have tests. A misconfiguration that produces an empty page instead of an error is one somebody debugs for an hour.
+
+### The feed was mounted and never connected
+
+It returned `{"items": []}` and a 200. It reads Merchant truth fresh through doors 1 and 2 now, and the live document shows every property the spec asks for: 15 items, variants grouped by `item_group_id`, `SD-TOTE-BLK-L` absent because it was never made, `low-stock` folded into the reader's `in_stock`, and **no exact count anywhere in the document**.
+
+`on_event("startup")` is deprecated; the wiring is a `lifespan` now and **logs what it wired**, because the failure mode of silent wiring is a shop that looks empty.
+
+---
+
 ## 2026-09-21 · The agent surface and the approve page
 
 **442 Python tests.** A6 built four translators and never mounted the request path; this is that path. `/.well-known/*`, `/agent/*` and `/agentic/approve` are live and served through Caddy.

@@ -9,6 +9,9 @@ Consumer is actually looking at.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -22,7 +25,50 @@ from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
 from openstore.sidecar.protocols.agent_routes import router as agent_router
 from openstore.sidecar.verify.checks import verify
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Point the agent surface at this deployment's Merchant.
+
+    At startup rather than at import, so settings are read once after the
+    process has decided what it is. `lifespan` rather than the deprecated
+    `on_event` — and it **logs what it wired**, because a feed that silently
+    serves nothing looks like an empty shop rather than a misconfiguration.
+    """
+    import httpx
+
+    from openstore.sidecar.protocols.agent_routes import AgentSurface
+    from openstore.sidecar.protocols.agent_routes import configure as configure_surface
+    from openstore.sidecar.trait.client import TraitClient
+
+    settings = get_settings()
+    trait = (
+        TraitClient(
+            settings.trait_base_url,
+            settings.trait_hmac_secret,
+            client=httpx.AsyncClient(timeout=10),
+        )
+        if settings.trait_base_url
+        else None
+    )
+    configure_surface(
+        AgentSurface(
+            merchant_domain=settings.openstore_merchant_domain or "localhost",
+            merchant_name=settings.webauthn_rp_name or "This shop",
+            demo=settings.openstore_demo_mode,
+            trait=trait,
+        )
+    )
+    logging.getLogger("openstore").warning(
+        "agent surface wired: merchant=%s trait=%s",
+        settings.openstore_merchant_domain or "unset",
+        settings.trait_base_url or "NOT CONFIGURED - the feed will be empty",
+    )
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="OpenStore sidecar",
     description="Makes one Merchant site transactable by any Buyer Agent.",
     version="0.1.0",

@@ -9,12 +9,18 @@ help: ## Show this help
 
 up: ## Build and start the whole stack, then seed it
 	docker compose up -d --build
-	@echo "Waiting for the shop..."
+	@echo "Waiting for the shop to answer..."
+	@# `/healthz`, not `/`. The home page needs a seeded catalogue, and the seed
+	@# runs after this wait — waiting for `/` is waiting for the thing this step
+	@# is about to do.
 	@for i in $$(seq 1 60); do \
-		curl -fsS -H 'Host: spoiledduckie.localhost' http://127.0.0.1/ >/dev/null 2>&1 && break; \
+		curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1 && break; \
 		sleep 2; \
 	done
 	@$(MAKE) --no-print-directory seed
+	@echo "Checking the shop renders..."
+	@curl -fsS -H 'Host: spoiledduckie.localhost' http://127.0.0.1/ >/dev/null \
+		|| { echo "The shop did not render after seeding."; docker compose logs --no-color store | tail -20; exit 1; }
 	@echo ""
 	@echo "  Shop     http://spoiledduckie.localhost"
 	@echo "  Console  http://spoiledduckie.localhost/agentic"
