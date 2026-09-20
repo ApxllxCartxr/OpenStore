@@ -4,6 +4,37 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-21 · Mount and end-to-end — five services, one origin
+
+**The whole stack runs.** `docker compose up -d` brings up caddy, sidecar, store, buyer-chat and postgres; the merchant seeds through the real flow; and the sidecar's conformance suite passes **12/12 against the containerised store**, including 50 concurrent reserves on 5 units against real Postgres.
+
+### What the edge serves, and what it refuses
+
+| path | answer |
+|---|---|
+| `/`, `/p/tote`, `/shop`, `/lookup` | store, 200 |
+| `/agentic/*`, `/receipt/<id>`, `/.well-known/*` | sidecar, 200 |
+| `chat.localhost` | chat, 200 |
+| `/trait/*` | **404** |
+| `/admin*` | **404** |
+
+**A real finding during integration: the nine doors answered on the public origin.** HMAC refused them with a 401, so nothing was exploitable — but they were *routable*, and §6.1 says private network only. Defence in depth matters exactly here: a door that cannot be reached from the edge stays safe if the HMAC secret ever leaks. The edge refuses both the trait and the shop's admin now, and CI asserts all three paths return 404 while the three public surfaces answer.
+
+### Four integration defects, none visible from unit tests
+
+- **`corepack` is gone from Node 25+.** Both Dockerfiles used it; pnpm is installed explicitly and pinned to the version that wrote the lockfile.
+- **The build context was 173 MB** because `node_modules` was being uploaded. A `.dockerignore` was missing entirely.
+- **`@import 'tailwindcss'` inside `design/tokens.css` cannot resolve.** The directory sits outside every package, so there is no `node_modules` to resolve against. It worked in local dev and failed at image build — the worst place to find out. The import is lifted into each app's own `app.css`, which is how a Tailwind v4 app is structured anyway, and `design/README.md` records the one change from the portfolio's original.
+- **The chat listened on 3000.** `adapter-node` defaults to `$PORT` and the compose file never set one, so both SvelteKit services claimed the same port and Caddy 502'd the chat. Ports are part of §16.1's contract and are now set explicitly rather than inherited from a default.
+
+Also: the images now mirror the repo layout (`/workspace/demo/...` beside `/workspace/design`) so the same relative import works in dev and in the image, and the store image ships `src/lib` because the seed script running inside it imports from there — shipping a schema without the code that applies it is how `docker compose exec store seed` fails at 2am.
+
+### CI now covers all of it
+
+Three jobs became five: guardrails, checks, a **surfaces** matrix running `svelte-check` and `vitest` on both SvelteKit roots, and a compose job that brings the whole stack up, seeds it, asserts the edge's public/private split, and runs the conformance suite against the containerised store.
+
+---
+
 ## 2026-09-21 · A4c + C1–C5 — the buyer chat
 
 **68 chat tests, 420 Python, 36 merchant-site.** `svelte-check` clean on both SvelteKit roots, and the import firewall passes with all three roots live.

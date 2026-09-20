@@ -1,0 +1,19 @@
+# Never ship these into a build context. Without this the context is 170MB of
+# node_modules and the build spends longer uploading than compiling.
+**/node_modules
+**/.svelte-kit
+**/build
+**/dist
+.venv
+.git
+.mypy_cache
+.hypothesis
+mutants
+.claude
+.opencode
+.remember
+**/__pycache__
+*.pyc
+.env
+.env.*
+!.env.example

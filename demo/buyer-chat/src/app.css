@@ -1,6 +1,7 @@
 /* Claude-shaped: a centred 68ch column, message rows, streaming text.
    `--accent-2` is primary here so chat and shop never look like the same app
    (§4). Same tokens, different weighting. */
+@import 'tailwindcss';
 @import '../../../design/tokens.css';
 
 * { box-sizing: border-box; }

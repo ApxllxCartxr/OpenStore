@@ -1,4 +1,13 @@
-@import 'tailwindcss';
+/* NOTE: the portfolio's `@import 'tailwindcss'` has been lifted out of this
+   file and into each app's own `app.css`.
+   
+   The reason is mechanical rather than aesthetic: this file lives outside every
+   package, so a bare `@import 'tailwindcss'` here has no `node_modules` to
+   resolve against. It happens to work in local dev and fails at image build
+   time, which is the worst place to find out. Each surface imports Tailwind
+   itself — which is how a Tailwind v4 app is structured anyway — and then
+   imports this token layer. Everything below is the portfolio's, unchanged. */
+
 
 /* ============================================================
    Fonts — self-hosted, subsetted to woff2 (see /static/fonts)

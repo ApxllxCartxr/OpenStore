@@ -16,6 +16,14 @@ an asset's hat.
   instruments instead of a landing page.
 - **PP Kyoto** — serif flourishes and pull quotes only.
 
+## One change from the portfolio's `app.css`
+
+`@import 'tailwindcss'` has been lifted out of `tokens.css` and into each app's
+own `app.css`. This directory is outside every package, so a bare package import
+here has no `node_modules` to resolve against — it works in local dev and fails
+at image build time, which is the worst place to find out. Everything else is
+the portfolio's, unchanged.
+
 ## Palette
 
 Token names are unchanged, so **no component ever references a literal colour**.

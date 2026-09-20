@@ -1,5 +1,6 @@
 /* The portfolio token layer, at full strength. The merchant site is the surface
    that has to look like a shop somebody runs (§4). */
+@import 'tailwindcss';
 @import '../../../design/tokens.css';
 
 * { box-sizing: border-box; }

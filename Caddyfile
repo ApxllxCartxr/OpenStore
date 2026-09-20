@@ -26,6 +26,21 @@ http://spoiledduckie.localhost {
 	handle /receipt/* {
 		reverse_proxy sidecar:8000
 	}
+
+	# The nine doors are private-network only (§6.1). HMAC is the real
+	# protection, but a door that is not routable from the edge cannot be
+	# reached at all if that secret ever leaks — so the edge refuses it rather
+	# than forwarding it to be refused.
+	handle /trait* {
+		respond "Not found" 404
+	}
+
+	# The shop's own admin is session-authenticated and bound to the private
+	# network. It is not part of the public origin's contract.
+	handle /admin* {
+		respond "Not found" 404
+	}
+
 	handle {
 		reverse_proxy store:3000
 	}

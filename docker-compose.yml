@@ -45,6 +45,51 @@ services:
       - "8000"
     restart: unless-stopped
 
+  store:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://sd_app:sd_app_dev@postgres:5432/spoiledduckie
+      TRAIT_HMAC_SECRET: conformance-secret
+      SIDECAR_INTERNAL_URL: http://sidecar:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://spoiledduckie.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      # Loopback only, and deliberately: the nine doors live here and the edge
+      # refuses them. This is the private network, for the seed script and the
+      # conformance suite. Never bind it to 0.0.0.0.
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  buyer-chat:
+    build:
+      context: .
+      dockerfile: demo/buyer-chat/Dockerfile
+    environment:
+      PORT: "3001"
+      CHAT_MODEL_DRIVER: scripted
+      CHAT_DATABASE_PATH: /data/chat.db
+      CHAT_KEY_PATH: /data/agent-key.json
+      # The chat reaches the sidecar through Caddy carrying the real Host
+      # header: a card fetched as http://caddy/ would advertise the wrong
+      # origin back to the browser (§10.1).
+      SIDECAR_PUBLIC_ORIGIN: http://spoiledduckie.localhost
+      SIDECAR_VIA: http://caddy
+      NODE_ENV: production
+    volumes:
+      - chatdata:/data
+    expose:
+      - "3001"
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -67,3 +112,4 @@ services:
 
 volumes:
   pgdata:
+  chatdata:
