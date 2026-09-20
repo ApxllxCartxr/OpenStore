@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from openstore.sidecar.console.merchant_actions import router as merchant_actions_router
 from openstore.sidecar.console.routes import router as console_router
 from openstore.sidecar.core.settings import Settings, get_settings
 from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
@@ -28,6 +29,9 @@ app = FastAPI(
 )
 
 
+# Merchant actions BEFORE the console router: the console's /agentic/{tab}
+# catch-all would otherwise swallow /agentic/refund and answer "no console tab".
+app.include_router(merchant_actions_router)
 app.include_router(console_router)
 
 

@@ -19,9 +19,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator
 
-import httpx
 import pytest
-
 from openstore.sidecar.core.codes import ReasonCode
 from openstore.sidecar.trait.client import TraitClient
 from openstore.sidecar.trait.errors import TraitError

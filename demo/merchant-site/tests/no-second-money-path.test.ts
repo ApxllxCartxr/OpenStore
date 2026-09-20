@@ -32,11 +32,25 @@ describe('cut 5: no second money path', () => {
 		expect(offenders).toEqual([]);
 	});
 
-	it('no public route reserves stock', () => {
+	it('no PUBLIC route moves stock', () => {
+		// The Merchant's own admin adjusts inventory — that is Merchant truth
+		// being edited by the person who owns it. What must never happen is a
+		// public route holding stock, because that is a checkout by another name.
 		const offenders = files
-			.filter((path) => !isPrivate(path))
+			.filter((path) => !isPrivate(path) && !path.includes(`${'/'}admin${'/'}`))
 			.filter((path) => /UPDATE\s+stock\s+SET/i.test(readFileSync(path, 'utf8')));
 		expect(offenders).toEqual([]);
+	});
+
+	it('every admin stock write is audited in stock_moves', () => {
+		// An adjustment nobody can trace is an adjustment nobody can dispute.
+		for (const path of files.filter((p) => p.includes(`${'/'}admin${'/'}`))) {
+			const source = readFileSync(path, 'utf8');
+			if (!/UPDATE\s+stock\s+SET/i.test(source)) continue;
+			expect(source, `${path} moves stock without auditing it`).toMatch(
+				/INSERT INTO stock_moves/i
+			);
+		}
 	});
 
 	it('there is no direct cart or checkout route', () => {
@@ -60,14 +74,28 @@ describe('cut 5: no second money path', () => {
 });
 
 describe('the exposure boundary', () => {
-	it('no storefront load function returns a raw stock count', () => {
-		// `available` crosses door 2 and the loaders' internals; what reaches the
-		// browser is a bucket. A count in a page payload is an oracle any visitor
-		// can read.
-		for (const path of files.filter((p) => p.endsWith('+page.server.ts'))) {
-			const source = readFileSync(path, 'utf8');
-			if (!source.includes('available')) continue;
-			expect(source, `${path} returns a count to the browser`).toMatch(/bucketFor|groupBucket/);
-		}
+	/**
+	 * The rule is about **agents and the public**, not about the Merchant.
+	 *
+	 * `/admin` is session-authenticated shop ops and shows exact counts on
+	 * purpose — it is the Merchant's own inventory and they are the ones who
+	 * have to reorder it. What must never carry a count is a public page or an
+	 * agent-facing payload, because a count handed to anyone who asks is an
+	 * inventory-probing oracle.
+	 */
+	const isMerchantOwnConsole = (path: string) => path.includes(`${'/'}admin${'/'}`);
+
+	it('no PUBLIC storefront loader returns a raw stock count', () => {
+		const leaks = files
+			.filter((p) => p.endsWith('+page.server.ts'))
+			.filter((p) => !isMerchantOwnConsole(p))
+			.filter((p) => readFileSync(p, 'utf8').includes('available'))
+			.filter((p) => !/bucketFor|groupBucket/.test(readFileSync(p, 'utf8')));
+		expect(leaks).toEqual([]);
+	});
+
+	it('the admin is allowed its counts, and is behind a session', () => {
+		const guard = readFileSync(new URL('../src/routes/admin/+layout.server.ts', import.meta.url), 'utf8');
+		expect(guard).toMatch(/redirect\(303, '\/admin\/login'\)/);
 	});
 });

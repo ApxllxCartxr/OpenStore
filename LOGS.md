@@ -4,6 +4,41 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-21 · B3 + B4 — shop-ops admin, notifications, merchant money actions
+
+**418 Python tests, 36 vitest, svelte-check clean.** Admin auth verified live: unauthenticated `/admin` → 303 to login, signed in → 200 on every page, wrong password mints **no session cookie**, and an unknown user gets the same message as a wrong password.
+
+### Access control first, because of what this surface holds
+
+The admin holds the **Refund button**, which moves real money through the sidecar. An unauthenticated admin is a refund endpoint for anyone who can reach the container, so the session check is a `+layout.server.ts` guard that every route under `/admin` inherits — a new page cannot be added without it, which is the difference between access control and a habit.
+
+Login hashes even when the user does not exist, so a missing account and a wrong password take the same time. Otherwise the form enumerates operators.
+
+### The four money actions go through the sidecar, never the order row
+
+Refund, shop-reject, COD collection and RTO are HMAC calls to `/agentic/*`. The sidecar holds the `RESERVE`, so a Merchant-side write would strand a Ledger hold, and routing through door 8 serialises shop-reject against a Consumer tap and the expiry sweep on one key. Seven tests cover them, including that an RTO writes **zero** Ledger entries and that rejecting a `paid` order refuses `cancel-not-allowed` — past that point a refund is the instrument, not a cancellation.
+
+### The invoice number, and the boundary that gets it wrong
+
+`assignInvoiceNumber` uses one `INSERT … ON CONFLICT DO UPDATE … RETURNING`, so two concurrent dispatch calls cannot read the same value. It refuses on a terminal-negative status and returns the existing number on a second call — never re-derived, never reused.
+
+The financial year is computed in **IST**, and the test names the case a UTC implementation gets wrong: 00:15 IST on 1 April is 18:45 UTC on 31 March, and a UTC bucket files the new year's first invoice into the year that just closed. The whole five-and-a-half-hour window is asserted, in both directions, around the exact 18:30 UTC boundary.
+
+### Two test-scope corrections, both real distinctions
+
+My "no second money path" assertions were too broad and the test caught it twice:
+
+- **The admin legitimately sees exact stock counts.** The exposure rule is about agents and the public, not about the Merchant looking at their own inventory — they are the ones who have to reorder it. The rule now excludes `/admin` and separately asserts the admin sits behind a session.
+- **The admin legitimately writes stock.** That is Merchant truth being edited by its owner. The rule now excludes `/admin` for writes and adds a stronger one in its place: **every admin stock write must insert a `stock_moves` row**, because an adjustment nobody can trace is an adjustment nobody can dispute.
+
+Both are cases where the first version of a guardrail was directionally right and imprecise, and the imprecision would have fired on correct code until somebody deleted the check.
+
+### Notifications
+
+One row per (order, kind), so a retry writes nothing — which is what "exactly one notification per status change" actually requires. **Dispatch is not a status change**, so the shipped notice needs that guard rather than inheriting one. An erased Contact Point skips the send with a named reason instead of throwing: erasure must never break the system that honoured it.
+
+---
+
 ## 2026-09-21 · B1 + B2 — schema, seed, storefront, the nine doors
 
 **B2's DONE WHEN met against the real store, not the fake.** The sidecar's conformance suite runs unmodified against the SvelteKit merchant site over HTTP: **12 live tests pass**, including the 50-concurrent-reserves gate against real Postgres. `svelte-check` clean, 21 vitest tests pass.
