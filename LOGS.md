@@ -4,6 +4,36 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · A1 — skeleton and guardrail harness
+
+**DONE WHEN met.** App boots behind the proxy split; the harness goes red on planted violations and green on the tree. `uv run pytest -q` → **105 passed**. `ruff`, `mypy --strict`, firewall, money lint, time lint, `CODES.md` diff and the prose scan all clean.
+
+### The gate, run rather than asserted
+
+`docker compose up -d --build` → caddy, sidecar and postgres healthy. Against the live stack:
+
+- `curl -H 'Host: spoiledduckie.localhost' http://127.0.0.1/agentic/codes` → the reason-code set, served by the sidecar through Caddy on the Merchant domain.
+- `/readyz` → `ready`, and it carries the `dev-profile-allowlist-active` warning, because compose sets `OPENSTORE_DEV_PROFILE_HOSTS=buyer-chat:3001` and SPEC §14 requires the exception to be visible in health output.
+- `GET /` → **502**, which is the correct answer and the point of the check: `/` belongs to the store, the store is not built yet, and a 200 would mean the split had leaked. `chat.localhost` likewise — the site block exists per §10 so the third surface has somewhere to arrive.
+
+### What landed
+
+- `app.py` (FastAPI, `/healthz`, `/readyz`, `/agentic/codes`), `core/settings.py`, `Dockerfile` (non-root — the container holds the signing key), `Caddyfile` with both site blocks, `docker-compose.yml`, `docker/postgres-init.sql` (two databases, two roles, and an explicit `REVOKE CONNECT ... FROM PUBLIC`, since PUBLIC gets CONNECT on every new database by default and "no cross-grant" would otherwise quietly mean "can connect and read the public schema").
+- `scripts/lint_money.py`, `scripts/lint_time.py`, `scripts/lint_firewall.py`, and `.github/workflows/ci.yml` wiring all of them plus hour 0's `registry_diff` into every push.
+- `tests/test_harness_planted_violations.py` — 18 cases. Every lint is run against a file written to fail it *and* against the real tree, because a guardrail nobody has watched fail is a guardrail nobody knows works.
+
+### Two decisions worth the ink
+
+**Money lint bans `/` outright, with an escape.** `int / int` silently yields a float and AST cannot see types, so true division is refused and the tax extraction (§16.11 step 5) carries `# money-lint: decimal`. The marker is not a weakening: it makes every place in the system where money is divided greppable, which is a list worth being able to read. Also refused: float literals, `float()`, and `round()` — banker's rounding disagrees with §16.11's ROUND_HALF_UP on exactly the .5 cases money hits.
+
+**`extra="forbid"` on Settings was wrong and is now `ignore`.** Written as a typo guard, it was caught by its own test suite reading the repo's real `.env`. The compose demo shares one `.env` across three services (§10), so a variable the sidecar does not declare is usually the chat's — and forbidding it would mean the sidecar dies at boot because another surface added a variable. Typo detection did not go away; it moved to `test_env_example_and_settings_agree`, which diffs `.env.example` against the fields **in both directions**. A field with no template entry is one an operator cannot set; a template entry with no field is a typo that reads as an empty secret. CI is the right place for that, boot is not.
+
+### Note for A4c
+
+§10.1's scheme carve-out is now in `.env.example` and in the `Settings` field description: the dev allowlist permits plain `http` for its named entries, because the hardened fetcher is HTTPS-only and public-IP-only, and both of those refuse `http://buyer-chat:3001`. Without it the demo's own self-registration is refused by its own hardening.
+
+---
+
 ## 2026-09-20 · Hour 0 — contracts frozen
 
 All seven steps of §12's hour-0 checklist, in order. `uv run pytest -q` → **74 passed**; `ruff check`, `ruff format --check` and `mypy --strict` clean.

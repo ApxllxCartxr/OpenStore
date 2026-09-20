@@ -1,0 +1,113 @@
+name: CI
+
+# Every push (§10 CI): firewall · CODES.md diff · money lint · time lint ·
+# pytest. Any red is a stop.
+#
+# The vitest / svelte-check / golden-replay jobs land with the surfaces they
+# test (B1, C1, A6). A job that passes because nothing exists to run is worse
+# than no job — it reads green and means nothing.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1" # the lockfile is the pin; CI never re-resolves
+
+jobs:
+  guardrails:
+    name: Guardrails (firewall, registry, money, time)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.11"
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      # The firewall runs first: a cross-root import makes every other result
+      # meaningless, because the thing under test is no longer three surfaces.
+      - name: Import firewall (all roots, both directions, design/ assets-only)
+        run: uv run scripts/lint_firewall.py
+
+      - name: docs/CODES.md matches the enums
+        run: uv run scripts/registry_diff.py --check
+
+      - name: No code in spec prose is missing from the registry
+        run: uv run scripts/registry_diff.py --prose
+
+      - name: Money lint (paise integers, no float in a money path)
+        run: uv run scripts/lint_money.py
+
+      - name: Time lint (UTC, no naive datetimes)
+        run: uv run scripts/lint_time.py
+
+  checks:
+    name: Lint, types, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.11"
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - name: ruff
+        run: |
+          uv run ruff check src scripts tests
+          uv run ruff format --check src scripts tests
+
+      - name: mypy --strict
+        run: uv run mypy src scripts
+
+      # Includes the planted-violation tests, which are the only proof the
+      # guardrails above actually bite.
+      - name: pytest
+        run: uv run pytest -q
+
+  compose:
+    name: Boots behind the proxy split
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start
+        run: docker compose up -d --build sidecar caddy
+
+      - name: The sidecar answers through Caddy on the Merchant domain
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -H 'Host: spoiledduckie.localhost' http://127.0.0.1/agentic/codes >/dev/null; then
+              echo "up after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS -H 'Host: spoiledduckie.localhost' http://127.0.0.1/agentic/codes | tee /dev/stderr | grep -q 'sold-out'
+
+      - name: The store's routes are the store's, not the sidecar's
+        run: |
+          # `/` must NOT be answered by the sidecar. The store is not built yet,
+          # so a 502 from Caddy is correct and a 200 would mean the split leaked.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: spoiledduckie.localhost' http://127.0.0.1/)
+          test "$code" = "502" || { echo "expected 502 from an absent store, got $code"; exit 1; }
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop
+        if: always()
+        run: docker compose down -v

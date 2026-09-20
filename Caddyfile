@@ -1,0 +1,46 @@
+# The proxy split (SPEC §10). One origin per surface, because passkeys and tap
+# tokens are bound to the origin the Consumer is actually looking at.
+#
+# Both site blocks exist from day one: chat.localhost with nothing serving it is
+# a browser error page where the third surface should be (§10).
+#
+# TLS is the proxy's job in a real install — see Caddyfile.tls.example. Here the
+# demo runs plain http on *.localhost, which browsers resolve to loopback.
+
+{
+	admin off
+	auto_https off
+}
+
+http://spoiledduckie.localhost {
+	# The sidecar's three mount points. Everything else is the store's.
+	handle /.well-known/* {
+		reverse_proxy sidecar:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar:8000
+	}
+	handle {
+		reverse_proxy store:3000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://chat.localhost {
+	reverse_proxy buyer-chat:3001
+
+	log {
+		output stdout
+		format console
+	}
+}

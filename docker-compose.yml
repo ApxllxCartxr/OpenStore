@@ -1,0 +1,65 @@
+# The demo, as five services (§10). Mount paths and the origin contract are the
+# product; the public demo runs the same split on Fly.io as three apps, because
+# Fly scopes secrets per app rather than per process (ADR-0019).
+#
+# `store` and `buyer-chat` are built by their own phases (B1, C1). Until then
+# Caddy's routes for them answer 502, which is the honest answer — the route
+# exists, the upstream does not yet.
+
+name: openstore
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      sidecar:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # One deploy, one Merchant domain (ADR-0007).
+      OPENSTORE_MERCHANT_DOMAIN: spoiledduckie.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://spoiledduckie.localhost
+      WEBAUTHN_RP_ID: spoiledduckie.localhost
+      WEBAUTHN_RP_NAME: SpoiledDuckie
+      SIDECAR_DATABASE_URL: postgresql+psycopg://sc_app:sc_app_dev@postgres:5432/sidecar
+      STORE_INTERNAL_URL: http://store:3000
+      TRAIT_BASE_URL: http://store:3000/trait
+      PAYMENT_PROVIDER: fake
+      OPENSTORE_DEMO_MODE: "true"
+      # The SSRF exception, for the compose demo's own chat and nothing else
+      # (§10.1). Boot is refused if this is set alongside live provider keys.
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres_dev
+    volumes:
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
