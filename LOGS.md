@@ -4,6 +4,35 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · A2 — trait client and conformance fake
+
+**DONE WHEN met.** Conformance suite green: retry-safety, external-sale visibility, byte-for-byte quote determinism, a flat-price Merchant's zero-value lines passing unchanged, and `variant-required` on a group id at every door taking a SKU. `uv run pytest -q` → **159 passed**, everything else clean.
+
+### The fake is a Merchant, not a mock
+
+It is an ASGI app and the client reaches it over real HTTP through `httpx.ASGITransport`, so every test exercises HMAC verification, idempotency replay and reason-code → status mapping rather than stepping around them. It also misbehaves on purpose, because that is what the Gate is for: `quote_drift_paise` moves the price between calls so `quote-fresh` has something real to catch, and `external_sale()` lowers stock outside the agent path so "the next Gate re-reads fresh" is a test rather than a claim.
+
+**§16.11's arithmetic is implemented in the fake, deliberately, and A3 will re-implement the check independently.** If the Gate and the Merchant shared a pricing module, `quote-consistent` would prove only that the sidecar agrees with itself. The fake computes the §16.11 worked example from its own seed and lands on 249800 / 9900 / 15827 / 11894 / 11894 / 259700 — the same numbers hour 0's golden vector pins, reached by a different route.
+
+### The client is async, and that was a design decision rather than a test convenience
+
+`httpx.ASGITransport` is async-only, which forced the question early. The answer would have been the same regardless: a synchronous HTTP call inside a FastAPI handler blocks the event loop for the length of the Merchant's round trip, and the Gate makes several per decision (`quote`, `reserve`, `orders.set-status`). Under any concurrency that is the sidecar serialising itself behind the slowest Merchant response. Better found at A2 than at A3 with the Gate written against a blocking client.
+
+### Three decisions worth the ink
+
+**The signature covers the path, not only the body.** `release` and `commit` both carry `{order_id}` and nothing else, so a signature over the body alone makes a signed release a signed commit. An attacker who can redirect a request gets a free close of somebody's hold.
+
+**`reserve` checks every line before it moves any stock.** Decrementing as it goes leaves a basket half-reserved when line three is sold out, and the caller then holds stock it has no order to release.
+
+**A refusal replays as a refusal.** Same idempotency key, same result, including the error — the Merchant caches the refusal too. A retry that succeeds where the first attempt refused is a second hold with extra steps, and the test plants a restock between the two attempts to prove it.
+
+### Two guardrail findings from A2's own code
+
+- The money lint flagged `timeout: float = 10.0` in the client. A timeout is a duration, not money — but rather than teach the lint an exception, the field is now `int` seconds. "No float anywhere in the sidecar" is enforceable; "no float except where it is fine" is not.
+- `ruff format` wrapped the tax extraction and moved `# money-lint: decimal` onto the closing-paren line, so the line-anchored marker missed and the lint failed on correct code. The marker now matches anywhere in the **enclosing statement's** line span. A guardrail that fails whenever the formatter rewraps is a guardrail somebody deletes.
+
+---
+
 ## 2026-09-20 · A1 — skeleton and guardrail harness
 
 **DONE WHEN met.** App boots behind the proxy split; the harness goes red on planted violations and green on the tree. `uv run pytest -q` → **105 passed**. `ruff`, `mypy --strict`, firewall, money lint, time lint, `CODES.md` diff and the prose scan all clean.

@@ -32,13 +32,31 @@ DEFAULT_ROOTS = [Path("src/openstore/sidecar")]
 
 
 class MoneyVisitor(ast.NodeVisitor):
+    """Walks the tree, tracking which statement it is inside.
+
+    The marker is matched against the **whole statement**, not the one line the
+    operator happens to sit on: `ruff format` moves a trailing comment to the
+    closing paren when it wraps an expression, and a guardrail that fails
+    whenever the formatter rewraps is a guardrail somebody deletes.
+    """
+
     def __init__(self, path: Path, source: str) -> None:
         self.path = path
         self.lines = source.splitlines()
         self.problems: list[tuple[int, str]] = []
+        self._statement: ast.stmt | None = None
+
+    def visit(self, node: ast.AST) -> None:
+        if isinstance(node, ast.stmt):
+            self._statement = node
+        super().visit(node)
 
     def _allowed(self, lineno: int) -> bool:
-        return ALLOW_MARKER in self.lines[lineno - 1]
+        stmt = self._statement
+        start = stmt.lineno if stmt else lineno
+        end = (stmt.end_lineno or start) if stmt else lineno
+        span = self.lines[start - 1 : end]
+        return any(ALLOW_MARKER in line for line in span)
 
     def visit_Constant(self, node: ast.Constant) -> None:
         if isinstance(node.value, float):

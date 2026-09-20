@@ -138,3 +138,52 @@ def test_error_envelope_requires_a_code_and_a_detail() -> None:
     validator = _validator(DOORS_SCHEMA["$defs"]["error"])
     validator.validate({"error": {"code": "sold-out", "detail": "2 left; try 2 or fewer."}})
     assert not validator.is_valid({"error": {"detail": "something went wrong"}})
+
+
+def test_models_and_schema_agree_on_the_quote() -> None:
+    """`models.py` says the JSON Schema is the contract a Merchant implements
+    against and these are what the sidecar holds. A field in one and not the
+    other is a divergence that shows up as a validation error on a correct
+    Merchant."""
+    from openstore.sidecar.trait.models import Quote as QuoteModel
+
+    schema_fields = set(QUOTE_SCHEMA["properties"])
+    model_fields = set(QuoteModel.model_fields)
+    assert schema_fields == model_fields, {
+        "schema only": sorted(schema_fields - model_fields),
+        "model only": sorted(model_fields - schema_fields),
+    }
+
+
+def test_models_and_schema_agree_on_the_quote_line() -> None:
+    from openstore.sidecar.trait.models import QuoteLine
+
+    schema_fields = set(QUOTE_SCHEMA["$defs"]["quoteLine"]["properties"])
+    assert schema_fields == set(QuoteLine.model_fields)
+
+
+def test_the_fake_quotes_something_the_schema_accepts() -> None:
+    """The conformance fake is a Merchant. If its Quote does not validate
+    against the published schema, the schema is describing nobody."""
+    import asyncio
+
+    import httpx
+    from openstore.sidecar.trait.client import TraitClient
+    from openstore.sidecar.trait.fake import make_app
+    from openstore.sidecar.trait.models import Destination, Line
+    from openstore.sidecar.trait.seed import seeded
+
+    async def run() -> dict[str, object]:
+        transport = httpx.ASGITransport(app=make_app(seeded(), "s"))
+        async with TraitClient(
+            "http://m",
+            "s",
+            client=httpx.AsyncClient(transport=transport, base_url="http://m"),
+        ) as client:
+            quote, _ = await client.quote(
+                [Line(sku="SD-TOTE-BLK-M", qty=1), Line(sku="SD-CHARMBAR-SEAT", qty=1)],
+                Destination(line1="Dadar West", city="Mumbai", state="MH", postal_code="400028"),
+            )
+            return quote.model_dump()
+
+    _validator(QUOTE_SCHEMA).validate(asyncio.run(run()))
