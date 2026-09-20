@@ -102,9 +102,26 @@ Cost: `SPEC.md §1` and `PLAN-merchant-site.md` say Next.js and need a one-line 
 
 `upi-pin` is the spec default and the honest Indian story. `passkey` is the stronger binding and the thing that makes an audience sit up — and `main` already has 621 lines of working WebAuthn RP plus a virtual authenticator. Shipping both costs an afternoon rather than a day, and the demo toggles between them to show the receipt's Binding line changing. `confirmed-intent` ships too, because COD rests on it (D4). `mandate` is registered in the closed set, recorded, and refused with a named code — the seam a UAP adapter lands on rather than an ADR reopening.
 
-### D3 — MCP and UCP are live; ACP and AP2 are declared and refused
+### D3 — All four protocols are live: MCP, UCP, ACP, AP2
 
-The protocol toggle stays in the header because it is the clearest statement of "one core, many envelopes." MCP is live (the chat speaks it). UCP is a live thin translator — `main` already carries the UCP manifest, envelope shape, and conformance goldens. ACP and AP2 appear in the toggle **disabled, with the conformance badge naming the reason**. A greyed toggle that tells the truth reads better than four tabs where two are lies, and the badge already has to name deviations (`SPEC.md §9`), so this is the mechanism working rather than an exception to it.
+*(Revised. This previously shipped ACP and AP2 as declared-and-refused; they are now real translators.)*
+
+The protocol toggle is the clearest statement of "one core, many envelopes," and two live tabs plus two greyed ones makes that claim at half strength. All four ship as thin translators over the same core: **validate the foreign envelope → core calls → translate back.** No second checkout, no second ledger, no second receipt, and the core Transcript stays byte-identical across all four — which is the whole point and the thing CI asserts.
+
+**The deviations are not a weakness here; they are the argument.** Each protocol wants something at the completion step that this product refuses on purpose, and the badge names it inline:
+
+- **MCP** — live and spoken by the demo chat. No completion model of its own, so no deviation beyond the redirect handoff.
+- **UCP** — its totals breakdown maps 1:1 onto the Quote, so the translator carries no pricing logic. Foreign direct-checkout-inside-AI maps to our same-domain approve handoff, which is **UCP's own buyer-escalation path**, not a departure from it.
+- **ACP** — built around a **delegated payment credential** (a shared payment token) handed to the agent. That is exactly the authority ADR-0008 and ADR-0013 removed from agents, so the translator accepts the whole ACP flow and **refuses the delegated-credential completion step with a named code, redirecting to the approve ceremony instead**. Refused on purpose, not unimplemented — and the badge says which.
+- **AP2** — mandate-based. Its **human-present** mode, where the buyer approves the cart in real time, maps cleanly onto our approve ceremony and the `cart_hash` binding. Its **human-not-present** mode rests on a pre-signed intent mandate, which is our `mandate` Authority kind: defined, registered in `docs/CODES.md`, recorded, and **refused in v1** (ADR-0017). So AP2 works for the mode we support and refuses the one we do not, by name.
+
+Two protocols where the refusal *is* the product beat is worth more on stage than two greyed tabs, and it makes the conformance badge do real work across four envelopes instead of two.
+
+**Cost and how it is funded, stated honestly:** A6 goes 2h → 4h (+2.0). Paid for by taking **cut #2 up front** (the `/agentic` Attribution and Health tabs, −1.0) and making the console's **Exposure tab read-only over seeded values** (−0.5). Net **+0.5h on Track P, which moves it from −0.5h to −1.0h against the day.** It is not free and this document is not going to pretend it is.
+
+Where that hour comes from, in order: the rehearsal block is 1.5h and can compress to 1.0h; failing that, A6's own step-0 escape hatch recovers the full 2h automatically — **if either spec cannot be fetched, that protocol downgrades to declared-and-refused and the badge says so**, which means the risk here is self-limiting rather than open-ended. See §12.
+
+**Hard prerequisite, and it is not optional:** ACP and AP2 are young specifications and nobody on this build has their wire formats memorised. **Fetch the published specs before writing either translator, pin the version you read in `LOGS.md`, and map against the document — never against a remembered shape.** §0's "never invent an identifier" rule applies with full force to foreign envelope fields. A translator built from memory is a conformance claim that is not true, which is the one failure this product cannot survive.
 
 ### D4 — COD is in
 
@@ -482,16 +499,22 @@ So whoever writes the verifier writes the signer, in the same sitting, against t
 - Browser receipt viewer at **`/receipt/<id>`, a public route outside the console's auth boundary**. It cannot live under `/agentic`, which is session-authenticated for the Merchant — a receipt that opens by unguessable ID *with no login* is the whole point, and putting it behind the Merchant's session means no Consumer can ever open their own. The ID is the only credential; 128 bits is the protection. In the design system, printable.
 - **DONE WHEN**: clean bundle verifies; a one-digit tamper fails naming the link; an erased order's bundle still verifies and renders Destination as `erased` while an altered row renders `tampered`; a partial refund produces v2 showing `Refunded ₹X of ₹Y` with v1 still valid; a bundle signed by a since-revoked key verifies if signed before revocation and fails `untrusted-key` if after; live keys refused at boot.
 
-### A6 · Protocols — 2h
+### A6 · Protocols — 4h *(all four live; was 2h for two — see D3)*
 
-- `protocols/mcp.py` — live. `tools/list`, tool schemas, and envelope ported from `main`; every body rewired to the new core. Least-privilege per tool, scope-checked.
-- `protocols/ucp.py` — live thin translator. UCP's totals breakdown (`subtotal / items_discount / fulfillment / tax / total`) maps 1:1 onto the Quote, so the translator carries **no pricing logic**. Foreign direct-checkout-inside-AI maps to our same-domain approve handoff, which is UCP's own buyer-escalation path rather than a departure from it.
-- `protocols/registry.py` — ACP and AP2 registered, declared unimplemented, refusing with a named code.
-- **Conformance badge** names its deviations inline: capability supported / redirect-only completion / which payment instruments this Merchant has enabled / which envelopes are live. A golden replay asserts the deviation text is present. This is the thing that keeps "conformant" from becoming a lie (per the standing note on authority deviation).
-- Header toggle `[MCP | UCP | ACP·off | AP2·off]` replays the same flow through the selected envelope.
-- **DONE WHEN**: one golden end-to-end replay per live protocol (search → allow → cart → tap → fake-UPI → receipt → verify) with the **core Transcript pinned byte-identical** across envelopes; conformance goldens from `main` pass; the badge's deviation text is asserted.
+> **STEP 0, BEFORE ANY CODE.** Fetch the published ACP and AP2 specifications, and the UCP spec. Record in `LOGS.md`: the URL, the version or date read, and the exact capability/endpoint names each one defines. **Map against those documents, never against a remembered shape.** If a spec cannot be fetched, log it under `## BLOCKED — A6`, ship that protocol as declared-and-refused with the badge saying exactly that, and move on — a translator built from memory is a false conformance claim, which is the one failure this product cannot survive.
 
-### A7 · `/agentic` console — 2.5h
+- `protocols/mcp.py` — live. `tools/list`, tool schemas and envelope ported from `main`; every body rewired to the new core. Least-privilege per tool, scope-checked.
+- `protocols/ucp.py` — live. UCP's totals breakdown maps 1:1 onto the Quote, so the translator carries **no pricing logic**. Direct-checkout-inside-AI maps to our approve handoff, which is UCP's own buyer-escalation path.
+- `protocols/acp.py` — live. Accepts the ACP flow end to end and **refuses the delegated-payment-credential completion step** with a named code, handing back the approve URL instead. This is ADR-0008 and ADR-0013 enforced at the envelope boundary rather than an unimplemented gap, and the badge says so in those words.
+- `protocols/ap2.py` — live. **Human-present** mode maps onto the approve ceremony and the `cart_hash` binding. **Human-not-present** rests on a pre-signed intent mandate, which is the `mandate` Authority kind — registered, recorded, and refused in v1 with `authority-kind-not-enabled` (ADR-0017).
+- `protocols/registry.py` — one place naming all four, their live/refused capabilities, and their deviation text. The header toggle and the badge both read from it, so a protocol cannot be live in one and stale in the other.
+- **Conformance badge** names its deviations inline, per protocol: capability supported, redirect-only completion, which payment instruments this Merchant has enabled, and **which completion step this envelope wanted that we refuse and why**. A golden replay asserts the deviation text is present for every protocol. This is what keeps "conformant" from becoming a lie.
+- Header toggle `[MCP | UCP | ACP | AP2]` replays the same flow through the selected envelope.
+- **DONE WHEN**: one golden end-to-end replay **per protocol** (search → allow → cart → tap → fake-UPI → receipt → verify) with the **core Transcript pinned byte-identical across all four** — envelopes differ, core decision bytes do not, and that assertion is the single most valuable test in this phase; an ACP delegated-credential completion attempt refuses with its named code and returns an approve URL; an AP2 human-not-present mandate refuses `authority-kind-not-enabled` while human-present completes; `main`'s MCP and UCP conformance goldens still pass; the badge's per-protocol deviation text is asserted; every spec URL and version is recorded in `LOGS.md`.
+
+**Scope boundary, so this does not become six hours:** ACP and AP2 are **request-path live and golden-replay proven — there is no client integration for either.** You can POST a correct envelope and get a correct response including the named refusal. Only MCP has a live client (the demo chat). That is genuinely live rather than stubbed, and it is what the 4h buys.
+
+### A7 · `/agentic` console — 1.0h *(2.5h less cut #2 and a read-only Exposure tab — funding A6's four protocols, see D3)*
 
 Instrument-panel styling per §4. Tabs:
 
@@ -499,12 +522,12 @@ Instrument-panel styling per §4. Tabs:
 - **Policy** — window / count / qty / blocked / tags / caps, CRUD, with caps evaluated at the Product Group stated in the UI so nobody wonders. **Seeded values in §16.4.**
 - **Provider** — adapter, enabled method subset, webhook status, link lifetime. **Seeded: `fake`, methods `upi` + `cash-on-delivery`, link lifetime 15 min (§16.4, §16.7).**
 - **Authority** — which kinds this Merchant accepts. **Seeded: `upi-pin`, `passkey`, `confirmed-intent`; mechanisms `upi-verify` + `passkey` (§16.4).**
-- **Exposure** — which policies are public to agents.
+- **Exposure** — which policies are public to agents. **Read-only over the seeded values (§16.4)** — display, no editing.
 - **Agents** — allowlist, blocklist, tier, `agent_id`, last seen, revoke.
 - **Receipts** — list, open, verify-in-browser.
-- **Attribution** — agent-sourced orders and revenue split by `agent_id` over a date range. *The number that tells a Merchant whether any of this is working* — which makes it the most important tab for the pitch, not the least.
-- **Health** — overdue holds (the sidecar owns both expiry clocks, so a wedged sidecar holds stock forever and the only defence is that somebody can see it), gate refusals by reason code, authority outcomes by kind, webhook lag, reconciler drift, and the dev-allowlist banner if it is set.
-- **DONE WHEN**: every tab renders against seeded data; policy edits change Gate outcomes without a restart; an overdue hold appears within one sweep interval and the documented release path goes through the sidecar and never a Merchant-side write.
+- ~~**Attribution**~~ — *(**cut #2, taken up front to fund A6.** Full scope kept for later: agent-sourced orders and revenue split by `agent_id` over a date range — the number that tells a Merchant whether any of this is working. The orders already carry `agent_id`, so this is a query and a table when it returns, not a redesign.)*
+- **Health** — ~~the full panel~~ *(cut #2)*, reduced to the two things that cannot be dropped: **overdue holds** (the sidecar owns all three expiry clocks, so a wedged sidecar holds stock forever and the only defence is that somebody can see it) and the **dev-allowlist banner** when it is set. Counters still emit to structured logs and `/healthz`; they just have no panel.
+- **DONE WHEN**: every shipped tab renders against seeded data; policy edits change Gate outcomes without a restart; an overdue hold appears within one sweep interval and the documented release path goes through the sidecar and never a Merchant-side write; the dev-allowlist banner shows when the allowlist is non-empty.
 
 ### A8 · Mount, install, operations — 1.5h
 
@@ -757,18 +780,18 @@ Phase hours, plus the three integration windows and the closing pass, against 13
 | A4 Authority + orders (incl. COD) | 4.5 | | B2 the nine doors | 3.0 |
 | **A4c agent signing kit** | **1.5** | | B3 admin *(cut 4a applied)* | 1.5 |
 | A5 evidence + verifier | 2.0 | | B4 notifications + health | 0.5 |
-| A6 protocols | 2.0 | | C1 chat scaffold + tool loop | 3.5 |
-| A7 `/agentic` console | 2.5 | | C2 direct-add + TOFU | 1.5 |
+| A6 protocols (**all four**) | 4.0 | | C1 chat scaffold + tool loop | 3.5 |
+| A7 `/agentic` console *(cut #2 applied)* | 1.0 | | C2 direct-add + TOFU | 1.5 |
 | A8 mount + install + feed | 1.5 | | C3 shopping flow | 4.5 |
 | C5 toggle + smoothness gates | 1.0 | | C4 tap + pay + receipt | 2.0 |
-| **Phase subtotal** | **23.5** | | **Phase subtotal** | **23.5** |
+| **Phase subtotal** | **24.0** | | **Phase subtotal** | **23.5** |
 | 3 × integration window | 1.5 | | 3 × integration window | 1.5 |
 | Rehearsal + `make up` | 1.5 | | Polish pass | 1.5 |
-| **Total** | **26.5** | | **Total** | **26.5** |
+| **Total** | **27.0** | | **Total** | **26.5** |
 | Available (2 × 13h) | 26.0 | | Available (2 × 13h) | 26.0 |
-| **Margin** | **−0.5h** | | **Margin** | **−0.5h** |
+| **Margin** | **−1.0h** | | **Margin** | **−0.5h** |
 
-Both tracks land **half an hour over**, and the only compressible thing left is the closing pass. That is a tight plan, not a comfortable one, and it is the honest number rather than a flattering one. **Without cuts 4a and 5, Track S is 26.5 + 3.0 = 29.5 against 26.0 — three and a half hours over.** Which is why the configuration below is decided at hour 0 and not discovered at hour 22.
+Track P is **an hour over** (it absorbed D3's four-protocol decision) and Track S **half an hour over**. The only compressible things left are the closing passes: Track P's rehearsal block and Track S's polish. Track P also carries A6's automatic escape — an unfetchable spec downgrades that protocol and returns 2h without a decision being needed. That is a tight plan, not a comfortable one, and it is the honest number rather than a flattering one. **Without cuts 4a and 5, Track S is 26.5 + 3.0 = 29.5 against 26.0 — three and a half hours over.** Which is why the configuration below is decided at hour 0 and not discovered at hour 22.
 
 ### The configuration — SETTLED: **Option B, two builders, no third**
 
@@ -821,16 +844,15 @@ Written for **Option B** (two builders, cuts 5 and 4a taken at hour 0). Under Op
 |---|---|---|
 | 14–15.5 | **A4c agent signing kit** *(files land in `demo/buyer-chat/`; same sitting as A4's verifier)* | C1 continues: chat UI, session DB, tool loop, model seam |
 | 15.5–17.5 | A5 evidence + verifier | C1 finishes *(consumes A4c's identity module)*, then C2 starts |
-| 17.5–19.5 | A6 protocols (MCP + UCP + badge) | C2 finishes by 17.5 → **C3 shopping flow** starts |
-| 19.5–20.5 | A7 `/agentic` console pt 1 | C3 continues |
-| **20.5–21** | **★ Integration 2** *(both tracks, 30 min — needs C2 green, which it is)* | |
-| 21–22 | A7 pt 2 | C3 continues |
-| 22–23.5 | A8 mount + install + feed | C3 finishes → C4 starts |
-| 23.5–25 | C5 protocol toggle + smoothness gates | C4 tap + pay + receipt |
+| 17.5–21 | **A6 protocols — all four + badge** *(step 0: fetch the ACP and AP2 specs and log their versions before writing either translator; if one is unfetchable, downgrade it to declared-and-refused and reclaim the time)* | C2 finishes by 17.5 → **C3 shopping flow** starts |
+| **21–21.5** | **★ Integration 2** *(both tracks, 30 min — needs C2 green, which it is)* | |
+| 21.5–22.5 | A7 `/agentic` console *(trimmed — cut #2 taken up front)* | C3 continues |
+| 22.5–24 | A8 mount + install + feed | C3 finishes → C4 starts |
+| 24–25 | C5 protocol toggle *(now four tabs)* + smoothness gates | C4 tap + pay + receipt |
 | **25–25.5** | **★ Integration 3** *(both tracks, 30 min)* | |
-| 25.5–26 | `make up` from a clean checkout; rehearse §13 twice | Polish: empty and error states, dark mode, mobile, the receipt's print view |
+| 25.5–26 | `make up` from a clean checkout; rehearse §13 | Polish: empty and error states, dark mode, mobile, the receipt's print view |
 
-The last row is where the −0.5h lives: the polish pass is budgeted at 1.5h and gets 0.5h. **Polish is the buffer — not a DONE WHEN gate, and not the rehearsal.** Present an unrehearsed demo and the plan was wasted; present one with plain empty states and nobody notices.
+The last row is where both overruns live: polish is budgeted 1.5h and gets 0.5h, rehearsal 1.5h and gets 0.5h. **Polish is the buffer. The rehearsal is not** — present an unrehearsed demo and the whole plan was wasted, while plain empty states go unnoticed. If Track P is behind at Integration 3, take cut #1 (ACP and AP2 back to declared-and-refused) rather than eating the rehearsal; it is a clean reversal and the badge still tells the truth.
 
 **A4c is scheduled first on day 2 for a reason**: C1 consumes it, so it has to exist before Track S needs it, and A4's verifier is still fresh in the writer's head from the previous evening.
 
@@ -868,10 +890,10 @@ Expect: exit 0 then exit 1; the receipt prints the Authority kind, its mechanism
 
 Decide at an integration point, never mid-phase. Each cut names what it costs on stage, because that is the thing you are actually trading.
 
-**Cuts 4a and 5 are already taken at hour 0 under Option B** and are not available again. What remains, in order:
+**Cuts 4a and 5 are taken at hour 0 under Option B; cut 2 is taken up front to fund A6's four protocols (D3).** None of the three is available again. What remains, in order:
 
-1. **UCP translator** → MCP only, badge says so *(−2h Track P; costs the "one core, many envelopes" beat)*
-2. **`/agentic` Attribution and Health tabs** → keep Keys/Policy/Provider/Receipts *(−1h Track P; costs the "is this working" number)*
+1. **ACP and AP2** → back to declared-and-refused, MCP + UCP live *(−2h Track P; costs the four-envelope beat, but the badge still tells the truth — this is a clean reversal, not damage)*
+1b. **UCP too** → MCP only *(−1h more; take only if A6 is genuinely drowning, since it costs "one core, many envelopes" entirely)*
 3. **`passkey` Authority** → `upi-pin` + `confirmed-intent` only *(−1.5h Track P; costs the biometric moment, keeps COD and keeps A4c, which the chat still needs)*
 4. **Admin down to read-only** — the blunt version of 4a, if trimming was not enough *(−1.5h more from Track S; costs "a Merchant can operate it," which is Surface 2's whole purpose — this is the first cut that takes a claim away rather than a convenience)*
 5. **C3's non-essential UI states** — keep the picker, the verbatim quote card, the signature check and the eleven reason codes; drop filters and the add-on flow *(−1h Track S; the thesis survives, the polish does not)*
@@ -893,6 +915,8 @@ Note that cuts 1–3 are all Track P, which has the margin — so the first thre
 6. **The proof.** `openstore verify bundle.json` → green, printing the Authority kind and its Binding rather than an unqualified "verified." Flip one byte → red, naming the exact link. Then open admin, refund half, and show v2 appended while v1 stays verifiable. *(60s)*
 
 7. **Cash on delivery**, which is ~60% of Indian ecommerce and the thing every competitor's demo quietly omits. Same basket, choose COD: the sidecar calls no provider, writes no Ledger entry, and holds the stock anyway. Dispatch it from admin — a gapless invoice number lands while the order is still `confirmed`, before `paid` exists — then Record collection and watch a `CAPTURE` appear with no `RESERVE` in front of it. Say out loud that **the Merchant asserts the cash and nothing here can check it**, that this is correct because it is their money and their Ledger, and that what `confirmed-intent` bought them is evidence the basket was committed to by someone holding a real funding instrument, not a phone number. *(75s)*
+
+7b. **Four envelopes, one core.** Flip the header toggle through `[MCP | UCP | ACP | AP2]` and replay the same basket. The conformance badge changes with each, naming what that protocol wanted and what this Merchant refuses: **ACP** wanted a delegated payment token handed to the agent — refused, here is the approve URL instead; **AP2** human-not-present wanted a pre-signed mandate — refused, registered, named; human-present completes normally. Then show the CI assertion that the **core Transcript bytes are identical across all four**. *(60s — this is the architecture beat. If the room remembers one thing, make it this.)*
 
 **If there is an eighth minute**, show a refusal: `SD-PLUSH-MINI` already carries a 2-per-order cap (§16.4), so try for three and watch `cap-exceeded` fire — evaluated at the Product Group, so taking one of each variant cannot walk around it either. That is the whole thesis in one refusal.
 
@@ -1126,7 +1150,18 @@ Demo basket, **destination B (Mumbai, 400028)**, no discount code. This is the �
 
 Both GST splits in one Quote, which is the point of the basket. If your implementation produces any other number, it is wrong — not the table.
 
-### 16.12 What is deliberately not pinned
+### 16.12 Protocol specifications — fetch, do not remember
+
+Four envelopes ship (D3). **MCP and UCP have working references on `main`**; ACP and AP2 do not, and neither is old enough for anyone's memory to be trusted with its field names.
+
+Before writing `protocols/acp.py` or `protocols/ap2.py`, fetch the published specification and record in `LOGS.md`: the URL, the version or date read, the capability and endpoint names it defines, and the exact name of the completion step being refused. Map against the document.
+
+- **ACP** — the completion step hands the agent a delegated payment credential. Our refusal of that is ADR-0008 and ADR-0013, enforced at the envelope boundary with a named code plus an approve URL.
+- **AP2** — mandate-based, with human-present and human-not-present modes. Human-present maps onto the approve ceremony; human-not-present is the `mandate` Authority kind, refused in v1 per ADR-0017.
+
+Those two sentences are the *shape* of each deviation and are safe to rely on. **Every field name, envelope key and endpoint path comes from the fetched document, not from this plan.** If a spec cannot be retrieved, that protocol ships declared-and-refused with the badge saying exactly why, and A6 reclaims its time — this is a designed escape, not a failure.
+
+### 16.13 What is deliberately not pinned
 
 Copy, microcopy, and empty-state wording — write them in the voice §4 describes. Product images — generated placeholders in the design palette; no scraping. Exact component structure inside a phase. Anything §12 lists as a cut.
 

@@ -4,6 +4,45 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · D3 REVISED — all four protocols live (ACP and AP2 promoted)
+
+Operator asked for the ACP and AP2 translators. D3 previously shipped them declared-and-refused. They are now real translators alongside MCP and UCP.
+
+### Why this is worth real hours
+
+Two live tabs plus two greyed ones makes the "one core, many envelopes" claim at half strength. More to the point, **the deviations are the argument rather than an embarrassment**: each of these protocols wants something at the completion step that this product refuses on purpose, and the badge now names it per protocol.
+
+- **ACP** is built around a delegated payment credential handed to the agent — exactly the authority ADR-0008 and ADR-0013 removed. The translator accepts the whole flow and refuses that one step with a named code, returning the approve URL. Refused on purpose, not unimplemented.
+- **AP2** is mandate-based. Human-present maps cleanly onto the approve ceremony and the `cart_hash` binding; human-not-present rests on a pre-signed intent mandate, which is the `mandate` Authority kind — registered, recorded, refused in v1 (ADR-0017).
+
+Two protocols where the refusal *is* the product beat beats two greyed tabs, and the conformance badge now does real work across four envelopes. New demo beat 7b at 60s, flagged as the architecture moment.
+
+### Cost, and the correction to my own number
+
+A6 2h → 4h. Funded by taking **cut #2 up front** (`/agentic` Attribution and Health tabs, −1.0) and making **Exposure read-only** over seeded values (−0.5). A7 drops 2.5h → 1.0h.
+
+I first wrote this as "net −0.5h, unchanged." **That was wrong.** +2.0 against −1.5 is net +0.5, so **Track P moves from −0.5h to −1.0h** against the day. Corrected in the arithmetic table and in D3 rather than smoothed over. Track S is untouched at −0.5h.
+
+Where the hour comes from: the rehearsal block compresses 1.5h → 0.5h, and A6 carries an automatic escape (below) that returns 2h without anyone deciding. Noted explicitly that **the rehearsal is not the buffer** — if Track P is behind at Integration 3, take cut #1 and reverse ACP/AP2 rather than skipping the rehearsal.
+
+### The prerequisite that makes this safe
+
+ACP and AP2 are young specifications and **nobody on this build has their wire formats memorised, including whoever wrote this plan.** A translator built from memory is a false conformance claim, which is the one failure this product cannot survive — the whole pitch rests on the badge being honest.
+
+So A6 now opens with a blocking **step 0**: fetch the published specs, record URL and version in `LOGS.md`, map against the document. §16.12 repeats it and states the boundary precisely — the *shape* of each deviation (ACP's delegated credential, AP2's two modes) is safe to rely on from this plan; **every field name, envelope key and endpoint path comes from the fetched document.**
+
+**If a spec cannot be retrieved, that protocol ships declared-and-refused with the badge saying exactly why, and A6 reclaims its time.** That is a designed escape, not a failure, and it is what makes this addition self-limiting rather than an open-ended risk on the track with no margin.
+
+### Cut list renumbered
+
+Cut #1 is now "ACP and AP2 back to declared-and-refused" (−2h, a clean reversal), with #1b "UCP too" (−1h more) only if A6 is genuinely drowning. Cut #2 is spent. Cuts 4a and 5 remain spent from the Option B decision.
+
+### Also changed
+
+`protocols/registry.py` is now one place naming all four protocols, their live/refused capabilities and their deviation text, with the header toggle and the badge both reading from it — so a protocol cannot be live in one and stale in the other. A6's DONE WHEN requires a golden replay per protocol with **the core Transcript byte-identical across all four**, which is the single most valuable assertion in the phase. Day 2 schedule rebuilt: A6 occupies 17.5–21, Integration 2 moves to 21–21.5.
+
+---
+
 ## 2026-09-20 · Pre-hour-0 validation — four defects found and fixed
 
 Last pass before the build starts. Cross-checked §16 against §6, §8 and §13, and checked whether hour 0 is executable as written. Four things were wrong.
