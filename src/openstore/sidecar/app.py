@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 
 from openstore.sidecar.core.codes import ReasonCode
 from openstore.sidecar.core.settings import Settings, get_settings
+from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
+from openstore.sidecar.verify.checks import verify
 
 app = FastAPI(
     title="OpenStore sidecar",
@@ -79,3 +81,41 @@ def codes() -> dict[str, list[str]]:
     refusal they were handed actually means. Generated from the enum — there is
     no second list."""
     return {"reason_codes": [c.value for c in ReasonCode]}
+
+
+@app.get("/receipt/{receipt_id}")
+def receipt(receipt_id: str) -> JSONResponse:
+    """The public receipt viewer.
+
+    **Outside the console's auth boundary, deliberately.** `/agentic` is
+    session-authenticated for the Merchant, and a receipt that opens by
+    unguessable ID *with no login* is the whole point — putting it there would
+    mean no Consumer could ever open their own. The ID is the only credential
+    and 128 bits is the protection.
+
+    A missing receipt and a wrong id answer identically, because the difference
+    between them is exactly the oracle the unguessable id exists to close.
+    """
+    store: ReceiptStore = get_receipt_store()
+    bundle = store.get(receipt_id)
+    if bundle is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "not-found", "detail": "No receipt with that id."}},
+        )
+
+    result = verify(bundle)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "receipt": bundle.to_dict(),
+            "verification": {
+                "status": result.exit_code.name,
+                "claims": result.claims,
+                "unopened": result.unopened,
+                "findings": [
+                    {"ok": f.ok, "label": f.label, "detail": f.detail} for f in result.findings
+                ],
+            },
+        },
+    )

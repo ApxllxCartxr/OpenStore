@@ -4,6 +4,38 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · A5 — evidence and verifier
+
+**DONE WHEN met.** **337 tests pass**; ruff, mypy --strict and all four guardrails clean.
+
+Five sections, hash-chained, ES256-signed, carrying their own JWKS snapshot. Exit codes 0/1/2 preserved from `main`, because a script piping receipts through the verifier needs to tell valid from tampered from untrusted without parsing prose.
+
+### The verifier reports rather than summarises
+
+A bundle never comes back "verified". It comes back with the Authority kind, the mechanism where there is one, and the Binding printed — and a `strength` line in the plan's own words. Under `upi-pin` that line says explicitly that the basket is bound *by reference through the Quote, not signed by the buyer*; under `passkey` it says buyer-attested over the exact basket. A COD `moved` section says the **Merchant asserts** the capture and no rail attested it.
+
+**A claim-ordering bug, caught by its own test.** The COD branch fired on `merchant_asserted` before checking whether anything had moved, so a bundle sealed at `confirmed` with an empty `moved` section announced "the Merchant asserts this CAPTURE" about a capture that had not happened. Emptiness is checked first now. Precisely the flattering-claim failure the section exists to avoid, produced by my own code.
+
+### Three details worth keeping
+
+- **The chain link covers the section's name, not just its bytes.** Without that, two sections with identical payloads would be interchangeable and a `told` could be presented as a `moved`.
+- **The JWKS snapshot is inside the signed payload.** A bundle whose key list could be swapped after signing would verify against whatever key an attacker supplied; a test swaps in a hostile keyring and expects `TAMPERED`.
+- **Erased verifies, altered does not.** Without the salt both PII sections report `unopened` and the bundle is `VALID`, because erasure must never break verification. With the salt and an altered row it is `TAMPERED`. Those are different states and the verifier says which.
+
+### COD sealing, and why it needed no new machinery
+
+Sealed at `confirmed` with an empty `moved` section — every other section is already final — and collection appends an entry as v2 through **exactly the path a refund uses**. The same function serves both because from the bundle's point of view they are the same act: a new money event on an order whose other four sections were settled. The Consumer has a verifiable receipt from the moment they commit rather than only after they pay.
+
+### `format_rupees`
+
+Written first as `f"₹{minor / 100:.2f}"` with a money-lint marker, which was the wrong instinct: the marker exists for exact decimal arithmetic, not for making the lint quiet. This is the number a Consumer reads off a receipt, so it is `divmod` — integer arithmetic with no rounding mode to get wrong.
+
+### The receipt viewer
+
+`/receipt/<id>` is mounted **outside** the console's auth boundary. `/agentic` is session-authenticated for the Merchant, and a receipt that opens by unguessable id *with no login* cannot live there — putting it there would mean no Consumer could ever open their own. A test asserts the request carries no session. A missing receipt and a wrong id answer identically.
+
+---
+
 ## 2026-09-20 · A4 — Authority, admission, order lifecycle
 
 **299 tests pass**; ruff, mypy --strict and all four guardrails clean.
