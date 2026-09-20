@@ -4,6 +4,38 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · Verification pass on the fetched specs — all claims hold, four refinements
+
+The step-0 findings were committed on the strength of page summaries. Re-fetched against raw sources asking for **verbatim quotes** rather than paraphrase, because those claims are now pinned authority that translators will be built from.
+
+### Verified verbatim — every load-bearing claim holds
+
+AP2, quoted from `docs/ap2/specification.md`:
+
+> "AP2 operates as a security feature within a Commerce Protocol."
+> "AP2 is designed explicitly to be compatible with the Universal Commerce Protocol (UCP) and integrates seamlessly."
+> "AP2 defines two Mandate types: Checkout Mandate and Payment Mandate."
+> "Verify that the hash of the Checkout JWT sent for approval matches the value included for the `checkout_hash` claim."
+> "The `vct` value includes a numeric suffix that acts as a schema version number (e.g. `mandate.payment.1`, `mandate.checkout.open.1`)."
+> "The Trusted Surface role is a UI surface that is trusted to get informed user consent for an Intent before creating a user-signed Mandate."
+> "Human Present (Direct): The User directly sees the closed Checkout and approves it and its payment explicitly."
+> "Human Not Present (Autonomous): The User sees and approves a set of constraints over what closed Checkout and Payment would meet their intent."
+
+**So the AP2-as-a-layer decision is not an interpretation — it is the specification's own sentence**, and it is now quoted in §16.12 so it can be defended in the room rather than asserted.
+
+ACP, from the raw `openapi.agentic_checkout.yaml`: all four path keys, all five operationIds and the header sets confirmed as recorded.
+
+### Four refinements
+
+1. **"Five endpoints" was loose.** It is **four paths, five operations** — `/checkout_sessions/{checkout_session_id}` carries both POST (`updateCheckoutSession`) and GET (`getCheckoutSession`). Corrected everywhere, because a pinned reference that miscounts its own surface invites a wrong implementation.
+2. **Headers are per-operation, not blanket.** `Authorization` and `API-Version` on all five; `Idempotency-Key` on the four POSTs only — **`getCheckoutSession` has none**; `Content-Type` only where there is a body. The plan had listed all four as universally required.
+3. **Authorship conflicts between sources and is now recorded as such.** The repository says the spec is *maintained by OpenAI and Stripe*; Stripe's documentation says *created by Stripe, OpenAI and Meta*. The plan previously asserted the three-party version flatly. Guidance added: **say "OpenAI and Stripe" on stage** and you cannot be contradicted by the repo.
+4. **ACP revises quarterly, which the plan had not accounted for.** `spec/` holds `2025-09-29`, `2025-12-12`, `2026-01-16`, `2026-01-30`, `2026-04-17` and `unreleased` — five dated releases in under a year. Two consequences now written in: **pin `2026-04-17`, never build against `unreleased`**, and **the conformance badge must name the spec version it targets** (`ACP 2026-04-17`), because an unqualified "ACP conformant" ages badly against a spec that moves every quarter. A6's DONE WHEN now asserts the vendored OpenAPI matches that version, so a revision is noticed rather than drifted past.
+
+Point 4 is the one with legs beyond this build: the badge already names payment-instrument and completion deviations, and spec version belongs in the same honest sentence.
+
+---
+
 ## 2026-09-20 · A6 STEP 0 DONE — specs fetched, and AP2 was not what we assumed
 
 Pulled the ACP and AP2 specifications before hour 0 rather than at hour 17.5. **It immediately overturned two things this plan had asserted from memory.** This is the step-0 gate working exactly as intended, one day early and at zero cost.
