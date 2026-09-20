@@ -4,6 +4,73 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+# Morning report
+
+Written as §0 requires: every phase with its gates, every ladder-step-4
+decision, every blocked item, and every cut.
+
+## Phases
+
+| Phase | Gates | Evidence |
+|---|---|---|
+| **h0** contracts frozen | green | 17 closed sets, 3 `cart_hash` vectors, door + Quote schemas, `.env.example` |
+| **A1** skeleton + harness | green | boots behind the proxy split; 18 planted violations caught |
+| **A2** trait client + fake | green | conformance suite over real HTTP; `variant-required` at 5 doors |
+| **A3** gate + ledger + provider | green | 12 checks in order, both invariants, COD writes nothing at order time |
+| **A4** authority + admission | green | SSRF refused before any fetch; standing approval never covers a spend |
+| **A4c** agent signing kit | green | one fixture asserted by **both** suites |
+| **A5** evidence + verifier | green | exit 0/1/2; erased verifies, altered does not |
+| **A6** four protocols | green | core Transcript **byte-identical** across all four |
+| **A7** `/agentic` console | green | every shipped tab renders; policy edits reach the Gate live |
+| **A8** mount + install + feed | green | `make up` clean → working shop, zero hand-edited files |
+| **B1** schema, seed, storefront | green | 15 items; no public route creates an order |
+| **B2** the nine doors | green | conformance passes against the **real** store; 50-on-5 under Postgres |
+| **B3** shop-ops admin | green | auth verified live; refunds route through the sidecar |
+| **B4** notifications | green | one per (order, kind); erased contact skips with a reason |
+| **C1–C5** buyer chat | green | air-gap is a build break; the agent computes nothing |
+
+**445 Python tests, 36 merchant-site, 68 chat.** `ruff`, `mypy --strict`,
+`svelte-check` on both roots, and four guardrails clean.
+
+## OPEN — decisions taken by ladder step 4
+
+- **h0** — Destination/Contact field shapes; scopes for `order-status`,
+  `cancel-order`, `request-refund`; canonical PII bytes. The first is preimage
+  bytes and is only reversible by regenerating the vectors.
+- **A3** — `aiosqlite` added (an addition, not an upgrade); check 8 `tags`
+  passes unconditionally until `/agentic` gives it something to enforce, and
+  stays in the order because removing it would change Transcript bytes.
+- **A4** — the approve page and `/agent/*` were unit-tested here and mounted
+  later; both are now live and asserted end to end.
+- **A6** — `fixed_order_salt_hex` and `order_id_hint` on the fake, so a golden
+  replay produces comparable bytes. Both are test-only and documented as such.
+
+## BLOCKED
+
+None. No gate required changing a frozen §6 contract.
+
+## Cuts
+
+Taken up front, per §12, and none of them reopened: **cut 2** (attribution and
+the full health panel), **cut 4a** (admin trimmed to the operating path), **cut
+5** (no direct cart or checkout). Each is absent rather than half-built, and
+`cut 5` is asserted by a test that walks the route tree.
+
+## What the next person should know
+
+1. **Three implementations of §16.11 agree and share no module** — the
+   merchant's in TypeScript, the fake's in Python, and the Gate's check. That is
+   the property the money core rests on. Do not refactor them into one.
+2. **The golden `cart_hash` vectors and the core Transcript bytes are frozen.**
+   If a change makes them fail, the change is wrong.
+3. **The guardrails have planted-violation tests.** If one starts failing on
+   correct code, fix the guardrail rather than deleting it — that happened
+   twice here and both times the rule was directionally right and imprecise.
+4. **F12's credit-note half is still open** and needs counsel, as does the
+   Registrar question in ADR-0025.
+
+---
+
 ## 2026-09-21 · The install gate, and three bugs only a clean run could find
 
 `make down && make up` on an empty machine reaches a working shop with **zero hand-edited files**, and `make demo` passes 12/12 against it. **445 tests.**
