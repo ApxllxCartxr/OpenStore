@@ -1,0 +1,4 @@
+Iosevka Term SS08 (static/fonts/IosevkaTermSS08-*.woff2)
+Copyright 2015-2026, Renzhi Li (aka. Belleve Invis, belleve@typeof.net).
+Licensed under the SIL Open Font License, Version 1.1 — https://openfontlicense.org/
+Subset to the Latin + symbol ranges this site uses.

@@ -14,6 +14,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 
 COPY src/ ./src/
+# The token layer the console and approve page are styled from (§4). Without it
+# the image serves an unstyled console, which is the kind of thing that only
+# shows up once it is deployed.
+COPY design/ ./design/
 RUN uv sync --frozen --no-dev
 
 # Non-root: the sidecar holds the Merchant's signing key, and a container that

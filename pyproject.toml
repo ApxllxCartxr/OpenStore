@@ -67,6 +67,10 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# The repo root, so `scripts/` is importable. A script whose behaviour is only
+# reachable by running it is a script nobody tests, and openstore_up.py is the
+# install gate.
+pythonpath = ["."]
 
 [dependency-groups]
 # PEP 735 group: `uv sync` installs this by default, so a fresh clone can run

@@ -4,6 +4,41 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-21 · A7 + A8 — console, feed, logs, install
+
+**411 tests pass**; ruff, mypy --strict and all four guardrails clean. Verified against the live stack through Caddy, not just in-process.
+
+### The design system was imported, not approximated
+
+`design/tokens.css` and eleven font files copied whole from `~/projects/portfolío/frontend` per §4, with `design/README.md` carrying the role rules **and the licensing flag**: two of the four faces ship no licence file, Open Sauce Sans is believed OFL but unverified, and PP Kyoto is a commercial Pangram Pangram face. Fine on this machine, a question the moment anything is recorded or hosted. Written down now rather than discovered later.
+
+The console is the instrument-panel weighting: Iosevka throughout, tabular figures, hairline rules, `--bg-sunken` panels, **no animation**, `prefers-reduced-motion` honoured anyway. A test parses the stylesheet and asserts **no literal colour appears outside a token fallback**, so the dark theme is inherited rather than re-implemented.
+
+### What the cuts actually mean in the UI
+
+Attribution and the full health panel were cut up front to fund A6's four protocols. They are **absent rather than empty** — a tab rendering a blank panel looks broken, an absent one is a decision — and a test asserts `/agentic/attribution` 404s. Health keeps only the two things that could not be dropped: overdue holds and the dev-allowlist banner, both of which appear on **every** tab because the whole point is that somebody sees them.
+
+### Two real bugs, both found by running it rather than reasoning about it
+
+- **A route collision.** The console's `/agentic/{tab}` catch-all was registered before `/agentic/codes`, so the reason-code endpoint answered "no console tab 'codes'". FastAPI matches in registration order; the route now sits above the catch-all with a comment saying why, because the next person to add a console route will hit the same edge.
+- **`design/` was not in the Docker image.** The console rendered correctly in tests and served an **unstyled page in the container** — `tokens.css` 404'd through Caddy. Exactly the class of thing that only shows up once it is deployed. The Dockerfile copies it now and the live check passes.
+
+### The feed maps to the reader's enum, not ours
+
+`low-stock` is our bucket and not Merchant Center's, so it folds into `in_stock` through a function with a test rather than a hopeful string. A feed carrying an invented value is rejected by the only reader that matters. Two rules hold without exception and both are asserted: only exposed items appear, and **no exact count ever does**.
+
+### Logs redact by name, not by guess
+
+A regex over values would miss `line1` and flag a SKU, so redaction is a deny list of key names applied at any depth. Transcripts are forensic; logs are operational — a Gate that refuses in 3ms and one that refuses in 3s after a slow Merchant look identical in a Transcript, which is why the log line carries the duration.
+
+### The install gate
+
+`openstore up <domain>` reads `.env.example` for its variable names rather than keeping a second list that would drift — a test asserts the two agree exactly. Every secret comes from `secrets`, the file is written `0600`, the dev allowlist is empty out of the box, and it **refuses to overwrite an existing `.env`**, because regenerating secrets over a live deployment orphans every signature it has made.
+
+`scripts/` became a package so the install gate could be tested rather than only run.
+
+---
+
 ## 2026-09-20 · A6 — four protocols, one core
 
 **DONE WHEN met.** **379 tests pass**; ruff, mypy --strict and all four guardrails clean.

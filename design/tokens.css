@@ -1,0 +1,313 @@
+@import 'tailwindcss';
+
+/* ============================================================
+   Fonts — self-hosted, subsetted to woff2 (see /static/fonts)
+   Roles:  EB Garamond → the name, the one display face, used once
+           Open Sauce Sans → body and titles
+           Iosevka Term SS08 → every mono label, chip, clock and spec row
+           PP Kyoto → every other serif touchpoint (flourishes, pull quotes)
+   Iosevka is OFL 1.1 — see static/fonts/LICENSE-Iosevka.txt.
+   EB Garamond is OFL 1.1 — see static/fonts/LICENSE-EBGaramond.txt.
+   ============================================================ */
+@font-face {
+	font-family: 'Open Sauce Sans';
+	src: url('/fonts/OpenSauceSans-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Open Sauce Sans';
+	src: url('/fonts/OpenSauceSans-Medium.woff2') format('woff2');
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Open Sauce Sans';
+	src: url('/fonts/OpenSauceSans-SemiBold.woff2') format('woff2');
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Iosevka Term SS08';
+	src: url('/fonts/IosevkaTermSS08-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Iosevka Term SS08';
+	src: url('/fonts/IosevkaTermSS08-SemiBold.woff2') format('woff2');
+	font-weight: 600 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'EB Garamond';
+	src: url('/fonts/EBGaramond-400.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'EB Garamond';
+	src: url('/fonts/EBGaramond-700.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'PP Kyoto';
+	src: url('/fonts/PPKyoto-Medium.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'PP Kyoto';
+	src: url('/fonts/PPKyoto-Extrabold.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@theme {
+	--font-display: 'EB Garamond', Georgia, serif; /* main name */
+	/* Titles share the body family at SemiBold — EB Garamond is the only
+	   display face on the page, used once, on the name — a second serif
+	   underneath it would read as two headings arguing. */
+	--font-title: 'Open Sauce Sans', ui-sans-serif, system-ui, sans-serif;
+	--font-body: 'Open Sauce Sans', ui-sans-serif, system-ui, sans-serif; /* body */
+	/* Every other serif touchpoint (flourishes, pull quotes) is PP Kyoto,
+	   kept distinct from the EB Garamond display face. */
+	--font-serif: 'PP Kyoto', Georgia, serif;
+	/* Mono is load-bearing here — chips, spec rows, the clock, every meta
+	   label — so it ships rather than falling back to whatever the OS has. */
+	--font-mono: 'Iosevka Term SS08', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* ============================================================
+   PALETTE — warm neutral light (default) with Tokyo Night as
+   the dark theme. Both are defined in the same token names, so
+   components never reference a literal colour.
+
+   Light:  paper #f6f5f2 · cards #fffdfa · ink #16161a
+   Dark:   Tokyo Night (tokyo-night/tokyo-night-vscode-theme)
+           bg #1a1b26 · fg #c0caf5 · red #f7768e · cyan #7dcfff
+
+   --muted is for secondary text; --comment is decoration-only
+   (rules, disabled glyphs) — too low-contrast for body copy.
+   ============================================================ */
+:root {
+	--bg: #f6f5f2;
+	--bg-raised: #fffdfa;
+	--bg-sunken: #eceae4;
+	--fg: #16161a;
+	--muted: #6c6c74;
+	--line: #e2e0da;
+	--accent: #c2415a;
+	--accent-2: #2f6b95;
+	--comment: #9a9aa1;
+	--ok: #2f8a4d;
+	--scrim: rgb(22 22 26 / 0.3);
+}
+
+/* The inline script in app.html stamps data-theme before first paint, so the
+   media query only decides for visitors who have never picked a theme. */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		--bg: #1a1b26;
+		--bg-raised: #20212e;
+		--bg-sunken: #15161f;
+		--fg: #c0caf5;
+		--muted: #a9b1d6;
+		--line: #3b4261;
+		--accent: #f7768e;
+		--accent-2: #7dcfff;
+		--comment: #565f89;
+		--ok: #9ece6a;
+		--scrim: rgb(0 0 0 / 0.55);
+	}
+}
+
+:root[data-theme='dark'] {
+	--bg: #1a1b26;
+	--bg-raised: #20212e;
+	--bg-sunken: #15161f;
+	--fg: #c0caf5;
+	--muted: #a9b1d6;
+	--line: #3b4261;
+	--accent: #f7768e;
+	--accent-2: #7dcfff;
+	--comment: #565f89;
+	--ok: #9ece6a;
+	--scrim: rgb(0 0 0 / 0.55);
+}
+
+/* ============================================================
+   TYPE SCALE — defined as custom properties so every surface
+   resolves to one source of truth. Steps are dramatic on purpose:
+   display → title → body is a cliff, not a slope. Caption sits
+   below body in size AND goes mono + tracked + uppercase, so
+   metadata never competes with the headline above it.
+   ============================================================ */
+:root {
+	--t-display: clamp(3.25rem, 9vw, 6rem); /* hero name */
+	--t-h1: clamp(1.85rem, 3.5vw, 2.6rem); /* section title (job role) */
+	--t-h2: 0.72rem; /* small mono badge: the "live" status dot */
+	--t-section: clamp(1.6rem, 2.8vw, 2.2rem); /* section titles: Work, Experience, Stack, Writing */
+	--t-body: 1rem;
+	/* Caption is metadata, not fine print. It used to sit at 0.75rem tracked
+	   mono, which turned every label on the page into something you had to
+	   lean in for — nothing here reads below this size any more. */
+	--t-caption: 0.95rem;
+	--t-track: 0.06em;
+
+	--t-label-ordinal: clamp(1.5rem, 3vw, 2.4rem); /* wall-label ordinal */
+
+	--measure: 64ch;
+	--col-label: 8.5rem;
+
+	/* Clearance for anything sticky: the shell, plus the nav pill parked
+	   against it. */
+	--sticky-top: 5.25rem;
+
+	/* The ink shell framing the viewport (Shell.svelte). */
+	--shell-w: 0.55rem;
+	--shell-radius: 1.1rem;
+
+	--radius: 6px;
+	--radius-lg: 10px;
+	--rule: 1px;
+
+	--focus-ring: var(--fg);
+	/* Section glyphs printed at plate scale sit behind type — they are the
+	   same hairline as every rule on the page, never the accent. */
+	--plate: var(--line);
+}
+
+/* Derived tokens — always in terms of the palette, never a literal colour. */
+:root {
+	--focus-ring: var(--fg);
+}
+
+html {
+	background: var(--bg);
+	color: var(--fg);
+	font-family: var(--font-body);
+	font-size: var(--t-body);
+	line-height: 1.55;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	/* Hide the native document scrollbar — the page is a bordered "ink shell"
+	   frame, and a browser chrome bar would break the matte-edge illusion. */
+	scrollbar-width: none;
+}
+
+html::-webkit-scrollbar {
+	display: none;
+}
+
+body {
+	min-height: 100dvh;
+}
+
+/* Lenis smooth-scroll recommended styles — keeps native scroll-sync
+   predictable while the virtual scroll is active. */
+html.lenis,
+html.lenis body {
+	height: auto;
+}
+
+.lenis.lenis-smooth {
+	scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+	overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+	overflow: hidden;
+}
+
+::selection {
+	background: var(--fg);
+	color: var(--bg);
+}
+
+a {
+	color: inherit;
+}
+
+/* ============================================================
+   SECTION SHELL — every section below the hero is a two-track
+   layout: the head sits in a narrow rail on the left and stays
+   put while the content scrolls past it. Below 1000px there is
+   no room for two tracks, so the head goes back to sitting on
+   top of its content.
+   ============================================================ */
+.sec {
+	display: grid;
+	row-gap: 1.25rem;
+}
+
+@media (min-width: 1000px) {
+	.sec {
+		grid-template-columns: 11rem minmax(0, 1fr);
+		column-gap: clamp(1.5rem, 3vw, 3rem);
+		row-gap: 0;
+	}
+}
+
+/* A thin vertical rail at the column gutter — gives the spine something
+   to do on wide screens. The hairline is the same --line used everywhere
+   else, so the page stays one material. */
+.rail-rule {
+	position: relative;
+}
+
+@media (min-width: 900px) {
+	.rail-rule::before {
+		content: '';
+		position: absolute;
+		left: calc(var(--col-label) - 0.5rem);
+		top: 0.4em;
+		bottom: 0.4em;
+		width: var(--rule);
+		background: var(--line);
+	}
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+	animation-duration: 0.45s;
+	animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	::view-transition-old(root),
+	::view-transition-new(root) {
+		animation: none;
+	}
+}
+
+:focus-visible {
+	outline: 2px solid var(--focus-ring);
+	outline-offset: 3px;
+	border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms !important;
+		transition-duration: 0.001ms !important;
+	}
+}

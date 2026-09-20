@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from openstore.sidecar.core.codes import ReasonCode
+from openstore.sidecar.console.routes import router as console_router
 from openstore.sidecar.core.settings import Settings, get_settings
 from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
 from openstore.sidecar.verify.checks import verify
@@ -26,6 +26,9 @@ app = FastAPI(
     docs_url=None,  # no interactive docs on a money surface
     redoc_url=None,
 )
+
+
+app.include_router(console_router)
 
 
 @app.get("/healthz")
@@ -73,14 +76,6 @@ def readyz() -> JSONResponse:
             }
         ]
     return JSONResponse(status_code=200, content=body)
-
-
-@app.get("/agentic/codes")
-def codes() -> dict[str, list[str]]:
-    """The closed reason-code set, served so an operator can check what a
-    refusal they were handed actually means. Generated from the enum — there is
-    no second list."""
-    return {"reason_codes": [c.value for c in ReasonCode]}
 
 
 @app.get("/receipt/{receipt_id}")
