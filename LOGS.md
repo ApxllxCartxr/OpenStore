@@ -4,6 +4,48 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · A3 — Gate, Ledger, provider
+
+**DONE WHEN met.** `uv run pytest -q` → **222 passed**; ruff, mypy --strict and all four guardrails clean. Every gate in the phase text has a test named after it.
+
+### The Ledger
+
+Single entry per money event, and `main`'s double-entry account legs deliberately not carried over: the invariants here are stated per order, and mixing the representations makes the arithmetic disagree without failing anything loudly.
+
+**The `main` trap is closed and tested.** `create_refund_entry` keyed idempotency on the checkout id alone, so a second partial refund returned the first entry and wrote nothing. The key now carries the refund's own id, and `test_two_successive_partial_refunds_both_write` asserts two rows — the test that would have caught it doing nothing.
+
+**A design bug of my own, found by the COD test.** `open_holds` was computed as `reserved − captured − released`, which made a COD capture look like it had closed a hold that never existed: the order read as "closed more than it held" and the invariant refused a correct cash sale. Whether an entry closes a hold is now **recorded on the row** rather than inferred from its kind. Escrow-zero then quantifies over `RESERVE` entries exactly as ADR-0018 says it should, and COD needs no exception at all.
+
+Also: SQLite only autoincrements `INTEGER PRIMARY KEY`, never `BIGINT`, so the first version had every insert arrive with a NULL id and look like a duplicate-key collision. The column carries a `with_variant` now. And the duplicate-key path uses a SAVEPOINT rather than rolling back the session — a duplicate key is the *expected* outcome of a retry, and rolling back would discard every legitimate write before it in the same unit of work.
+
+### The Gate
+
+Twelve checks in §6.5's fixed order, byte-stable Transcript, dry-run with zero side effects. `decide()` / `settle()` / `collect()` are three entry points rather than two, and `collect()` is not a branch inside `settle()`: it verifies no Provider record because there is no rail, records nothing about Authority because `confirmed-intent` resolved days earlier at `decide()`, writes one `CAPTURE` with no preceding `RESERVE`, and runs no Gate check because the goods are already on the doorstep.
+
+`upi-pin` **defers** at check 1 rather than passing, because the payer authenticates in their own PSP app and the Authority arrives with the money. Recording it as `pass` would put a false statement into signed evidence; `settle()` resolves it, and `assert_complete()` refuses to capture while anything is still deferred.
+
+`quote-consistent` is implemented independently of the fake's §16.11 arithmetic, as A2 promised. It catches a tampered total, a tampered line fold, a quote that disagrees with the pinned Attestation, a non-zero `round_off`, and tax-inclusive lines that are not marked informational.
+
+### Two things the tests pin that prose alone would not
+
+- **A `sold-out` failure writes no `RELEASE`.** No hold was taken, so there is nothing to close, and the trait refuses one if attempted. An `amount-mismatch` arrives *after* a successful reserve and does release exactly its own hold — two causes, different ledger consequences, and they must not be written as one.
+- **50 concurrent taps on 5 units yield exactly 5**, stock never negative, against the conformance fake. B2 repeats this against real Postgres; they test different things and both are required.
+
+### Provider
+
+Four methods, plus `block / capture-block / release-block` declared by nothing and consumed by nothing — the seam ADR-0024 wants, and explicitly not a Reserve Pay COD hold, which ADR-0018 retired. A test asserts no adapter declares it, so the seam cannot drift open unnoticed.
+
+Webhooks are HMAC-on-raw-bytes with `event_id` dedupe. The raw-bytes point is tested by signing a body with irregular whitespace and showing that its own re-serialization fails verification — a signature checked against a round-trip verifies nothing.
+
+Crash-mid-link adopts via `check-status`: the fake can crash after creating a link and before answering, and the recovery finds the orphan rather than creating a second link, which is how a Consumer gets charged twice.
+
+### OPEN — A3 (ladder step 4)
+
+- **`aiosqlite` added as a dependency.** §16.1 says pin at hour 0 and never upgrade mid-build; this is an addition rather than an upgrade, needed because the Ledger is async and SQLAlchemy's async engine needs an async driver for the test database. Postgres uses `psycopg`, already pinned.
+- **`tags` (check 8) currently passes unconditionally.** It is separate from `blocked` (check 7) on purpose — blocked is "never", tags is the Merchant's own per-tag refusal list — but no Policy field feeds it yet. It needs the `/agentic` console (A5) to have anything to enforce, and it stays in the check order because removing it would change Transcript bytes.
+
+---
+
 ## 2026-09-20 · A2 — trait client and conformance fake
 
 **DONE WHEN met.** Conformance suite green: retry-safety, external-sale visibility, byte-for-byte quote determinism, a flat-price Merchant's zero-value lines passing unchanged, and `variant-required` on a group id at every door taking a SKU. `uv run pytest -q` → **159 passed**, everything else clean.
