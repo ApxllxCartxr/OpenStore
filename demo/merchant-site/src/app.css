@@ -1,0 +1,33 @@
+/* The portfolio token layer, at full strength. The merchant site is the surface
+   that has to look like a shop somebody runs (§4). */
+@import '../../../design/tokens.css';
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); }
+
+/* Iosevka is load-bearing, not decoration: every price, SKU, reason code and
+   hash. This is what makes the money surfaces look like instruments. */
+.mono, .price, .sku, code { font-family: 'Iosevka Term SS08', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums; }
+
+/* EB Garamond, once per page. */
+.shop-name { font-family: 'EB Garamond', Georgia, serif; font-weight: 400; }
+
+.wrap { max-width: 72rem; margin: 0 auto; padding: 1.5rem 1rem; }
+a { color: inherit; }
+.grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+.card { background: var(--raised); border: 1px solid var(--line); padding: 1rem; }
+.bucket { font-size: 0.8125rem; }
+.bucket[data-b='sold-out'] { color: var(--comment); }
+.bucket[data-b='low-stock'] { color: var(--accent); }
+.bucket[data-b='in-stock'] { color: var(--ok); }
+button, .button { min-height: 44px; padding: 0 1rem; border: 1px solid var(--line);
+  background: var(--accent); color: var(--paper); font: inherit; cursor: pointer; }
+button[disabled] { background: var(--bg-sunken); color: var(--comment); cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.option-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0; }
+.option { min-height: 44px; padding: 0 0.75rem; border: 1px solid var(--line); background: var(--raised); }
+.option[aria-pressed='true'] { border-color: var(--accent); }
+.option[data-unavailable='true'] { color: var(--comment); text-decoration: line-through; }
+.agent-panel { background: var(--bg-sunken); border: 1px solid var(--line); padding: 1rem; margin-top: 1.5rem; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

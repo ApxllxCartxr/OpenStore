@@ -4,6 +4,42 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-21 · B1 + B2 — schema, seed, storefront, the nine doors
+
+**B2's DONE WHEN met against the real store, not the fake.** The sidecar's conformance suite runs unmodified against the SvelteKit merchant site over HTTP: **12 live tests pass**, including the 50-concurrent-reserves gate against real Postgres. `svelte-check` clean, 21 vitest tests pass.
+
+### Three implementations of §16.11 now agree
+
+The Merchant's own arithmetic is in TypeScript, the conformance fake's is in Python, and the Gate's `quote-consistent` check is a third. **None of them share a module.** All three reach §16.11's worked example — subtotal 249800, shipping apportioned 3955/5945, IGST 15827, CGST/SGST 11894 each, total 259700 — and the live test asserts it through the real HTTP door.
+
+That is the property the whole design rests on: two implementations that round differently fire `quote-inconsistent` on a *correct* quote, and the only way to know they do not is to build them separately and compare.
+
+### The concurrency gate is a different claim from A3's
+
+A3 ran 50-on-5 against the conformance fake, which proves the sidecar's logic. This runs it against Postgres, which proves `UPDATE stock SET available = available - qty WHERE available >= qty` actually holds under the real isolation level. Exactly 5 succeed and stock lands on zero. Both were required and neither substitutes for the other.
+
+### Cut 5, asserted rather than remembered
+
+No direct cart, no direct checkout, no `site_carts` table. A test walks the route tree and fails if any non-`/trait` file contains `INSERT INTO orders` or `UPDATE stock SET` — so a second money path cannot reappear by accident in six weeks. Another asserts every storefront loader that touches `available` passes it through a bucket function before it reaches the browser.
+
+### Four dependency decisions worth recording
+
+- **argon2 → `scrypt` from the standard library.** argon2 is a native module whose build script pnpm blocks pending interactive approval, which breaks unattended installs. scrypt is memory-hard, needs no build, and is one fewer thing that fails on somebody else's machine.
+- **TypeScript pinned to 6.** `svelte-check` refuses TS 7 unless both majors are installed with a `--tsgo` flag; pinning is the honest fix rather than carrying two compilers.
+- **Tailwind v4 installed**, because the imported token layer *is* a Tailwind `@theme` block. §4 says the design system is taken whole, so the plugin comes with it rather than the tokens being transcribed.
+- **`vitest` config split out of `vite.config.ts`**, where `test` is not a valid key.
+
+### Two Postgres details
+
+`postgres.js` owns transaction boundaries and refuses a literal `BEGIN` inside `unsafe()`, so the schema has none and every statement is `IF NOT EXISTS`. And bigint columns come back as strings by default — without the explicit `types.bigint`, every paise comparison would silently become a string comparison.
+
+### OPEN — B1
+
+- **The seed's `SD-TOTE-BLK-L` guard is a hard error, not a comment.** `validate()` refuses to seed it at all, refuses a non-integer stock or price, and refuses a missing HSN or GST rate on a non-Add-on — a catalogue that loads with a missing GST rate produces a first agent order that cannot be invoiced, and the failure surfaces hours later as an untraceable quote refusal.
+- **Postgres is now published on `127.0.0.1:5432`** so the seed script and a human with `psql` can reach it. The services still talk over the compose network.
+
+---
+
 ## 2026-09-21 · A7 + A8 — console, feed, logs, install
 
 **411 tests pass**; ruff, mypy --strict and all four guardrails clean. Verified against the live stack through Caddy, not just in-process.

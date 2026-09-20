@@ -49,6 +49,10 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_PASSWORD: postgres_dev
+    ports:
+      # Published for local development and the seed script. The compose network
+      # is how the services actually reach it; this is for a human with psql.
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
       - pgdata:/var/lib/postgresql/data

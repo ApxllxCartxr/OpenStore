@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="icon" href="/favicon.svg" />
+		<!-- Stamped before first paint, so a dark-theme visitor never sees a white
+		     flash. The media query only decides for visitors who never chose. -->
+		<script>
+			try {
+				const chosen = localStorage.getItem('theme');
+				if (chosen) document.documentElement.dataset.theme = chosen;
+			} catch {}
+		</script>
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>

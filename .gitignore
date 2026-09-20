@@ -25,3 +25,8 @@ target/
 .mutmut-cache
 htmlcov/
 .coverage
+
+# SvelteKit / node
+node_modules/
+.svelte-kit/
+demo/*/build/
