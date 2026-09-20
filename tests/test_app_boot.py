@@ -146,6 +146,6 @@ def test_env_example_and_settings_agree() -> None:
     fields = {name.upper() for name in Settings.model_fields}
 
     assert not (fields - declared), f"in Settings, not in .env.example: {sorted(fields - declared)}"
-    assert not (declared - fields - _OTHER_SURFACES), (
-        f"in .env.example, not in Settings: {sorted(declared - fields - _OTHER_SURFACES)}"
-    )
+    assert not (
+        declared - fields - _OTHER_SURFACES
+    ), f"in .env.example, not in Settings: {sorted(declared - fields - _OTHER_SURFACES)}"

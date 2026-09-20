@@ -245,9 +245,9 @@ def check_quote_identities(q: dict[str, Any], name: str) -> None:
     # extract to the tax the Quote claims for it, by exact decimal arithmetic.
     assert q["tax_inclusive"] is True, f"{name}: the seeded Merchant is tax-inclusive"
     claimed = sum(t["amount_minor"] for t in q["tax_lines"])
-    assert all(t["informational"] for t in q["tax_lines"]), (
-        f"{name}: inclusive tax is informational"
-    )
+    assert all(
+        t["informational"] for t in q["tax_lines"]
+    ), f"{name}: inclusive tax is informational"
     assert claimed < q["total_minor"], f"{name}: tax cannot exceed the total it sits inside"
 
 
