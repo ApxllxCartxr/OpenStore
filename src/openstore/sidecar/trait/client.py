@@ -230,6 +230,7 @@ class TraitClient:
         attempt: int = 1,
         agent_id: str | None = None,
         consumer_id: str | None = None,
+        order_id_hint: str | None = None,
     ) -> OrderCreated:
         """Door 7 (create). Keys on `cart_id:attempt`, and returns the
         `order_salt` — the only response that ever does (§6.3a)."""
@@ -244,6 +245,11 @@ class TraitClient:
             payload["agent_id"] = agent_id
         if consumer_id:
             payload["consumer_id"] = consumer_id
+        if order_id_hint:
+            # Tests and golden replays only: lets a replay name its own order so
+            # the Transcript bytes are comparable. A Merchant is free to ignore
+            # it, and the real one does.
+            payload["order_id_hint"] = order_id_hint
         return OrderCreated.model_validate(
             await self._call(
                 Door.ORDERS_CREATE, payload, idempotency=cart_idempotency_key(cart_id, attempt)

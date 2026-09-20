@@ -4,6 +4,43 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-20 · A6 — four protocols, one core
+
+**DONE WHEN met.** **379 tests pass**; ruff, mypy --strict and all four guardrails clean.
+
+### The assertion this phase exists for
+
+`test_the_core_transcript_is_byte_identical_across_all_four` runs the full flow — search → allow → cart → tap → fake-UPI → receipt → verify — four times through four envelopes and byte-compares the core Transcripts. Only `order_id` differs by construction and is normalised out. A companion test asserts the **envelopes actually differ**, because if they were all identical the byte-identity claim would be trivially true and prove nothing. A third asserts byte-identity holds **on the refusal path too**, which is the case where a translator drifting would matter most.
+
+### The spec was vendored, not remembered
+
+`vendor/acp/2026-04-17/openapi.agentic_checkout.yaml` is fetched from the repository and committed. A test parses it and asserts the four paths, the five `operationId`s and the seven top-level schemas §16.12 names are all present. That is what makes "a quarterly revision is noticed rather than silently drifted past" a build failure rather than a hope. The vendored document confirmed §16.12's pinned facts exactly.
+
+### ACP: four operations work, one is refused
+
+`completeCheckoutSession` refuses with `method-not-supported`, names the refused step, returns the approve URL, and **lists the credential fields it ignored** — so an integrator can see their Shared Payment Token was received and deliberately not used, rather than wondering if it was dropped. ADR-0008 and ADR-0013 at the envelope boundary, not an unimplemented gap.
+
+Headers are per-operation: `getCheckoutSession` requires no `Idempotency-Key` because it mutates nothing, and inventing a requirement the spec does not have would be its own kind of non-conformance. A request with no `API-Version` is refused rather than defaulted — guessing against a quarterly spec is how a silent incompatibility ships.
+
+### AP2 rides on UCP
+
+It renders UCP's checkout because it *is* a layer over UCP, and the toggle reads `[MCP | UCP | UCP+AP2 | ACP]`. The `checkout_hash` comparison is the load-bearing check: without it a mandate proves only that *some* checkout was approved. Autonomous mode refuses `authority-kind-not-enabled` — it is the `mandate` kind, defined and refused in v1.
+
+`alg: none` is refused at the door, and a test greps `ap2.py` to assert it does **no curve maths of its own** — there is one ES256 verifier in this codebase and a second would be a second thing to get wrong.
+
+### Two bugs in my own replay, both instructive
+
+- I gave each protocol a **different `agent_id`**, which made the Transcripts differ for a reason that had nothing to do with envelopes. The test was measuring my test harness.
+- I called `orders.set-status` twice on **the same idempotency attempt**, so the second transition replayed the first result and the order sat at `confirmed` while the Ledger said `CAPTURE`. That is same-key-same-result working exactly as specified, and it is a trap worth naming: two distinct transitions need two keys.
+
+### OPEN — A6
+
+- **`fixed_order_salt_hex` added to the conformance fake**, so a golden replay produces comparable bytes — the same reason hour 0's `cart_hash` vectors pin a salt. Empty outside tests; a real Merchant always generates one.
+- **`order_id_hint` added to door 7's request.** It lets a replay name its own order so Transcripts are comparable. A Merchant is free to ignore it and the real one will; it is documented as test-only at the call site.
+- **Scope boundary held:** ACP and AP2 are request-path live and golden-replay proven, with no client integration for either, exactly as the phase text scoped. Only MCP has a live client, and that client is C's job.
+
+---
+
 ## 2026-09-20 · A5 — evidence and verifier
 
 **DONE WHEN met.** **337 tests pass**; ruff, mypy --strict and all four guardrails clean.

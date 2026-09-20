@@ -176,6 +176,11 @@ class FakeMerchant:
     #: Move the price by this many paise on every quote after the first, so
     #: `quote-fresh` has something real to catch.
     quote_drift_paise: int = 0
+
+    #: Pin the order salt so a golden replay produces comparable bytes, exactly
+    #: as hour 0's cart_hash vectors do. A real Merchant always generates one
+    #: (§16.1: secrets.token_bytes(16)) and this stays empty outside tests.
+    fixed_order_salt_hex: str = ""
     _quote_calls: int = 0
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -341,8 +346,8 @@ class FakeMerchant:
     def orders_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         """The door that produces the `order_id`, and the only response that
         ever carries the `order_salt` (§6.3a)."""
-        order_id = f"ord_{secrets.token_hex(8)}"
-        salt = secrets.token_hex(16)
+        order_id = payload.get("order_id_hint") or f"ord_{secrets.token_hex(8)}"
+        salt = self.fixed_order_salt_hex or secrets.token_hex(16)
         quote = self._quote(
             payload["lines"],
             payload["destination"],
