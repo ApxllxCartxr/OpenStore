@@ -29,11 +29,16 @@ def agent_commerce_card(
     *,
     merchant_domain: str,
     merchant_name: str,
+    origin: str,
     enabled_methods: frozenset[PaymentMethod],
     enabled_authority_kinds: frozenset[AuthorityKind],
     demo: bool,
 ) -> dict[str, Any]:
-    origin = f"https://{merchant_domain}"
+    """`origin` is the origin an agent should dial back on, and it is passed in
+    rather than derived: a card that assumes `https://<domain>` advertises an
+    origin that does not answer wherever the deployment is plain http, and every
+    endpoint on it is then unreachable to the agent that just read it.
+    """
     return {
         "version": "1",
         "merchant": {"name": merchant_name, "domain": merchant_domain},
@@ -44,6 +49,11 @@ def agent_commerce_card(
             "register": f"{origin}/agent/register",
             "token": f"{origin}/agent/token",
             "feed": f"{origin}/agent/feed.json",
+            # One core, four envelopes. Advertising a protocol with no endpoint
+            # behind it is how an agent discovers the gap at the checkout step.
+            "ucp_checkout": f"{origin}/agent/ucp/checkout",
+            "acp_checkout_sessions": f"{origin}/agent/acp/checkout_sessions",
+            "ap2_checkout": f"{origin}/agent/ap2/checkout",
             "approve": f"{origin}/agentic/approve",
             "jwks": f"{origin}/.well-known/jwks.json",
         },
@@ -77,8 +87,7 @@ def agent_commerce_card(
     }
 
 
-def ucp_manifest(*, merchant_domain: str, merchant_name: str) -> dict[str, Any]:
-    origin = f"https://{merchant_domain}"
+def ucp_manifest(*, merchant_domain: str, merchant_name: str, origin: str) -> dict[str, Any]:
     spec = spec_for(Protocol.UCP)
     return {
         "ucp_version": spec.version,

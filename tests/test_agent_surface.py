@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +21,7 @@ from openstore.sidecar.console.approve import configure as configure_approve
 from openstore.sidecar.core.codes import PaymentMethod, ReasonCode, Scope, ToolName
 from openstore.sidecar.protocols.agent_routes import AgentSurface
 from openstore.sidecar.protocols.agent_routes import configure as configure_surface
+from openstore.sidecar.trait.models import Destination, Quote
 
 QUOTE = {
     "currency": "INR",
@@ -52,6 +54,36 @@ QUOTE = {
     ],
     "round_off_minor": 0,
     "total_minor": 259700,
+    "tax_inclusive": True,
+}
+
+
+#: The smallest Quote the model accepts. This test is about what `place-order`
+#: hands back, not about arithmetic — `QUOTE` above is the §16.11 worked example
+#: and carries tax detail that is beside the point here.
+MINIMAL_QUOTE: dict[str, Any] = {
+    "currency": "INR",
+    "subtotal_minor": 89900,
+    "lines": [
+        {
+            "sku": "SD-TOTE-BLK-M",
+            "qty": 1,
+            "unit_price_minor": 89900,
+            "line_total_minor": 89900,
+            "addons": [],
+            "hsn_sac": "4202",
+            "gst_rate_bp": 1800,
+            "place_of_supply": "KA",
+        }
+    ],
+    "discount_lines": [],
+    "fulfillment_options": [
+        {"id": "karnataka", "label": "Karnataka", "cost_minor": 4900, "eta_days": 2}
+    ],
+    "fulfillment_chosen": {"id": "karnataka", "cost_minor": 4900},
+    "tax_lines": [],
+    "round_off_minor": 0,
+    "total_minor": 94800,
     "tax_inclusive": True,
 }
 
@@ -170,20 +202,71 @@ def test_wrong_client_credentials_are_refused(client: TestClient, surface: Agent
 # ── place-order returns a link, never an order ───────────────────────────────
 
 
-def test_place_order_returns_an_approve_url_and_never_an_order(
+def test_place_order_refuses_when_no_checkout_has_been_started(
     client: TestClient, surface: AgentSurface
 ) -> None:
-    """The single most load-bearing sentence on this surface."""
+    """It used to hand back a bare approve URL for a basket that did not exist,
+    because the whole tool surface answered without doing anything. A link to
+    approve nothing is worse than a refusal."""
     token = surface.admission.issue_for_stranger("agent_x")
     response = client.post(
         "/agent/mcp",
         json={"tool": "place-order"},
         headers={"authorization": f"Bearer {token.token}"},
     )
-    body = response.json()["result"]
-    assert body["approve_url"].endswith("/agentic/approve")
-    assert "order_id" not in body
-    assert "cannot complete the purchase itself" in body["note"]
+    assert response.status_code >= 400
+    assert "start-checkout" in response.json()["error"]["detail"]
+
+
+def test_place_order_returns_an_approve_url_and_never_an_order(
+    client: TestClient, surface: AgentSurface
+) -> None:
+    """The single most load-bearing sentence on this surface.
+
+    What comes back is a link to the Merchant's own origin. The order it names
+    exists — door 7 created it as `pending` — but nothing about it has been
+    approved, no stock is held and no money has moved. Only the tap can change
+    that, and this surface has no way to reach it.
+    """
+    from openstore.sidecar import checkout as flow
+
+    token = surface.admission.issue_for_stranger("agent_x")
+    context = flow.CheckoutContext(merchant_domain="spoiledduckie.localhost")
+    pending = flow.Pending(
+        cart_id="cart_1",
+        order_id="ord_1",
+        lines=[],
+        destination=Destination(
+            line1="4th Cross", city="Bengaluru", state="KA", postal_code="560038"
+        ),
+        contact={},
+        fulfillment_option_id="karnataka",
+        expiry_utc="2026-09-22T00:00:00Z",
+        agent_id="agent_x",
+        method=PaymentMethod.UPI,
+        quote=Quote.model_validate(MINIMAL_QUOTE),
+        quote_bytes=b"{}",
+        cart_hash="deadbeef",
+        total_minor=int(MINIMAL_QUOTE["total_minor"]),
+        tap_token="tok_1",
+    )
+    context.pending[pending.order_id] = pending
+    flow.configure(context)
+    try:
+        response = client.post(
+            "/agent/mcp",
+            json={"tool": "place-order"},
+            headers={"authorization": f"Bearer {token.token}"},
+        )
+        body = response.json()["result"]
+        assert body["approve_url"].startswith("https://spoiledduckie.localhost/agentic/approve?t=")
+        assert body["order_id"] == "ord_1"
+        # No payment, no status, no confirmation: the agent is handing over a
+        # link, not reporting a purchase.
+        assert "status" not in body and "paid" not in body
+        assert "cannot complete the purchase itself" in body["note"]
+    finally:
+        flow.configure(flow.CheckoutContext())
 
 
 def test_an_unknown_tool_is_refused(client: TestClient, surface: AgentSurface) -> None:

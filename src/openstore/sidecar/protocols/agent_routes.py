@@ -15,6 +15,7 @@ most load-bearing sentence on this surface.
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,15 +25,18 @@ from fastapi.responses import JSONResponse
 from openstore.sidecar.admission.oauth import Admission, AgentToken
 from openstore.sidecar.admission.profile import ProfileFetcher, ProfileRefused
 from openstore.sidecar.admission.ratelimit import RateLimiter, Tier
+from openstore.sidecar.basket import BasketStore
 from openstore.sidecar.core.codes import (
     TOOL_SCOPES,
     AuthorityKind,
+    OrderStatus,
     PaymentMethod,
     ReasonCode,
     ToolName,
 )
 from openstore.sidecar.core.feed import build_feed
-from openstore.sidecar.protocols import mcp
+from openstore.sidecar.protocols import acp, ap2, mcp, tools, ucp
+from openstore.sidecar.protocols.tools import ToolRefused
 from openstore.sidecar.protocols.wellknown import (
     agent_commerce_card,
     jwks_document,
@@ -49,6 +53,10 @@ class AgentSurface:
 
     merchant_domain: str = "spoiledduckie.localhost"
     merchant_name: str = "SpoiledDuckie"
+    public_origin: str = ""
+    """The origin the cards advertise. Empty means `https://<merchant_domain>`,
+    which is right for every real install and wrong for the plain-http demo —
+    so the demo sets it."""
     demo: bool = True
     enabled_methods: frozenset[PaymentMethod] = frozenset(
         {PaymentMethod.UPI, PaymentMethod.CASH_ON_DELIVERY}
@@ -60,9 +68,16 @@ class AgentSurface:
     limiter: RateLimiter = field(default_factory=RateLimiter)
     fetcher: ProfileFetcher = field(default_factory=ProfileFetcher)
     jwks: dict[str, Any] = field(default_factory=lambda: {"keys": []})
+    keyring: Any = None
+    """A `Keyring`. Held so a receipt can be sealed by the key this surface
+    publishes — an empty default means this deploy has no signing key, and every
+    seal refuses rather than producing an unverifiable receipt."""
     trait: Any = None
     """A `TraitClient`. The feed is built from Merchant truth read fresh through
     doors 1 and 2 — the sidecar holds no catalogue of its own (ADR-0001)."""
+    baskets: BasketStore = field(default_factory=BasketStore)
+    """One basket per agent, held here because the cart lives in the sidecar —
+    an agent that keeps its own has two and shows the wrong one (SPEC §11)."""
     exposed: set[str] | None = None
     """Which SKUs the Merchant exposes to agents. `None` means every active
     item, which is the demo's configuration — not a default that quietly
@@ -70,6 +85,10 @@ class AgentSurface:
 
 
 _surface = AgentSurface()
+
+
+def _origin() -> str:
+    return _surface.public_origin or f"https://{_surface.merchant_domain}"
 
 
 def configure(surface: AgentSurface) -> None:
@@ -111,6 +130,7 @@ def card() -> dict[str, Any]:
     return agent_commerce_card(
         merchant_domain=_surface.merchant_domain,
         merchant_name=_surface.merchant_name,
+        origin=_origin(),
         enabled_methods=_surface.enabled_methods,
         enabled_authority_kinds=_surface.enabled_authority_kinds,
         demo=_surface.demo,
@@ -120,7 +140,9 @@ def card() -> dict[str, Any]:
 @router.get("/.well-known/ucp.json")
 def ucp_card() -> dict[str, Any]:
     return ucp_manifest(
-        merchant_domain=_surface.merchant_domain, merchant_name=_surface.merchant_name
+        merchant_domain=_surface.merchant_domain,
+        merchant_name=_surface.merchant_name,
+        origin=_origin(),
     )
 
 
@@ -153,7 +175,9 @@ async def register(request: Request) -> JSONResponse:
         return _refuse(exc.code, exc.detail)
 
     try:
-        token = _surface.admission.issue_for_stranger(profile.agent_id)
+        token = _surface.admission.issue_for_stranger(
+            profile.agent_id, name=profile.name, profile_url=profile.source_url
+        )
     except TraitError as exc:
         return _refuse(exc.code, exc.detail)
 
@@ -211,7 +235,7 @@ def _bearer(request: Request) -> AgentToken | None:
 
 
 @router.get("/agent/tools")
-def tools(request: Request) -> JSONResponse:
+def tools_list(request: Request) -> JSONResponse:
     """`tools/list`. Public: an agent should be able to see what a shop offers
     before deciding whether to register."""
     return JSONResponse({"tools": mcp.tools_list()})
@@ -251,24 +275,360 @@ async def mcp_call(request: Request) -> JSONResponse:
             f"{tool.value} needs the {TOOL_SCOPES[tool].value} scope.",
         )
 
+    _surface.admission.note_call(agent.agent_id)
+    payload = body.get("input") if isinstance(body.get("input"), dict) else body
+    try:
+        result = await _run_tool(tool, agent.agent_id, payload)
+    except ToolRefused as refusal:
+        return _refuse(refusal.code, refusal.detail)
+    except TraitError as exc:
+        # The Merchant refused. Its reason is better than any we could invent.
+        return _refuse(exc.code, exc.detail)
+    return JSONResponse({"protocol": "mcp", "result": result})
+
+
+async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """One tool, actually run.
+
+    Every branch reaches Merchant truth or the money core; none of them answers
+    `accepted: true`, which is what this surface used to do for all thirteen.
+    """
+    from openstore.sidecar import checkout as flow
+
+    def merchant() -> Any:
+        """The trait, or a refusal that says why there is none.
+
+        Demanded per tool rather than up front: `place-order` hands back a link
+        to a checkout that already exists and needs no Merchant round trip, and
+        refusing it for a missing trait would report the wrong problem.
+        """
+        if _surface.trait is None:
+            raise ToolRefused(
+                ReasonCode.NOT_FOUND,
+                "This sidecar has no Merchant wired, so it can answer nothing about a "
+                "catalogue. Check /readyz.",
+            )
+        return _surface.trait
+
+    basket = _surface.baskets.for_agent(agent_id)
+
+    if tool is ToolName.SEARCH:
+        return await tools.search(merchant(), str(payload.get("query", "")))
+    if tool is ToolName.READ_ITEM:
+        return await tools.read_item(merchant(), str(payload.get("group", "")))
+    if tool is ToolName.ADD_LINE:
+        parent = payload.get("parent")
+        return await tools.add_line(
+            merchant(),
+            basket,
+            str(payload.get("sku", "")),
+            int(payload.get("qty", 1)),
+            str(parent) if parent else None,
+        )
+    if tool is ToolName.REMOVE_LINE:
+        if not basket.remove(str(payload.get("sku", ""))):
+            raise ToolRefused(ReasonCode.NOT_FOUND, "That SKU is not in the basket.")
+        return await tools.summary(merchant(), basket)
+    if tool is ToolName.SET_DESTINATION:
+        tools.set_destination(basket, dict(payload.get("destination") or payload))
+        return await tools.summary(merchant(), basket)
+    if tool is ToolName.SET_CONTACT:
+        tools.set_contact(basket, dict(payload.get("contact") or payload))
+        return await tools.summary(merchant(), basket)
+    if tool is ToolName.CHOOSE_FULFILLMENT:
+        option = str(payload.get("id", ""))
+        if not option:
+            return await tools.fulfillment_options(merchant(), basket)
+        return await tools.choose_fulfillment(merchant(), basket, option)
+    if tool is ToolName.APPLY_PUBLIC_CODE:
+        return await tools.apply_public_code(merchant(), basket, str(payload.get("code", "")))
+
+    if tool is ToolName.START_CHECKOUT:
+        if not basket.quotable():
+            summary = await tools.summary(merchant(), basket)
+            raise ToolRefused(
+                ReasonCode.NOT_FOUND,
+                f"This basket is not ready to check out; it still needs: "
+                f"{', '.join(summary.get('needs', []))}.",
+            )
+        if not basket.contact:
+            raise ToolRefused(
+                ReasonCode.NOT_FOUND,
+                "The shop needs a Contact Point to send the order confirmation to.",
+            )
+        assert basket.destination is not None
+        checkout = await flow.start(
+            flow.get_context(),
+            cart_id=basket.cart_id,
+            lines=list(basket.lines),
+            destination=basket.destination,
+            contact=dict(basket.contact),
+            fulfillment_option_id=basket.fulfillment_option_id,
+            method=tools.method_for(str(payload.get("method", "upi"))),
+            agent_id=agent_id,
+            discount_code=basket.discount_code,
+        )
+        # The basket has become an order, so the agent starts a fresh one. Door 7
+        # keys on `cart_id:attempt`, so a second checkout built on the same cart
+        # would idempotently return the FIRST order — and if that one was already
+        # paid, the Consumer would be handed a receipt they had already had.
+        _surface.baskets.clear(agent_id)
+        return {
+            "order_id": checkout.order_id,
+            "total_minor": checkout.total_minor,
+            "currency": checkout.quote.currency,
+            "quote": checkout.quote.model_dump(mode="json"),
+            "expires_utc": checkout.expiry_utc,
+            "next": "place-order returns the link the Consumer approves.",
+        }
+
     if tool is ToolName.PLACE_ORDER:
         # **Never an order.** The Consumer approves the exact amount on this
         # Merchant's own domain, and that is the whole posture (ADR-0008).
-        return JSONResponse(
-            {
-                "protocol": "mcp",
-                "result": {
-                    "approve_url": f"https://{_surface.merchant_domain}/agentic/approve",
-                    "note": (
-                        "Hand this to the Consumer. They approve the exact amount on the "
-                        "shop's own page; this agent holds no payment credential and "
-                        "cannot complete the purchase itself."
-                    ),
-                },
-            }
-        )
+        ctx = flow.get_context()
+        # Only a checkout still waiting on its tap. A paid one would hand back
+        # an approve URL whose token is already spent, which reads to the
+        # Consumer as a broken link rather than as "you already bought this".
+        started = [
+            c
+            for c in ctx.pending.values()
+            if c.agent_id == agent_id and c.status is OrderStatus.PENDING
+        ]
+        if not started:
+            raise ToolRefused(
+                ReasonCode.NOT_FOUND,
+                "There is no started checkout to approve. Call start-checkout first.",
+            )
+        checkout = started[-1]
+        return {
+            "order_id": checkout.order_id,
+            "approve_url": flow.approve_url(ctx, checkout),
+            "total_minor": checkout.total_minor,
+            "currency": checkout.quote.currency,
+            "note": (
+                "Hand this to the Consumer. They approve the exact amount on the "
+                "shop's own page; this agent holds no payment credential and "
+                "cannot complete the purchase itself."
+            ),
+        }
 
-    return JSONResponse({"protocol": "mcp", "result": {"tool": tool.value, "accepted": True}})
+    if tool is ToolName.ORDER_STATUS:
+        order = await merchant().orders_read(str(payload.get("order_id", "")))
+        known = flow.get_context().pending.get(order.order_id)
+        return {
+            "order_id": order.order_id,
+            "status": order.status.value,
+            "receipt_id": known.receipt_id if known and known.receipt_id else None,
+        }
+
+    if tool is ToolName.CANCEL_ORDER:
+        ctx = flow.get_context()
+        order_id = str(payload.get("order_id", ""))
+        try:
+            cancelled = await flow.cancel(ctx, order_id, reason=str(payload.get("reason", "")))
+        except flow.CheckoutRefused as refusal:
+            raise ToolRefused(refusal.code, refusal.detail) from None
+        return {"order_id": cancelled.order_id, "status": cancelled.status.value}
+
+    raise tools.unsupported(tool)
+
+
+# ── The other three protocols ────────────────────────────────────────────────
+#
+# The card has advertised `["mcp", "ucp", "ap2", "acp"]` since it was written
+# and only MCP had an endpoint: `ucp.py`, `acp.py` and `ap2.py` produced their
+# envelopes for tests and for nothing else. A2 through A6 were green on that.
+#
+# They are translators, and that is the whole design: each one starts a checkout
+# through **the same** `checkout.start`, over the same Gate and the same Quote,
+# and differs only in the envelope it writes and the refusal it owes its own
+# spec. The core Transcript is byte-identical across all four because there is
+# only one core.
+
+
+async def _start_from(payload: dict[str, Any], agent_id: str) -> Any:
+    """Build a checkout from a protocol-shaped request body.
+
+    Every protocol carries the same four facts under different names; this is
+    where the naming stops mattering.
+    """
+    from openstore.sidecar import checkout as flow
+    from openstore.sidecar.trait.models import Destination, Line
+
+    lines_in = payload.get("lines") or payload.get("items") or payload.get("line_items") or []
+    lines = [
+        Line(
+            sku=str(entry.get("sku") or entry.get("id") or entry.get("item", {}).get("id", "")),
+            qty=int(entry.get("qty") or entry.get("quantity") or 1),
+        )
+        for entry in lines_in
+    ]
+    if not lines:
+        raise ToolRefused(ReasonCode.NOT_FOUND, "This checkout carries no lines.")
+
+    raw_destination = (
+        payload.get("destination")
+        or payload.get("fulfillment_address")
+        or payload.get("shipping_address")
+        or {}
+    )
+    try:
+        destination = Destination.model_validate(raw_destination)
+    except Exception:
+        raise ToolRefused(
+            ReasonCode.NOT_FOUND, "This checkout carries no Destination the shop can read."
+        ) from None
+
+    contact = payload.get("contact") or payload.get("buyer") or {}
+    return await flow.start(
+        flow.get_context(),
+        cart_id=str(payload.get("cart_id") or f"cart_{secrets.token_hex(8)}"),
+        lines=lines,
+        destination=destination,
+        contact={k: str(v) for k, v in contact.items() if k in {"email", "phone"} and v},
+        fulfillment_option_id=str(
+            payload.get("fulfillment_option_id") or payload.get("fulfillment_option") or ""
+        ),
+        method=tools.method_for(str(payload.get("method", "upi"))),
+        agent_id=agent_id,
+    )
+
+
+@router.post("/agent/ucp/checkout")
+async def ucp_checkout(request: Request) -> JSONResponse:
+    """UCP: a checkout whose completion is a buyer escalation to this domain.
+
+    `direct_completion: false` is already in the manifest; this is the endpoint
+    that manifest was describing.
+    """
+    from openstore.sidecar import checkout as flow
+
+    agent = _bearer(request)
+    if agent is None:
+        return _refuse(ReasonCode.SIGNATURE_INVALID, "This surface needs a token.")
+    refused = _limit(request, "agent", agent.agent_id, agent.tier)
+    if refused:
+        return refused
+    try:
+        checkout = await _start_from(await request.json(), agent.agent_id)
+    except ToolRefused as exc:
+        return _refuse(exc.code, exc.detail)
+    except TraitError as exc:
+        return _refuse(exc.code, exc.detail)
+
+    ctx = flow.get_context()
+    return JSONResponse(
+        ucp.checkout(checkout.quote, approve_url=flow.approve_url(ctx, checkout))
+        | {"order_id": checkout.order_id}
+    )
+
+
+@router.post("/agent/acp/checkout_sessions")
+async def acp_create_session(request: Request) -> JSONResponse:
+    """ACP `createCheckoutSession`."""
+    from openstore.sidecar import checkout as flow
+
+    agent = _bearer(request)
+    if agent is None:
+        return _refuse(ReasonCode.SIGNATURE_INVALID, "This surface needs a token.")
+    try:
+        acp.check_headers("createCheckoutSession", dict(request.headers))
+    except acp.AcpError as exc:
+        return JSONResponse(status_code=exc.status, content=exc.to_payload())
+    try:
+        checkout = await _start_from(await request.json(), agent.agent_id)
+    except ToolRefused as exc:
+        return _refuse(exc.code, exc.detail)
+    except TraitError as exc:
+        return _refuse(exc.code, exc.detail)
+
+    session = acp.session_from_quote(checkout.order_id, checkout.quote)
+    ctx = flow.get_context()
+    return JSONResponse(acp.envelope(session) | {"approve_url": flow.approve_url(ctx, checkout)})
+
+
+@router.post("/agent/acp/checkout_sessions/{session_id}/complete")
+async def acp_complete(session_id: str, request: Request) -> JSONResponse:
+    """ACP `completeCheckoutSession` — **the documented refusal**.
+
+    It is not unimplemented. A completion carrying a delegated credential is
+    exactly the authority this Merchant does not grant an agent, and the badge
+    on the card says so before an agent starts.
+    """
+    from openstore.sidecar import checkout as flow
+
+    agent = _bearer(request)
+    if agent is None:
+        return _refuse(ReasonCode.SIGNATURE_INVALID, "This surface needs a token.")
+    try:
+        acp.check_headers("completeCheckoutSession", dict(request.headers))
+    except acp.AcpError as exc:
+        return JSONResponse(status_code=exc.status, content=exc.to_payload())
+
+    ctx = flow.get_context()
+    checkout = ctx.pending.get(session_id)
+    if checkout is None:
+        return _refuse(ReasonCode.NOT_FOUND, f"No checkout session {session_id!r}.")
+    body = await request.json()
+    session = acp.session_from_quote(checkout.order_id, checkout.quote)
+    return JSONResponse(
+        status_code=400,
+        content=acp.complete(
+            session,
+            approve_url=flow.approve_url(ctx, checkout),
+            payment_data=body.get("payment_data"),
+        ),
+    )
+
+
+@router.post("/agent/ap2/checkout")
+async def ap2_checkout(request: Request) -> JSONResponse:
+    """AP2: the mandate layer over the same checkout.
+
+    The Merchant signs a Checkout Mandate over the exact basket. The agent's
+    user signs theirs over `checkout_hash` — and the human tap on this domain
+    still happens, because a mandate is evidence of intent and not a payment
+    credential.
+    """
+    from openstore.sidecar import checkout as flow
+
+    agent = _bearer(request)
+    if agent is None:
+        return _refuse(ReasonCode.SIGNATURE_INVALID, "This surface needs a token.")
+    if _surface.keyring is None:
+        return _refuse(ReasonCode.NOT_FOUND, "This sidecar holds no signing key to mandate with.")
+    try:
+        checkout = await _start_from(await request.json(), agent.agent_id)
+    except ToolRefused as exc:
+        return _refuse(exc.code, exc.detail)
+    except TraitError as exc:
+        return _refuse(exc.code, exc.detail)
+
+    ctx = flow.get_context()
+    mandate = ap2.sign_checkout(
+        {
+            "cart_hash": checkout.cart_hash,
+            "amount_minor": checkout.total_minor,
+            "currency": checkout.quote.currency,
+            "merchant_domain": _surface.merchant_domain,
+            "order_id": checkout.order_id,
+            "expiry_utc": checkout.expiry_utc,
+        },
+        _surface.keyring.current,
+    )
+    return JSONResponse(
+        {
+            "protocol": "ap2",
+            "checkout_mandate": mandate,
+            "checkout_hash": ap2.checkout_hash(mandate),
+            "order_id": checkout.order_id,
+            "approve_url": flow.approve_url(ctx, checkout),
+            "note": (
+                "Sign your Cart Mandate over this checkout_hash. Completion is still a human "
+                "tap on this domain: a mandate is evidence of intent, not a payment credential."
+            ),
+        }
+    )
 
 
 @router.get("/agent/feed.json")
@@ -296,7 +656,7 @@ async def feed() -> JSONResponse:
             catalog.groups,
             catalog.items,
             stock,
-            base_url=f"https://{_surface.merchant_domain}",
+            base_url=_origin(),
             exposed=_surface.exposed,
         )
     )
