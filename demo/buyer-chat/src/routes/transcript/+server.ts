@@ -17,12 +17,12 @@ export const GET: RequestHandler = ({ url }) => {
 	if (format !== 'md' && format !== 'json') {
 		error(400, `Unknown transcript format "${format}" — use md or json.`);
 	}
-	const shop =
-		(db.prepare(`SELECT domain, name FROM contacts ORDER BY added_at DESC LIMIT 1`).get() as
-			| { domain: string; name: string }
-			| undefined) ?? null;
+	const shops = db.prepare(`SELECT domain, name FROM contacts ORDER BY added_at ASC`).all() as {
+		domain: string;
+		name: string;
+	}[];
 	const exportedAt = new Date().toISOString();
-	const meta = { shop, driver: driverFromEnv().name, exportedAt };
+	const meta = { shops, driver: driverFromEnv().name, exportedAt };
 	const state = thread(THREAD);
 	const body =
 		format === 'json' ? transcriptJson(state, meta) : transcriptMarkdown(state, meta);

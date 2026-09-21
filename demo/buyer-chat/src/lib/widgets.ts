@@ -20,7 +20,7 @@
  *   submission is recorded as their own message, so the transcript shows where
  *   an address came from and the destination guard sees it honestly.
  */
-import { ToolError, type Seen, type ToolName } from './tools/loop.ts';
+import { ToolError, type Seen, type Shop, type ToolName } from './tools/loop.ts';
 
 /** The tools a widget may drive. The spend path is deliberately absent. */
 export const WIDGET_TOOLS = [
@@ -202,8 +202,29 @@ export function parseWidget(raw: unknown): Widget {
 export function widgetForRefusal(
 	code: string,
 	call: { name: string; args: Record<string, unknown> },
-	seen: Seen
+	seen: Seen,
+	fields: Record<string, unknown> = {}
 ): Widget | null {
+	if (code === 'shop-required') {
+		const candidates = Array.isArray(fields.candidates) ? (fields.candidates as Shop[]) : [];
+		// shop-required only ever comes from a write, and only the tools a
+		// widget can drive in the first place are ones this can offer to
+		// retry — a refused cancel-order or request-refund still says which
+		// shops could answer, just as a sentence rather than a tap.
+		if (candidates.length < 2 || !WIDGET_TOOLS.includes(call.name as WidgetTool)) return null;
+		const fixedArgs: Record<string, string | number> = {};
+		for (const [key, value] of Object.entries(call.args)) {
+			if (typeof value === 'string' || typeof value === 'number') fixedArgs[key] = value;
+		}
+		return {
+			kind: 'choices',
+			title: 'Which shop?',
+			tool: call.name as WidgetTool,
+			arg: 'shop',
+			options: candidates.map((shop) => ({ label: shop.name, value: shop.domain })),
+			args: fixedArgs
+		};
+	}
 	if (code === 'destination-not-given') {
 		return {
 			kind: 'form',

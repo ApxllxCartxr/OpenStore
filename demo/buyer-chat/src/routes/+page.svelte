@@ -8,15 +8,20 @@
 
 	/** Results worth showing as something other than JSON: what the shop
 	 *  returned, rendered as the shop returned it. No total is computed here. */
-	type Parsed = { name: string; request: any; response: any; at: string };
+	type Parsed = { shop: string; name: string; request: any; response: any; at: string };
 	const calls = $derived(
 		data.thread.toolCalls.map((c) => ({
+			shop: c.shop,
 			name: c.name,
 			at: c.at,
 			request: JSON.parse(c.request),
 			response: c.response ? JSON.parse(c.response) : null
 		})) as Parsed[]
 	);
+
+	function shopName(domain: string): string {
+		return data.shops.find((shop) => shop.domain === domain)?.name ?? domain;
+	}
 
 	/** One transcript in the order it happened: messages and tool calls
 	 *  interleaved by timestamp. Rendering them in two separate loops is what
@@ -36,6 +41,7 @@
 	type TimelineTool = {
 		kind: 'tool';
 		key: string;
+		shop: string;
 		name: string;
 		request: any;
 		response: any;
@@ -76,16 +82,20 @@
 		return items;
 	});
 
-	/** The basket exactly as the shop last reported it — the lines of the most
-	 *  recent tool result that carried any. Nothing here is local state: a panel
-	 *  the page maintained itself would be the second basket this whole design
-	 *  exists to avoid. */
-	const basket = $derived.by(() => {
-		for (let i = calls.length - 1; i >= 0; i -= 1) {
-			const lines = calls[i]?.response?.lines;
-			if (Array.isArray(lines)) return lines as { sku: string; qty: number; parent?: string }[];
+	/** Every shop's basket, exactly as that shop last reported it — one basket
+	 *  per shop, because one sidecar per shop is what the protocol says
+	 *  (ADR-0007), and merging them here would show a basket no shop can
+	 *  quote. Nothing here is local state: a panel the page maintained itself
+	 *  would be the second basket this whole design exists to avoid. */
+	const baskets = $derived.by(() => {
+		const byShop = new Map<string, { sku: string; qty: number; parent?: string }[]>();
+		for (const call of calls) {
+			const lines = call.response?.lines;
+			if (Array.isArray(lines)) byShop.set(call.shop, lines);
 		}
-		return null;
+		return [...byShop.entries()]
+			.map(([shop, lines]) => ({ shop, lines }))
+			.filter((b) => b.lines.length);
 	});
 
 	/** Delivery costs, by option id, from the shop's own last answer. A widget
@@ -107,9 +117,11 @@
 		return `₹${(minor / 100).toFixed(2)}`;
 	}
 	/** Shop images are root-relative on the shop's own origin, and this page is
-	 *  a different origin — so they are resolved against the shop's. */
-	function onShop(src: string): string {
-		return src.startsWith('http') ? src : `http://${data.shop?.domain}${src}`;
+	 *  a different origin — so they are resolved against whichever shop's
+	 *  result they came from, not a single "the" shop that may not be the
+	 *  one that answered. */
+	function onShop(src: string, domain: string): string {
+		return src.startsWith('http') ? src : `http://${domain}${src}`;
 	}
 	let sending = $state(false);
 	/** The verdict in flight on the consent prompt, if any. While set, the
@@ -167,7 +179,7 @@
 <svelte:head><title>Miro, a buyer agent</title></svelte:head>
 
 <div class="thread">
-	{#if !data.shop}
+	{#if !data.shops.length}
 		<p class="meta" style="margin-bottom:var(--s-4)">
 			No shop yet. <a href="/contacts">Add one</a> to start.
 		</p>
@@ -248,7 +260,8 @@
 									{/each}
 								</div>
 								<p class="meta">
-									Sent to {data.shop?.name ?? 'the shop'} as you typed it. Nothing is charged.
+									Sent to {data.shops.length === 1 ? data.shops[0]?.name : 'the shop'} as you typed it — if
+									more than one could answer, you'll be asked which. Nothing is charged.
 								</p>
 								<button class="tap" type="submit" disabled={sending}>{item.widget.submit}</button>
 							</form>
@@ -258,7 +271,7 @@
 			</div>
 		{:else}
 			<details class="tool" style="--i:{i}">
-				<summary class="mono">{item.name}</summary>
+				<summary class="mono">{item.shop ? `${shopName(item.shop)} · ` : ''}{item.name}</summary>
 				<!-- The exact request JSON. A card that summarised could be wrong, and
 				     the Consumer would have no way to tell. -->
 				<pre class="mono">{JSON.stringify(item.request, null, 2)}</pre>
@@ -271,7 +284,7 @@
 					{#each item.response.results as result, j (item.key + j)}
 						<div class="result" style="--i:{i}">
 							{#if result.image}
-								<img src={onShop(result.image)} alt={result.name} loading="lazy" />
+								<img src={onShop(result.image, item.shop)} alt={result.name} loading="lazy" />
 							{/if}
 							<div class="result-body">
 								<div style="font-weight:600">{result.name}</div>
@@ -316,7 +329,7 @@
 						complete it.
 					</p>
 					<a class="tap" href={item.response.approve_url} rel="noopener">
-						Approve {rupees(item.response.total_minor)} at {data.shop?.domain}
+						Approve {rupees(item.response.total_minor)} at {item.shop}
 					</a>
 				</div>
 			{/if}
@@ -332,23 +345,27 @@
 		</div>
 	{/if}
 
-	{#if basket?.length}
-		<!-- The shop's basket, line for line, with the two things a Consumer
-		     should never have to talk an agent into: removing a line they did not
-		     ask for, and starting over. No prices — this panel counts nothing. -->
+	{#if baskets.length}
+		<!-- One basket per shop (ADR-0007) — line for line, with the two things a
+		     Consumer should never have to talk an agent into: removing a line
+		     they did not ask for, and starting over everywhere at once. No
+		     prices — this panel counts nothing. -->
 		<div class="basket">
-			<p class="widget-title">In the basket</p>
-			{#each basket as line, b (line.sku + b)}
-				<div class="basket-line">
-					<span class="mono">{line.sku} × {line.qty}</span>
-					<form method="POST" action="?/basket" use:enhance={onWidgetSubmit}>
-						<input type="hidden" name="sku" value={line.sku} />
-						<button class="link" type="submit" disabled={sending}>Remove</button>
-					</form>
-				</div>
+			{#each baskets as { shop, lines } (shop)}
+				<p class="widget-title">In the basket — {shopName(shop)}</p>
+				{#each lines as line, b (shop + line.sku + b)}
+					<div class="basket-line">
+						<span class="mono">{line.sku} × {line.qty}</span>
+						<form method="POST" action="?/basket" use:enhance={onWidgetSubmit}>
+							<input type="hidden" name="sku" value={line.sku} />
+							<input type="hidden" name="shop" value={shop} />
+							<button class="link" type="submit" disabled={sending}>Remove</button>
+						</form>
+					</div>
+				{/each}
 			{/each}
 			<form method="POST" action="?/basket" use:enhance={onWidgetSubmit}>
-				<button class="link" type="submit" disabled={sending}>Start over</button>
+				<button class="link" type="submit" disabled={sending}>Start over (every shop)</button>
 			</form>
 		</div>
 	{/if}
@@ -371,7 +388,7 @@
 				<p class="meta" style="margin-top:var(--s-1)">
 					This click and the one on the shop's page are different things: this one only lets
 					Miro show you a total. Spending real money always needs a second, separate step on
-					{data.shop?.name ?? "the shop's"} own site — usually a passkey or a UPI PIN — which
+					{data.pending.shopName}'s own site — usually a passkey or a UPI PIN — which
 					Miro cannot see, hold, or complete for you. That is why nothing here ever asks you to
 					sign anything.
 				</p>

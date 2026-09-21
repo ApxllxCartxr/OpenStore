@@ -9,7 +9,7 @@ import {
 	type TranscriptThread
 } from '../src/lib/transcript.ts';
 
-const META = { shop: { domain: 'shop.test', name: 'SpoiledDuckie' }, driver: 'form', exportedAt: '2026-09-21T10:00:00.000Z' };
+const META = { shops: [{ domain: 'shop.test', name: 'SpoiledDuckie' }], driver: 'form', exportedAt: '2026-09-21T10:00:00.000Z' };
 
 const THREAD: TranscriptThread = {
 	messages: [
@@ -24,6 +24,7 @@ const THREAD: TranscriptThread = {
 	],
 	toolCalls: [
 		{
+			shop: 'shop.test',
 			name: 'search',
 			request: '{"q":"tote"}',
 			// Stored as the string "null" when a call returned nothing.
@@ -57,7 +58,10 @@ describe('transcript export', () => {
 
 	it('renders a call with no response without inventing one', () => {
 		const md = transcriptMarkdown(
-			{ messages: [], toolCalls: [{ name: 'quote', request: '{}', response: 'null', at: 'z' }] },
+			{
+				messages: [],
+				toolCalls: [{ shop: 'shop.test', name: 'quote', request: '{}', response: 'null', at: 'z' }]
+			},
 			META
 		);
 		expect(md).toContain('tool: quote');

@@ -35,8 +35,10 @@ import {
 	consentNote,
 	hasMeaningfulArgs,
 	requiresFreshConsent,
+	shopsFor,
 	validate,
 	type Seen,
+	type Shop,
 	type ToolName
 } from '$lib/tools/loop.ts';
 import { call as callShop, ShopError } from '$lib/mcp/client.ts';
@@ -44,31 +46,51 @@ import { explain } from '$lib/quote.ts';
 import { argsFor, composeMessage, parseWidget, saidBySubmitting, widgetForRefusal } from '$lib/widgets.ts';
 import { db } from '$lib/session.ts';
 
-/** The shop this thread is talking to: the most recently added contact.
- *  A chat with no shop can still be typed into — it just says so. */
-function currentShop(): { domain: string; name: string } | null {
-	const row = db
-		.prepare(`SELECT domain, name FROM contacts ORDER BY added_at DESC LIMIT 1`)
-		.get() as { domain: string; name: string } | undefined;
-	return row ?? null;
+/** Every shop this chat has been introduced to. A chat with none can still
+ *  be typed into — it just says so. Order is oldest-added first, which is
+ *  only ever used as a display order; dispatch never picks "the" shop by
+ *  position (`shopsFor`, below the tool loop, resolves by what a call named
+ *  or can only mean). */
+function knownShops(): Shop[] {
+	return db.prepare(`SELECT domain, name FROM contacts ORDER BY added_at ASC`).all() as Shop[];
+}
+
+function shopName(domain: string, shops: readonly Shop[]): string {
+	return shops.find((shop) => shop.domain === domain)?.name ?? domain;
+}
+
+/** Resolve a call to the shop(s) it targets, without throwing: `shopsFor`'s
+ *  `shop-required` is a question for the Consumer, not a bug, so every call
+ *  site handles it the same way rather than repeating a try/catch. */
+function resolve(call: ToolCall, seen: Seen, shops: readonly Shop[]): string[] | ToolError {
+	try {
+		return shopsFor(call, seen, shops);
+	} catch (error) {
+		return error as ToolError;
+	}
 }
 
 /** Standing permission is per thread and per tool, and it never covers a spend
  *  step — `ALWAYS_ALLOWABLE` is the whole of what it can hold (ADR-0008). */
 const standing = new Set<string>();
-/** A proposed call waiting on the Consumer. One at a time, deliberately: a
- *  queue of consent prompts is how people click through them. */
-let awaiting: ToolCall | null = null;
+/** A proposed call waiting on the Consumer, with the shop it was resolved to
+ *  — resolved once, when the call was proposed, so the tap the Consumer
+ *  answers is the shop they were shown. One at a time, deliberately: a queue
+ *  of consent prompts is how people click through them. */
+let awaiting: { call: ToolCall; domain: string } | null = null;
 
 export async function load() {
 	createThread(THREAD, 'SpoiledDuckie');
 	const state = thread(THREAD);
+	const shops = knownShops();
 	if (!state.messages.length && !state.toolCalls.length) {
-		await startFresh();
+		await startFresh(shops);
 		addMessage(
 			THREAD,
 			'agent',
-			'Hey, I’m Miro! Tell me what you’re looking for and I’ll search the shop. ' +
+			(shops.length > 1
+				? `Hey, I’m Miro! Tell me what you’re looking for and I’ll search across your ${shops.length} shops. `
+				: 'Hey, I’m Miro! Tell me what you’re looking for and I’ll search the shop. ') +
 				'I can browse and build a basket — I can’t spend. Every purchase ends with you ' +
 				'approving the exact amount on the shop’s own page.'
 		);
@@ -77,10 +99,12 @@ export async function load() {
 		thread: thread(THREAD),
 		driver: driverFromEnv().name,
 		tools: [...TOOLS],
-		shop: currentShop(),
-		pending: awaiting,
-		pendingNote: awaiting ? consentNote(awaiting) : null,
-		pendingHasArgs: awaiting ? hasMeaningfulArgs(awaiting.args) : false,
+		shops,
+		pending: awaiting
+			? { name: awaiting.call.name, args: awaiting.call.args, domain: awaiting.domain, shopName: shopName(awaiting.domain, shops) }
+			: null,
+		pendingNote: awaiting ? consentNote(awaiting.call) : null,
+		pendingHasArgs: awaiting ? hasMeaningfulArgs(awaiting.call.args) : false,
 		standing: [...standing]
 	};
 }
@@ -99,20 +123,26 @@ export async function load() {
  * Best effort: a shop that cannot be reached leaves the basket alone and says
  * so in the tool card. It is not a reason to refuse to open the chat.
  */
-async function startFresh(): Promise<void> {
-	const shop = currentShop();
-	if (!shop) return;
-	try {
-		const result = await callShop(shop.domain, 'clear-basket', {});
-		// Recorded only when it did something: an empty clear on a fresh thread
-		// is noise, but removed lines are exactly what the shopper must see.
-		if (((result.removed ?? []) as string[]).length) {
-			recordToolCall(THREAD, shop.domain, 'clear-basket', {}, result);
-		}
-	} catch (error) {
-		const refusal = error as ShopError;
-		recordToolCall(THREAD, shop.domain, 'clear-basket', {}, { error: refusal.code, detail: refusal.message });
-	}
+async function startFresh(shops: readonly Shop[]): Promise<void> {
+	await Promise.all(
+		shops.map(async (shop) => {
+			try {
+				const result = await callShop(shop.domain, 'clear-basket', {});
+				// Recorded only when it did something: an empty clear on a fresh
+				// thread is noise, but removed lines are exactly what the shopper
+				// must see.
+				if (((result.removed ?? []) as string[]).length) {
+					recordToolCall(THREAD, shop.domain, 'clear-basket', {}, result);
+				}
+			} catch (error) {
+				const refusal = error as ShopError;
+				recordToolCall(THREAD, shop.domain, 'clear-basket', {}, {
+					error: refusal.code,
+					detail: refusal.message
+				});
+			}
+		})
+	);
 }
 
 function describe(tool: string, result: Record<string, any>, previousNeeds: string | null = null): string {
@@ -184,26 +214,50 @@ function refusalText(refusal: ShopError): string {
 	return detail ? detail : explain(refusal.code);
 }
 
+/** `args.shop` is routing, read by `shopsFor`/`resolve` to pick a domain —
+ *  never a real tool argument, and a shop already dispatched to has no more
+ *  use for it. Stripped before the call is sent or recorded, so the tool
+ *  card shows only what the tool actually needed. */
+function withoutShopArg(args: Record<string, unknown>): Record<string, unknown> {
+	if (!('shop' in args)) return args;
+	const { shop: _shop, ...rest } = args;
+	return rest;
+}
+
 async function runCall(domain: string, call: ToolCall): Promise<Record<string, any>> {
-	const result = await callShop(domain, call.name, call.args);
-	recordToolCall(THREAD, domain, call.name, call.args, result);
+	const args = withoutShopArg(call.args);
+	const result = await callShop(domain, call.name, args);
+	recordToolCall(THREAD, domain, call.name, args, result);
 	return result;
 }
 
-/** Reads, concurrently. Recorded in the order the model planned them rather
- *  than the order they came back, so the transcript reads as one decision. */
-async function runReads(domain: string, reads: readonly ToolCall[]): Promise<void> {
-	const settled = await Promise.allSettled(
-		reads.map((read) => callShop(domain, read.name, read.args))
-	);
+/** Reads, concurrently, fanned out across every shop each one resolves to.
+ *  An unaddressed search reaches every shop the Consumer has; one naming a
+ *  shop, or an order-status call, reaches exactly one. Recorded in the order
+ *  the model planned them rather than the order they came back, so the
+ *  transcript reads as one decision. */
+async function runReads(reads: readonly ToolCall[], seen: Seen, shops: readonly Shop[]): Promise<void> {
+	const jobs = reads.flatMap((read) => {
+		const domains = resolve(read, seen, shops);
+		// A read cannot actually go unresolved — `shopsFor` fans an unnamed one
+		// out to every shop — but a shop named that this chat has never heard
+		// of still refuses, and that refusal belongs in the transcript like any
+		// other.
+		if (domains instanceof ToolError) {
+			recordToolCall(THREAD, '', read.name, read.args, { error: domains.code, detail: domains.message });
+			return [];
+		}
+		return domains.map((domain) => ({ call: { ...read, args: withoutShopArg(read.args) }, domain }));
+	});
+	const settled = await Promise.allSettled(jobs.map((job) => callShop(job.domain, job.call.name, job.call.args)));
 	settled.forEach((outcome, n) => {
-		const read = reads[n]!;
+		const { call, domain } = jobs[n]!;
 		if (outcome.status === 'fulfilled') {
-			recordToolCall(THREAD, domain, read.name, read.args, outcome.value);
+			recordToolCall(THREAD, domain, call.name, call.args, outcome.value);
 			return;
 		}
 		const refusal = outcome.reason as ShopError;
-		recordToolCall(THREAD, domain, read.name, read.args, { error: refusal.code, detail: refusal.message });
+		recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 	});
 }
 
@@ -278,7 +332,12 @@ function proposalRefusal(shop: string, call: ToolCall): ToolError | null {
  */
 function askInstead(shop: string, call: ToolCall, refused: ToolError): void {
 	recordToolCall(THREAD, shop, call.name, call.args, { error: refused.code, detail: refused.message });
-	addMessage(THREAD, 'agent', refused.message, widgetForRefusal(refused.code, call, seenCatalogue()));
+	addMessage(
+		THREAD,
+		'agent',
+		refused.message,
+		widgetForRefusal(refused.code, call, seenCatalogue(), refused.fields)
+	);
 }
 
 /** The conversation as the model should see it: messages and tool results in
@@ -307,7 +366,7 @@ function turns(): Turn[] {
  * spend the Consumer's time and the shop's rate limit, and `MAX_STEPS` is where
  * that stops.
  */
-async function runAgent(domain: string, driver: OpenRouterDriver): Promise<void> {
+async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promise<void> {
 	for (let step = 0; step < MAX_STEPS; step += 1) {
 		let turn;
 		try {
@@ -328,25 +387,35 @@ async function runAgent(domain: string, driver: OpenRouterDriver): Promise<void>
 		const planned = turn.calls.filter((call) => TOOLS.includes(call.name as ToolName));
 		let i = 0;
 		while (i < planned.length) {
-			// A run of reads goes to the shop at once. Reads change nothing, so
-			// their order between each other cannot matter — but it does matter
-			// against a write, which is why a run stops at the first one. Two
-			// products asked for together used to cost four serial round trips.
-			// None of the proposal guards apply to a read: they refuse an
-			// unchosen variant, an orphan add-on and an invented address, and a
-			// read proposes none of those.
+			// A run of reads goes out together. Reads change nothing, so their
+			// order between each other cannot matter — but it does matter against
+			// a write, which is why a run stops at the first one. Two products
+			// asked for together used to cost four serial round trips. None of
+			// the proposal guards apply to a read: they refuse an unchosen
+			// variant, an orphan add-on and an invented address, and a read
+			// proposes none of those.
 			const reads: ToolCall[] = [];
 			while (i < planned.length && READS.has(planned[i]!.name)) {
 				reads.push(planned[i]!);
 				i += 1;
 			}
 			if (reads.length) {
-				await runReads(domain, reads);
+				await runReads(reads, seenCatalogue(), shops);
 				continue;
 			}
 
 			const call = planned[i]!;
 			i += 1;
+			const domains = resolve(call, seenCatalogue(), shops);
+			if (domains instanceof ToolError) {
+				// More than one shop could be meant, or none named and more than
+				// one is known — a question for the Consumer, answered the same
+				// way an invented-address refusal is: a widget, or the plain
+				// sentence when there is nothing to tap.
+				askInstead('', call, domains);
+				return;
+			}
+			const domain = domains[0]!;
 			const refused = proposalRefusal(domain, call);
 			if (refused) {
 				// The refusal is recorded so the model sees why, and the interface
@@ -359,7 +428,7 @@ async function runAgent(domain: string, driver: OpenRouterDriver): Promise<void>
 			// Everything past the read batch above needs a fresh answer: standing
 			// approval only ever holds reads (ADR-0008), so anything reaching
 			// here is a call the Consumer has not yet allowed.
-			awaiting = call;
+			awaiting = { call, domain };
 			addMessage(THREAD, 'agent', `I’d like to call ${call.name} next — details below, your call.`);
 			return;
 		}
@@ -381,13 +450,13 @@ export const actions = {
 			addMessage(
 				THREAD,
 				'agent',
-				`Take your time — I’m still waiting on your answer about ${awaiting.name}. Allow or decline it and I’ll carry on.`
+				`Take your time — I’m still waiting on your answer about ${awaiting.call.name}. Allow or decline it and I’ll carry on.`
 			);
 			return { ok: true };
 		}
 
-		const shop = currentShop();
-		if (!shop) {
+		const shops = knownShops();
+		if (!shops.length) {
 			addMessage(
 				THREAD,
 				'agent',
@@ -398,7 +467,7 @@ export const actions = {
 
 		const driver = driverFromEnv();
 		if (driver instanceof OpenRouterDriver) {
-			await runAgent(shop.domain, driver);
+			await runAgent(shops, driver);
 			return { ok: true };
 		}
 
@@ -427,21 +496,27 @@ export const actions = {
 				addMessage(THREAD, 'agent', `${call.name} is not a tool this shop offers.`);
 				continue;
 			}
-			const refused = proposalRefusal(shop.domain, call);
+			const domains = resolve(call, seenCatalogue(), shops);
+			if (domains instanceof ToolError) {
+				askInstead('', call, domains);
+				break;
+			}
+			const domain = domains[0]!;
+			const refused = proposalRefusal(domain, call);
 			if (refused) {
-				askInstead(shop.domain, call, refused);
+				askInstead(domain, call, refused);
 				break;
 			}
 			if (requiresFreshConsent(call.name as ToolName, standing)) {
-				awaiting = call;
+				awaiting = { call, domain };
 				addMessage(THREAD, 'agent', `I’d like to call ${call.name} next — details below, your call.`);
 				return { ok: true };
 			}
 			try {
-				await runAndSay(shop.domain, call);
+				await runAndSay(domain, call);
 			} catch (error) {
 				const refusal = error as ShopError;
-				recordToolCall(THREAD, shop.domain, call.name, call.args, {
+				recordToolCall(THREAD, domain, call.name, call.args, {
 					error: refusal.code,
 					detail: refusal.message
 				});
@@ -490,17 +565,26 @@ export const actions = {
 		// into a form counts as given, and how the transcript shows that it was.
 		if (said) addMessage(THREAD, 'consumer', said);
 
-		const shop = currentShop();
-		if (!shop) return { ok: true };
+		const shops = knownShops();
+		if (!shops.length) return { ok: true };
+		const domains = resolve(call, seenCatalogue(), shops);
+		if (domains instanceof ToolError) {
+			// Tapping a variant or filling a form named no shop, and more than
+			// one could answer to it — offered again as the shop-picker widget,
+			// same as any other refusal a widget can resolve.
+			askInstead('', call, domains);
+			return { ok: true };
+		}
+		const domain = domains[0]!;
 		try {
-			await runAndSay(shop.domain, call);
+			await runAndSay(domain, call);
 		} catch (error) {
 			const refusal = error as ShopError;
-			recordToolCall(THREAD, shop.domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
+			recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
 		const driver = driverFromEnv();
-		if (driver instanceof OpenRouterDriver) await runAgent(shop.domain, driver);
+		if (driver instanceof OpenRouterDriver) await runAgent(shops, driver);
 		return { ok: true };
 	},
 
@@ -514,17 +598,36 @@ export const actions = {
 	basket: async ({ request }) => {
 		const form = await request.formData();
 		const sku = String(form.get('sku') ?? '');
-		const call: ToolCall = sku
-			? { name: 'remove-line', args: { sku } }
-			: { name: 'clear-basket', args: {} };
-		const shop = currentShop();
-		if (!shop) return { ok: true };
-		addMessage(THREAD, 'consumer', sku ? `Remove ${sku} from the basket.` : 'Start over with an empty basket.');
+		const shop = String(form.get('shop') ?? '');
+		const shops = knownShops();
+		if (!shops.length) return { ok: true };
+
+		if (!sku) {
+			// "Start over" has no id to resolve a single shop by — and the point
+			// of a fresh basket is that it is fresh everywhere, not just at
+			// whichever shop happened to be dispatched to last.
+			addMessage(THREAD, 'consumer', 'Start over with an empty basket.');
+			await startFresh(shops);
+			addMessage(THREAD, 'agent', 'Cleared every basket. Starting fresh.');
+			return { ok: true };
+		}
+
+		// The button already knows which shop's basket this line is in — named
+		// explicitly rather than re-derived, so removing a line never depends on
+		// that SKU still being resolvable through `seen.sources`.
+		const call: ToolCall = { name: 'remove-line', args: shop ? { sku, shop } : { sku } };
+		const domains = resolve(call, seenCatalogue(), shops);
+		if (domains instanceof ToolError) {
+			askInstead('', call, domains);
+			return { ok: true };
+		}
+		const domain = domains[0]!;
+		addMessage(THREAD, 'consumer', `Remove ${sku} from the basket.`);
 		try {
-			await runAndSay(shop.domain, call);
+			await runAndSay(domain, call);
 		} catch (error) {
 			const refusal = error as ShopError;
-			recordToolCall(THREAD, shop.domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
+			recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
 		return { ok: true };
@@ -533,31 +636,31 @@ export const actions = {
 	decide: async ({ request }) => {
 		const form = await request.formData();
 		const verdict = String(form.get('verdict') ?? '');
-		const call = awaiting;
+		const pending = awaiting;
 		awaiting = null;
-		if (!call) return { ok: true };
+		if (!pending) return { ok: true };
+		const { call, domain } = pending;
 
 		if (verdict === 'declined') {
 			addMessage(THREAD, 'agent', `Understood — I will not call ${call.name}.`);
 			return { ok: true };
 		}
 		if (verdict === 'always') {
-			// Reads only. A spend step can never acquire standing approval.
+			// A spend step can never acquire standing approval — see
+			// ALWAYS_ALLOWABLE's own doc comment for exactly which tools can.
 			if (ALWAYS_ALLOWABLE.has(call.name)) standing.add(call.name);
 		}
 
-		const shop = currentShop();
-		if (!shop) return { ok: true };
 		try {
-			await runAndSay(shop.domain, call);
+			await runAndSay(domain, call);
 		} catch (error) {
 			const refusal = error as ShopError;
-			recordToolCall(THREAD, shop.domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
+			recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
 		// A real model keeps going on its own once the call it asked for has run.
 		const driver = driverFromEnv();
-		if (driver instanceof OpenRouterDriver) await runAgent(shop.domain, driver);
+		if (driver instanceof OpenRouterDriver) await runAgent(knownShops(), driver);
 		return { ok: true };
 	},
 
@@ -568,14 +671,7 @@ export const actions = {
 		// traces to something this conversation asked for or accepted. Local
 		// state resets regardless; a shop that cannot be reached does not get
 		// to keep the thread dirty.
-		const shop = currentShop();
-		if (shop) {
-			try {
-				await callShop(shop.domain, 'clear-basket', {});
-			} catch {
-				// Best effort: the transcript below still starts fresh.
-			}
-		}
+		await startFresh(knownShops());
 		db.prepare(`DELETE FROM messages WHERE thread_id = ?`).run(THREAD);
 		db.prepare(`DELETE FROM tool_calls WHERE thread_id = ?`).run(THREAD);
 		standing.clear();

@@ -79,7 +79,11 @@ export const MAX_STEPS = 24;
 export class ToolError extends Error {
 	constructor(
 		readonly code: string,
-		message: string
+		message: string,
+		/** Structured data a caller needs beyond the message text — e.g.
+		 *  `shop-required`'s candidate shops, so the UI can offer them as
+		 *  taps rather than asking the shopper to retype a domain. */
+		readonly fields: Record<string, unknown> = {}
 	) {
 		super(message);
 	}
@@ -379,9 +383,18 @@ export function shopsFor(
 	}
 	if (candidates.size === 1) return [...candidates];
 
+	// Two or more shops sell the same-named id (the ordinary case for a
+	// deliberately overlapping SKU, e.g. two shops both selling AA batteries)
+	// — or the id is unrecognised anywhere and every shop is offered as a
+	// starting point. Either way the fix is the same tap; only the copy
+	// differs.
+	const pick = candidates.size > 1 ? candidates : new Set(shops.map((shop) => shop.domain));
 	throw new ToolError(
 		'shop-required',
-		`You have ${shops.length} shops and this step has to happen at one of them. Which shop?`
+		candidates.size > 1
+			? `More than one shop sells that. Which one did you mean?`
+			: `You have ${shops.length} shops and this step has to happen at one of them. Which shop?`,
+		{ candidates: shops.filter((shop) => pick.has(shop.domain)) }
 	);
 }
 
@@ -624,9 +637,14 @@ export const TOOL_SCHEMAS: Record<ToolName, { description: string; parameters: o
 };
 
 /** What the agent may and may not do, stated to the model in its own terms. */
-export const SYSTEM_PROMPT = `You are a shopping agent talking to one shop through its tools.
+export const SYSTEM_PROMPT = `You are a shopping agent. The shopper may have introduced you to more than one shop; you talk to all of them through the same tools.
 
 Hard rules, and they are not style preferences:
+- A search or a read with no shop named goes to every shop the shopper has
+  added, and results say which shop each one came from. If the shopper
+  clearly means one shop ("at CircuitYard", "the bookshop"), or two shops both
+  answer to the same id, include a \`"shop"\` field in that call's arguments
+  naming the shop's domain — you will see the domain in each result.
 - You NEVER state a price, total, tax, discount or stock count that did not come back from a tool. If you do not have it, call a tool or say you do not know.
 - You NEVER compute or estimate a total. The shop's own quote is the only total.
 - You CANNOT pay. \`place-order\` returns a link the shopper approves on the shop's own page; you hold no payment credential. Say so plainly rather than implying you can buy.
