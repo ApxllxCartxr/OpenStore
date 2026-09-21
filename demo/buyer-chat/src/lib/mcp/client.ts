@@ -143,6 +143,11 @@ export async function agentId(): Promise<string> {
 	return agentProfile(identity, '').jwks.keys[0]?.kid ?? 'chat-k1';
 }
 
+/** One id per process is enough: nothing here pipelines concurrent calls on
+ *  the same connection, so nothing needs the id to correlate a response back
+ *  to its request. */
+let nextId = 1;
+
 export async function call(
 	domain: string,
 	tool: string,
@@ -156,7 +161,12 @@ export async function call(
 			'content-type': 'application/json',
 			authorization: `Bearer ${session.token}`
 		},
-		body: JSON.stringify({ tool, input: args })
+		body: JSON.stringify({
+			jsonrpc: '2.0',
+			id: nextId++,
+			method: 'tools/call',
+			params: { name: tool, arguments: args }
+		})
 	});
 	// A token the shop no longer knows — it restarted, or the token expired
 	// early — is worth exactly one fresh registration, not a refusal the
@@ -170,12 +180,30 @@ export async function call(
 	}
 	const body = (await response.json()) as Record<string, any>;
 	if (!response.ok) {
-		// The shop's own reason, verbatim. An agent that rewrites a refusal into
-		// "something went wrong" has destroyed the only useful part of it.
+		// A refusal before the body was even read as JSON-RPC (auth, rate
+		// limit) — this repo's own {"error": {"code", "detail"}} shape, not a
+		// JSON-RPC error object.
 		throw new ShopError(
 			String(body?.error?.code ?? 'refused'),
 			String(body?.error?.detail ?? 'The shop refused that.')
 		);
 	}
-	return (body.result ?? {}) as ToolResult;
+	if (body.error) {
+		// A JSON-RPC protocol error: malformed request, unknown method, a tool
+		// name that doesn't exist. Not a tool refusing — the call never named
+		// a real tool to refuse.
+		throw new ShopError(
+			'invalid-request',
+			String(body.error.message ?? 'The shop rejected that call.')
+		);
+	}
+	const result = body.result as Record<string, any>;
+	if (result?.isError) {
+		const error = (result.structuredContent as Record<string, any>)?.error ?? {};
+		throw new ShopError(
+			String(error.code ?? 'refused'),
+			String(error.detail ?? 'The shop refused that.')
+		);
+	}
+	return (result?.structuredContent ?? {}) as ToolResult;
 }

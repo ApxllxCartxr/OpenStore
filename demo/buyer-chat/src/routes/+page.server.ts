@@ -105,11 +105,11 @@ async function startFresh(): Promise<void> {
 		// Recorded only when it did something: an empty clear on a fresh thread
 		// is noise, but removed lines are exactly what the shopper must see.
 		if (((result.removed ?? []) as string[]).length) {
-			recordToolCall(THREAD, 'clear-basket', {}, result);
+			recordToolCall(THREAD, shop.domain, 'clear-basket', {}, result);
 		}
 	} catch (error) {
 		const refusal = error as ShopError;
-		recordToolCall(THREAD, 'clear-basket', {}, { error: refusal.code, detail: refusal.message });
+		recordToolCall(THREAD, shop.domain, 'clear-basket', {}, { error: refusal.code, detail: refusal.message });
 	}
 }
 
@@ -184,7 +184,7 @@ function refusalText(refusal: ShopError): string {
 
 async function runCall(domain: string, call: ToolCall): Promise<Record<string, any>> {
 	const result = await callShop(domain, call.name, call.args);
-	recordToolCall(THREAD, call.name, call.args, result);
+	recordToolCall(THREAD, domain, call.name, call.args, result);
 	return result;
 }
 
@@ -197,11 +197,11 @@ async function runReads(domain: string, reads: readonly ToolCall[]): Promise<voi
 	settled.forEach((outcome, n) => {
 		const read = reads[n]!;
 		if (outcome.status === 'fulfilled') {
-			recordToolCall(THREAD, read.name, read.args, outcome.value);
+			recordToolCall(THREAD, domain, read.name, read.args, outcome.value);
 			return;
 		}
 		const refusal = outcome.reason as ShopError;
-		recordToolCall(THREAD, read.name, read.args, { error: refusal.code, detail: refusal.message });
+		recordToolCall(THREAD, domain, read.name, read.args, { error: refusal.code, detail: refusal.message });
 	});
 }
 
@@ -217,6 +217,7 @@ async function runAndSay(domain: string, call: ToolCall): Promise<void> {
  *  of the shop's catalogue this agent is allowed to reason from. */
 function recordedCalls() {
 	return thread(THREAD).toolCalls.map((c) => ({
+		shop: c.shop,
 		name: c.name,
 		args: JSON.parse(c.request) as Record<string, unknown>,
 		result: c.response ? JSON.parse(c.response) : null
@@ -244,7 +245,7 @@ function consumerSaid(): string {
  * invented address must never reach it — approving one would look, to the
  * Consumer, exactly like approving their own.
  */
-function proposalRefusal(call: ToolCall): ToolError | null {
+function proposalRefusal(shop: string, call: ToolCall): ToolError | null {
 	try {
 		// Shape first: a malformed call is refused here rather than spent as a
 		// round trip to a shop that would refuse the same thing.
@@ -253,7 +254,7 @@ function proposalRefusal(call: ToolCall): ToolError | null {
 			const seen = seenCatalogue();
 			const sku = String(call.args?.sku ?? '');
 			assertResolvedVariant(sku, seen.groups);
-			assertAddonHasParent(sku, call.args?.parent, seen.addons, seen.basket);
+			assertAddonHasParent(sku, call.args?.parent, seen.addons, seen.baskets.get(shop) ?? new Set());
 			assertVariantChosenByConsumer(sku, seen, consumerSaid());
 		}
 		if (call.name === 'set-destination') {
@@ -273,8 +274,8 @@ function proposalRefusal(call: ToolCall): ToolError | null {
  * refusal, so the form or the choice is offered here and the turn ends. No
  * second guess, no retry, no third tool card saying the same thing.
  */
-function askInstead(call: ToolCall, refused: ToolError): void {
-	recordToolCall(THREAD, call.name, call.args, { error: refused.code, detail: refused.message });
+function askInstead(shop: string, call: ToolCall, refused: ToolError): void {
+	recordToolCall(THREAD, shop, call.name, call.args, { error: refused.code, detail: refused.message });
 	addMessage(THREAD, 'agent', refused.message, widgetForRefusal(refused.code, call, seenCatalogue()));
 }
 
@@ -344,13 +345,13 @@ async function runAgent(domain: string, driver: OpenRouterDriver): Promise<void>
 
 			const call = planned[i]!;
 			i += 1;
-			const refused = proposalRefusal(call);
+			const refused = proposalRefusal(domain, call);
 			if (refused) {
 				// The refusal is recorded so the model sees why, and the interface
 				// that resolves it is offered in the same breath. The turn ends
 				// here: a model asked to recover from this invented a second
 				// address rather than asking for the first.
-				askInstead(call, refused);
+				askInstead(domain, call, refused);
 				return;
 			}
 			// Everything past the read batch above needs a fresh answer: standing
@@ -424,9 +425,9 @@ export const actions = {
 				addMessage(THREAD, 'agent', `${call.name} is not a tool this shop offers.`);
 				continue;
 			}
-			const refused = proposalRefusal(call);
+			const refused = proposalRefusal(shop.domain, call);
 			if (refused) {
-				askInstead(call, refused);
+				askInstead(shop.domain, call, refused);
 				break;
 			}
 			if (!ALWAYS_ALLOWABLE.has(call.name) && !standing.has(call.name)) {
@@ -438,7 +439,10 @@ export const actions = {
 				await runAndSay(shop.domain, call);
 			} catch (error) {
 				const refusal = error as ShopError;
-				recordToolCall(THREAD, call.name, call.args, { error: refusal.code, detail: refusal.message });
+				recordToolCall(THREAD, shop.domain, call.name, call.args, {
+					error: refusal.code,
+					detail: refusal.message
+				});
 				addMessage(THREAD, 'agent', refusalText(refusal));
 				break;
 			}
@@ -490,7 +494,7 @@ export const actions = {
 			await runAndSay(shop.domain, call);
 		} catch (error) {
 			const refusal = error as ShopError;
-			recordToolCall(THREAD, call.name, call.args, { error: refusal.code, detail: refusal.message });
+			recordToolCall(THREAD, shop.domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
 		const driver = driverFromEnv();
@@ -518,7 +522,7 @@ export const actions = {
 			await runAndSay(shop.domain, call);
 		} catch (error) {
 			const refusal = error as ShopError;
-			recordToolCall(THREAD, call.name, call.args, { error: refusal.code, detail: refusal.message });
+			recordToolCall(THREAD, shop.domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
 		return { ok: true };
@@ -546,7 +550,7 @@ export const actions = {
 			await runAndSay(shop.domain, call);
 		} catch (error) {
 			const refusal = error as ShopError;
-			recordToolCall(THREAD, call.name, call.args, { error: refusal.code, detail: refusal.message });
+			recordToolCall(THREAD, shop.domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
 		// A real model keeps going on its own once the call it asked for has run.

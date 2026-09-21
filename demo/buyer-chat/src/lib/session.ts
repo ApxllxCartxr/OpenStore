@@ -43,6 +43,7 @@ db.exec(`
 	CREATE TABLE IF NOT EXISTS tool_calls (
 	  id        INTEGER PRIMARY KEY AUTOINCREMENT,
 	  thread_id TEXT NOT NULL REFERENCES threads(id),
+	  shop      TEXT NOT NULL DEFAULT '',
 	  name      TEXT NOT NULL,
 	  request   TEXT NOT NULL,
 	  response  TEXT,
@@ -89,6 +90,16 @@ const messageColumns = (db.prepare(`PRAGMA table_info(messages)`).all() as { nam
 );
 if (!messageColumns.includes('widget')) {
 	db.exec(`ALTER TABLE messages ADD COLUMN widget TEXT`);
+}
+
+// A call recorded before this column existed reads back as '' — no shop it
+// could retroactively be assigned to is more correct than a guess, and every
+// site that reasons about a shop's catalogue already treats '' as "no shop".
+const toolCallColumns = (
+	db.prepare(`PRAGMA table_info(tool_calls)`).all() as { name: string }[]
+).map((column) => column.name);
+if (!toolCallColumns.includes('shop')) {
+	db.exec(`ALTER TABLE tool_calls ADD COLUMN shop TEXT NOT NULL DEFAULT ''`);
 }
 
 /**
@@ -161,13 +172,21 @@ export function widgetFor(threadId: string, messageId: number): string | null {
 
 export function recordToolCall(
 	threadId: string,
+	shop: string,
 	name: string,
 	request: unknown,
 	response: unknown
 ): void {
 	db.prepare(
-		`INSERT INTO tool_calls (thread_id, name, request, response, at) VALUES (?, ?, ?, ?, ?)`
-	).run(threadId, name, JSON.stringify(request), JSON.stringify(response ?? null), new Date().toISOString());
+		`INSERT INTO tool_calls (thread_id, shop, name, request, response, at) VALUES (?, ?, ?, ?, ?, ?)`
+	).run(
+		threadId,
+		shop,
+		name,
+		JSON.stringify(request),
+		JSON.stringify(response ?? null),
+		new Date().toISOString()
+	);
 }
 
 export function thread(threadId: string) {
@@ -182,7 +201,9 @@ export function thread(threadId: string) {
 			at: string;
 		}[],
 		toolCalls: db
-			.prepare(`SELECT name, request, response, at FROM tool_calls WHERE thread_id = ? ORDER BY id`)
-			.all(threadId) as { name: string; request: string; response: string; at: string }[]
+			.prepare(
+				`SELECT shop, name, request, response, at FROM tool_calls WHERE thread_id = ? ORDER BY id`
+			)
+			.all(threadId) as { shop: string; name: string; request: string; response: string; at: string }[]
 	};
 }

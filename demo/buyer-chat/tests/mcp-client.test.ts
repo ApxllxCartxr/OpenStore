@@ -41,7 +41,14 @@ function stubShop(): void {
 				status: 401
 			});
 		}
-		return new Response(JSON.stringify({ protocol: 'mcp', result: { lines: [] } }), { status: 200 });
+		return new Response(
+			JSON.stringify({
+				jsonrpc: '2.0',
+				id: 1,
+				result: { content: [], structuredContent: { lines: [] }, isError: false }
+			}),
+			{ status: 200 }
+		);
 	});
 }
 
