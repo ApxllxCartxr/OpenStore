@@ -39,6 +39,46 @@ consumer approving a spend is not the merchant, and a receipt that opens by
 unguessable id *with no login* cannot live behind the merchant's session — that
 would mean no consumer could ever open their own.
 
+## Ten shops, one chat
+
+`make up` seeds ten merchants, each its own sidecar, database and GST home
+state — the point being that "one deploy, one Merchant domain" (ADR-0007)
+scales by repetition, not by a tenant column. `demo/buyer-chat` talks to all
+ten (and to any other MCP server a Consumer pastes in — see below)
+concurrently: an unaddressed search fans out to every shop the chat knows,
+and a write resolves to whichever one it can only mean.
+
+| Shop | Category | Storefront | Console (private network) |
+|---|---|---|---|
+| SpoiledDuckie | accessories | `spoiledduckie.localhost` | `127.0.0.1:3000/admin` |
+| Dog-Eared | books | `dogeared.localhost` | `127.0.0.1:3010/admin` |
+| CircuitYard | electronics | `circuityard.localhost` | `127.0.0.1:3020/admin` |
+| IronList | hardware | `ironlist.localhost` | `127.0.0.1:3030/admin` |
+| PantryLine | grocery | `pantryline.localhost` | `127.0.0.1:3040/admin` |
+| Kettle & Grain | kitchenware | `kettleandgrain.localhost` | `127.0.0.1:3050/admin` |
+| DeskField | stationery | `deskfield.localhost` | `127.0.0.1:3060/admin` |
+| Root & Leaf | plants | `rootandleaf.localhost` | `127.0.0.1:3070/admin` |
+| Playspool | toys | `playspool.localhost` | `127.0.0.1:3080/admin` |
+| Furrow | pet supplies | `furrow.localhost` | `127.0.0.1:3090/admin` |
+
+Four SKUs deliberately overlap across two shops each (AA batteries, filter
+coffee, a sewn notebook, a tennis-ball 3-pack) — different price, different
+stock, same product concept, the ordinary case a multi-shop agent has to
+reason about. `operator@<domain>` / `demo-operator-pw` logs into any
+console; the admin path is refused at the edge on purpose (`/admin*` above),
+so it is reached over the published loopback port, never through
+`*.localhost`.
+
+**The chat is not shop-shaped.** Paste an `agent-commerce.json` URL and it
+connects as one of this repository's own shops (self-registration, TOFU key
+pinning, the closed tool set). Paste a bare MCP server's URL instead and it
+connects the way Claude Desktop's own MCP connector does — `initialize` +
+`tools/list` over the same SSRF-hardened fetch, no card, no pinned key,
+whatever tools that server names. Either way the model sees real tool
+schemas and real annotations (`readOnlyHint`, `moneyPathHint`), not a
+hand-picked list, and standing "always allow" is available for anything
+short of the two scopes that ever move toward a spend.
+
 ## The three claims this repository is built to support
 
 **An agent never holds spending authority.** Not "we validate carefully" — the
