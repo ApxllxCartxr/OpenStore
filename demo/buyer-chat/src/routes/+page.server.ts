@@ -45,14 +45,17 @@ import {
 	catalogueFrom,
 	consentNote,
 	hasMeaningfulArgs,
+	isMoneyPath,
+	reachableTools,
 	requiresFreshConsent,
+	schemasFor,
 	shopsFor,
 	validate,
 	type Seen,
 	type Shop,
 	type ToolName
 } from '$lib/tools/loop.ts';
-import { call as callShop, ShopError } from '$lib/mcp/client.ts';
+import { call as callShop, callGeneric, ShopError } from '$lib/mcp/client.ts';
 import { explain } from '$lib/quote.ts';
 import { argsFor, composeMessage, parseWidget, saidBySubmitting, widgetForRefusal } from '$lib/widgets.ts';
 import { db } from '$lib/session.ts';
@@ -63,7 +66,24 @@ import { db } from '$lib/session.ts';
  *  position (`shopsFor`, below the tool loop, resolves by what a call named
  *  or can only mean). */
 function knownShops(): Shop[] {
-	return db.prepare(`SELECT domain, name FROM contacts ORDER BY added_at ASC`).all() as Shop[];
+	const rows = db
+		.prepare(`SELECT domain, name, kind, mcp_endpoint, tools FROM contacts ORDER BY added_at ASC`)
+		.all() as { domain: string; name: string; kind: string; mcp_endpoint: string; tools: string }[];
+	return rows.map((row) => ({
+		domain: row.domain,
+		name: row.name,
+		kind: row.kind === 'generic' ? 'generic' : 'openstore',
+		tools: row.kind === 'generic' ? (JSON.parse(row.tools) as Shop['tools']) : undefined
+	}));
+}
+
+/** The endpoint a generic shop's tools/call actually goes to — its own URL,
+ *  not a domain to dial the way an openstore shop's own agent/mcp is. */
+function genericEndpoint(domain: string): string {
+	const row = db.prepare(`SELECT mcp_endpoint FROM contacts WHERE domain = ?`).get(domain) as
+		| { mcp_endpoint: string }
+		| undefined;
+	return row?.mcp_endpoint ?? '';
 }
 
 function shopName(domain: string, shops: readonly Shop[]): string {
@@ -121,7 +141,7 @@ export async function load() {
 		driver: currentDriver().name,
 		drivers: availableDrivers(),
 		driverChoice: getSetting(DRIVER_SETTING),
-		tools: [...TOOLS],
+		tools: [...reachableTools(shops)],
 		shops,
 		pending: awaiting
 			? {
@@ -177,23 +197,27 @@ function pendingOverCeiling(pending: { call: ToolCall; domain: string }): number
  */
 async function startFresh(shops: readonly Shop[]): Promise<void> {
 	await Promise.all(
-		shops.map(async (shop) => {
-			try {
-				const result = await callShop(shop.domain, 'clear-basket', {});
-				// Recorded only when it did something: an empty clear on a fresh
-				// thread is noise, but removed lines are exactly what the shopper
-				// must see.
-				if (((result.removed ?? []) as string[]).length) {
-					recordToolCall(THREAD, shop.domain, 'clear-basket', {}, result);
+		// A generic shop has no basket concept at all — clear-basket is this
+		// repo's own tool, not a thing every MCP server is assumed to have.
+		shops
+			.filter((shop) => shop.kind !== 'generic')
+			.map(async (shop) => {
+				try {
+					const result = await callShop(shop.domain, 'clear-basket', {});
+					// Recorded only when it did something: an empty clear on a fresh
+					// thread is noise, but removed lines are exactly what the shopper
+					// must see.
+					if (((result.removed ?? []) as string[]).length) {
+						recordToolCall(THREAD, shop.domain, 'clear-basket', {}, result);
+					}
+				} catch (error) {
+					const refusal = error as ShopError;
+					recordToolCall(THREAD, shop.domain, 'clear-basket', {}, {
+						error: refusal.code,
+						detail: refusal.message
+					});
 				}
-			} catch (error) {
-				const refusal = error as ShopError;
-				recordToolCall(THREAD, shop.domain, 'clear-basket', {}, {
-					error: refusal.code,
-					detail: refusal.message
-				});
-			}
-		})
+			})
 	);
 }
 
@@ -276,9 +300,23 @@ function withoutShopArg(args: Record<string, unknown>): Record<string, unknown> 
 	return rest;
 }
 
-async function runCall(domain: string, call: ToolCall): Promise<Record<string, any>> {
+/** One shop, one call, whichever transport it actually needs — self-registered
+ *  bearer auth against this repo's own shops, no auth against anything else
+ *  (`mcp/client.ts`'s own header). The rest of this file never branches on
+ *  kind again once a call has been dispatched through here. */
+async function dispatch(domain: string, shops: readonly Shop[], tool: string, args: Record<string, unknown>) {
+	const shop = shops.find((s) => s.domain === domain);
+	if (shop?.kind === 'generic') return callGeneric(genericEndpoint(domain), tool, args);
+	return callShop(domain, tool, args);
+}
+
+async function runCall(
+	domain: string,
+	shops: readonly Shop[],
+	call: ToolCall
+): Promise<Record<string, any>> {
 	const args = withoutShopArg(call.args);
-	const result = await callShop(domain, call.name, args);
+	const result = await dispatch(domain, shops, call.name, args);
 	recordToolCall(THREAD, domain, call.name, args, result);
 	return result;
 }
@@ -301,7 +339,9 @@ async function runReads(reads: readonly ToolCall[], seen: Seen, shops: readonly 
 		}
 		return domains.map((domain) => ({ call: { ...read, args: withoutShopArg(read.args) }, domain }));
 	});
-	const settled = await Promise.allSettled(jobs.map((job) => callShop(job.domain, job.call.name, job.call.args)));
+	const settled = await Promise.allSettled(
+		jobs.map((job) => dispatch(job.domain, shops, job.call.name, job.call.args))
+	);
 	settled.forEach((outcome, n) => {
 		const { call, domain } = jobs[n]!;
 		if (outcome.status === 'fulfilled') {
@@ -315,9 +355,9 @@ async function runReads(reads: readonly ToolCall[], seen: Seen, shops: readonly 
 
 /** Run a call and say what the shop said back. One place, because the `needs`
  *  comparison has to be taken *before* the new result is recorded. */
-async function runAndSay(domain: string, call: ToolCall): Promise<void> {
+async function runAndSay(domain: string, shops: readonly Shop[], call: ToolCall): Promise<void> {
 	const before = previousNeedsOf(recordedCalls());
-	const result = await runCall(domain, call);
+	const result = await runCall(domain, shops, call);
 	addMessage(THREAD, 'agent', describe(call.name, result, before));
 }
 
@@ -353,11 +393,11 @@ function consumerSaid(): string {
  * invented address must never reach it — approving one would look, to the
  * Consumer, exactly like approving their own.
  */
-function proposalRefusal(shop: string, call: ToolCall): ToolError | null {
+function proposalRefusal(shop: string, call: ToolCall, shops: readonly Shop[]): ToolError | null {
 	try {
 		// Shape first: a malformed call is refused here rather than spent as a
 		// round trip to a shop that would refuse the same thing.
-		validate(call);
+		validate(call, shops);
 		if (call.name === 'add-line') {
 			const seen = seenCatalogue();
 			const sku = String(call.args?.sku ?? '');
@@ -422,7 +462,7 @@ async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promi
 	for (let step = 0; step < MAX_STEPS; step += 1) {
 		let turn;
 		try {
-			turn = await driver.step(turns(), [...TOOLS]);
+			turn = await driver.step(turns(), [...reachableTools(shops)], schemasFor(shops));
 		} catch (error) {
 			addMessage(THREAD, 'agent', `I could not reach my model: ${(error as Error).message}`);
 			return;
@@ -446,7 +486,8 @@ async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promi
 			// timestamped ahead of the tool cards that follow it.
 			addMessage(THREAD, 'agent', '', null, turn.reasoning);
 		}
-		const planned = turn.calls.filter((call) => TOOLS.includes(call.name as ToolName));
+		const known = reachableTools(shops);
+		const planned = turn.calls.filter((call) => known.has(call.name));
 		let i = 0;
 		while (i < planned.length) {
 			// A run of reads goes out together. Reads change nothing, so their
@@ -478,7 +519,7 @@ async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promi
 				return;
 			}
 			const domain = domains[0]!;
-			const refused = proposalRefusal(domain, call);
+			const refused = proposalRefusal(domain, call, shops);
 			if (refused) {
 				// The refusal is recorded so the model sees why, and the interface
 				// that resolves it is offered in the same breath. The turn ends
@@ -487,12 +528,28 @@ async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promi
 				askInstead(domain, call, refused);
 				return;
 			}
-			// Everything past the read batch above needs a fresh answer: standing
-			// approval only ever holds reads (ADR-0008), so anything reaching
-			// here is a call the Consumer has not yet allowed.
-			awaiting = { call, domain };
-			addMessage(THREAD, 'agent', `I’d like to call ${call.name} next — details below, your call.`);
-			return;
+			// Standing never covers a spend step (ALWAYS_ALLOWABLE/isMoneyPath
+			// both refuse that outright), but it does cover everything else once
+			// the Consumer has granted it once — live-caught: this branch used
+			// to set `awaiting` unconditionally for every write, so "Always
+			// allow" never actually took effect here even though it did in the
+			// scripted-driver path and in requiresFreshConsent's own tests.
+			if (requiresFreshConsent(call.name, standing, shops)) {
+				awaiting = { call, domain };
+				addMessage(THREAD, 'agent', `I’d like to call ${call.name} next — details below, your call.`);
+				return;
+			}
+			try {
+				await runCall(domain, shops, call);
+			} catch (error) {
+				const refusal = error as ShopError;
+				recordToolCall(THREAD, domain, call.name, call.args, {
+					error: refusal.code,
+					detail: refusal.message
+				});
+				addMessage(THREAD, 'agent', refusalText(refusal));
+				return;
+			}
 		}
 	}
 	addMessage(THREAD, 'agent', 'I have taken this as far as I can in one go — tell me what to do next.');
@@ -538,7 +595,7 @@ export const actions = {
 		try {
 			proposed = await driver.plan(
 				state.messages.map((m) => ({ role: m.role as 'consumer' | 'agent', text: m.text })),
-				[...TOOLS]
+				[...reachableTools(shops)]
 			);
 		} catch (error) {
 			addMessage(THREAD, 'agent', `I could not plan a next step: ${(error as Error).message}`);
@@ -553,9 +610,9 @@ export const actions = {
 				return { ok: true };
 			}
 			const call = proposal;
-			if (!TOOLS.includes(call.name as ToolName)) {
-				// A name the shop does not have is refused here rather than sent.
-				addMessage(THREAD, 'agent', `${call.name} is not a tool this shop offers.`);
+			if (!reachableTools(shops).has(call.name)) {
+				// A name no known shop has is refused here rather than sent.
+				addMessage(THREAD, 'agent', `${call.name} is not a tool any shop you know offers.`);
 				continue;
 			}
 			const domains = resolve(call, seenCatalogue(), shops);
@@ -564,18 +621,18 @@ export const actions = {
 				break;
 			}
 			const domain = domains[0]!;
-			const refused = proposalRefusal(domain, call);
+			const refused = proposalRefusal(domain, call, shops);
 			if (refused) {
 				askInstead(domain, call, refused);
 				break;
 			}
-			if (requiresFreshConsent(call.name as ToolName, standing)) {
+			if (requiresFreshConsent(call.name, standing, shops)) {
 				awaiting = { call, domain };
 				addMessage(THREAD, 'agent', `I’d like to call ${call.name} next — details below, your call.`);
 				return { ok: true };
 			}
 			try {
-				await runAndSay(domain, call);
+				await runAndSay(domain, shops, call);
 			} catch (error) {
 				const refusal = error as ShopError;
 				recordToolCall(THREAD, domain, call.name, call.args, {
@@ -639,7 +696,7 @@ export const actions = {
 		}
 		const domain = domains[0]!;
 		try {
-			await runAndSay(domain, call);
+			await runAndSay(domain, shops, call);
 		} catch (error) {
 			const refusal = error as ShopError;
 			recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
@@ -686,7 +743,7 @@ export const actions = {
 		const domain = domains[0]!;
 		addMessage(THREAD, 'consumer', `Remove ${sku} from the basket.`);
 		try {
-			await runAndSay(domain, call);
+			await runAndSay(domain, shops, call);
 		} catch (error) {
 			const refusal = error as ShopError;
 			recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
@@ -702,19 +759,25 @@ export const actions = {
 		awaiting = null;
 		if (!pending) return { ok: true };
 		const { call, domain } = pending;
+		const shops = knownShops();
 
 		if (verdict === 'declined') {
 			addMessage(THREAD, 'agent', `Understood — I will not call ${call.name}.`);
 			return { ok: true };
 		}
 		if (verdict === 'always') {
-			// A spend step can never acquire standing approval — see
-			// ALWAYS_ALLOWABLE's own doc comment for exactly which tools can.
-			if (ALWAYS_ALLOWABLE.has(call.name)) standing.add(call.name);
+			// A spend step can never acquire standing approval. The closed set
+			// keeps ALWAYS_ALLOWABLE's own hand-reasoned boundary; a generic
+			// tool uses isMoneyPath's — see requiresFreshConsent's own comment
+			// for why the two are asked separately rather than merged.
+			const allowable = (TOOLS as readonly string[]).includes(call.name)
+				? ALWAYS_ALLOWABLE.has(call.name)
+				: !isMoneyPath(call.name, shops);
+			if (allowable) standing.add(call.name);
 		}
 
 		try {
-			await runAndSay(domain, call);
+			await runAndSay(domain, shops, call);
 		} catch (error) {
 			const refusal = error as ShopError;
 			recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });

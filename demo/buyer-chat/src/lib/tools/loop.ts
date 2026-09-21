@@ -100,8 +100,18 @@ export type PermissionRequest = {
 	spend: boolean;
 };
 
-export function requiresFreshConsent(tool: ToolName, standing: ReadonlySet<string>): boolean {
-	if (!ALWAYS_ALLOWABLE.has(tool)) return true;
+export function requiresFreshConsent(
+	tool: string,
+	standing: ReadonlySet<string>,
+	shops: readonly Shop[] = []
+): boolean {
+	// The closed set keeps its own hand-reasoned boundary (ALWAYS_ALLOWABLE,
+	// above) rather than being folded into isMoneyPath's generic one — they
+	// agree today (both are exactly "outside start-checkout/confirm"), but
+	// the closed set's boundary is allowed to diverge from the generic
+	// default without touching this function.
+	const allowable = (TOOLS as readonly string[]).includes(tool) ? ALWAYS_ALLOWABLE.has(tool) : !isMoneyPath(tool, shops);
+	if (!allowable) return true;
 	return !standing.has(tool);
 }
 
@@ -262,9 +272,84 @@ export type SeenCall = {
 	result: unknown;
 };
 
+/** One tool a `'generic'` shop's own `tools/list` named. Enough to build its
+ *  schema for the model and classify its consent tier — never the OpenStore
+ *  closed set's own shape, which is why this is its own small type rather
+ *  than reusing `mcp/client.ts`'s `ToolDescriptor` (`loop.ts` reasons about
+ *  tools; it does not fetch them). */
+export type GenericTool = {
+	name: string;
+	description: string;
+	inputSchema: Record<string, unknown>;
+	annotations: { readOnlyHint?: boolean; destructiveHint?: boolean; moneyPathHint?: boolean };
+};
+
 /** A shop this chat has been introduced to: its domain is the address, its
- *  name is what the Consumer calls it. */
-export type Shop = { domain: string; name: string };
+ *  name is what the Consumer calls it. `kind` and `tools` are absent (or
+ *  `'openstore'`/undefined) for one of this repo's own shops — the closed
+ *  14-tool set applies unconditionally, the way it always has. A `'generic'`
+ *  shop carries its own `tools/list` answer, cached at add time, because
+ *  that — not `TOOLS` — is the only true source for what it offers. */
+export type Shop = { domain: string; name: string; kind?: 'openstore' | 'generic'; tools?: GenericTool[] };
+
+function genericTool(shops: readonly Shop[], name: string): { shop: Shop; tool: GenericTool } | null {
+	for (const shop of shops) {
+		const tool = shop.tools?.find((t) => t.name === name);
+		if (tool) return { shop, tool };
+	}
+	return null;
+}
+
+/** Every tool name reachable right now: the closed set, plus whatever each
+ *  connected generic shop's own `tools/list` named. The one gate everything
+ *  else — dispatch, the model's own schema, consent — is built from. */
+export function reachableTools(shops: readonly Shop[]): Set<string> {
+	const names = new Set<string>(TOOLS);
+	for (const shop of shops) for (const tool of shop.tools ?? []) names.add(tool.name);
+	return names;
+}
+
+/** The two scopes that ever move toward a spend, generalised past the
+ *  closed set: a generic tool is money-path when its own server says so
+ *  (`moneyPathHint`/`destructiveHint`), and — since nothing here can verify
+ *  a server that stays silent — money-path by default when it says nothing
+ *  at all. The closed set never needed a default; every one of its tools
+ *  already declares a scope. */
+export function isMoneyPath(name: string, shops: readonly Shop[]): boolean {
+	if ((TOOLS as readonly string[]).includes(name)) {
+		const scope = SCOPES[name as ToolName];
+		return scope === 'start-checkout' || scope === 'confirm';
+	}
+	const found = genericTool(shops, name);
+	if (!found) return true;
+	const { moneyPathHint, destructiveHint, readOnlyHint } = found.tool.annotations;
+	if (moneyPathHint || destructiveHint) return true;
+	// readOnlyHint is the one positive safety signal worth trusting on its
+	// own — a tool that says it reads and changes nothing is exactly the
+	// case ALWAYS_ALLOWABLE already treats as safe for the closed set. A
+	// tool that says neither gets the same default an unrecognised one
+	// does: nothing here can verify silence, so silence is money-path.
+	return !readOnlyHint;
+}
+
+/** `description`/`inputSchema` for the model's native tool-calling, merged
+ *  across the closed set and every connected generic shop. A generic tool's
+ *  own JSON Schema is used verbatim — it is real JSON Schema (ADR-0026 on
+ *  the sidecar side; whatever the generic server itself declares here),
+ *  unlike the closed set's schemas, which predate that and are converted by
+ *  `TOOL_SCHEMAS`' own shape below. */
+export function schemasFor(
+	shops: readonly Shop[]
+): Record<string, { description: string; parameters: object }> {
+	const merged: Record<string, { description: string; parameters: object }> = { ...TOOL_SCHEMAS };
+	for (const shop of shops) {
+		for (const tool of shop.tools ?? []) {
+			if (merged[tool.name]) continue; // the closed set wins a name collision
+			merged[tool.name] = { description: tool.description, parameters: tool.inputSchema };
+		}
+	}
+	return merged;
+}
 
 export type SeenVariant = {
 	group: string;
@@ -365,6 +450,23 @@ export function shopsFor(
 	}
 	if (shops.length === 1) return [shops[0]!.domain];
 
+	// A tool outside the closed set belongs to whichever generic shop's own
+	// tools/list named it — never inferred from sku/group the way the closed
+	// set's writes are, since a generic tool's arguments follow that server's
+	// own schema and mean nothing here.
+	if (!(TOOLS as readonly string[]).includes(call.name)) {
+		const declaring = shops.filter((shop) => shop.tools?.some((t) => t.name === call.name));
+		if (declaring.length === 1) return [declaring[0]!.domain];
+		if (declaring.length > 1) {
+			throw new ToolError(
+				'shop-required',
+				`More than one shop offers ${call.name}. Which one did you mean?`,
+				{ candidates: declaring }
+			);
+		}
+		throw new ToolError('unknown-tool', `${call.name} is not a tool any known shop offers.`);
+	}
+
 	// A read with no shop named goes to every shop: "find me a notebook" is a
 	// question about the shops the Consumer has, not about whichever one was
 	// added last. Reads change nothing, so asking all of them costs only the
@@ -443,10 +545,18 @@ export function assertVariantChosenByConsumer(sku: string, seen: Seen, said: str
 	);
 }
 
-export function validate(call: ToolCall): ToolCall {
-	if (!TOOLS.includes(call.name as ToolName)) {
+export function validate(call: ToolCall, shops: readonly Shop[] = []): ToolCall {
+	if (!reachableTools(shops).has(call.name)) {
 		throw new ToolError('unknown-tool', `${call.name} is not a tool this agent has.`);
 	}
+	// Everything past here is the closed set's own shape (a SKU that
+	// resolves, a quantity that is a whole number, ...). A generic tool's
+	// arguments follow that server's own JSON Schema instead, checked
+	// server-side when the call actually reaches it — this function has no
+	// second schema to check them against, and inventing one would be
+	// exactly the kind of guess this repo's tools never make about a
+	// Merchant's own data.
+	if (!(TOOLS as readonly string[]).includes(call.name)) return call;
 	const tool = call.name as ToolName;
 	const args = call.args;
 

@@ -1,34 +1,84 @@
 import { fail } from '@sveltejs/kit';
 import { clearSetting, db, getSetting, setSetting } from '$lib/session.ts';
-import { ContactError, fetchCard, forgetContact, saveContact } from '$lib/contacts.ts';
+import {
+	ContactError,
+	connectMcp,
+	fetchCard,
+	forgetContact,
+	saveContact,
+	saveGenericContact
+} from '$lib/contacts.ts';
 
 const CEILING_KEY = 'spend_ceiling_minor';
 
+/** SSRF-level refusals: the URL itself is refused before anything is asked
+ *  of it, so a second attempt with a different parsing strategy would fail
+ *  for the identical reason. Everything else is about what came back, and
+ *  is worth a second reading — an agent-commerce.json shop and a bare MCP
+ *  server can both 404 a request shaped for the other one. */
+const URL_LEVEL_REFUSALS = new Set(['not-https', 'not-public', 'metadata-refused', 'blocked']);
+
 export async function load() {
 	const contacts = db
-		.prepare(`SELECT domain, name, category, protocols, added_at FROM contacts ORDER BY name`)
-		.all() as { domain: string; name: string; category: string; protocols: string; added_at: string }[];
+		.prepare(`SELECT domain, name, category, protocols, kind, tools, added_at FROM contacts ORDER BY name`)
+		.all() as {
+		domain: string;
+		name: string;
+		category: string;
+		protocols: string;
+		kind: string;
+		tools: string;
+		added_at: string;
+	}[];
 	const ceiling = getSetting(CEILING_KEY);
 	return {
-		contacts: contacts.map((c) => ({ ...c, protocols: JSON.parse(c.protocols) as string[] })),
+		contacts: contacts.map((c) => ({
+			...c,
+			protocols: JSON.parse(c.protocols) as string[],
+			toolCount: (JSON.parse(c.tools) as unknown[]).length
+		})),
 		spendCeilingMinor: ceiling ? Number(ceiling) : null
 	};
 }
 
 export const actions = {
+	/**
+	 * One field, two things it might be: an agent-commerce.json card (this
+	 * repo's own shops) or a bare MCP server endpoint (everything else —
+	 * the same "paste a URL" flow Claude Desktop's own MCP connector uses).
+	 * Tried in that order because a card answers its own well-known path
+	 * whether or not the pasted URL points there directly, while a generic
+	 * server has no such convention to try first.
+	 */
 	add: async ({ request }) => {
 		const form = await request.formData();
 		const url = String(form.get('url') ?? '').trim();
 		try {
 			const card = await fetchCard(url);
 			saveContact(card, url);
-			return { message: `Added ${card.name}.` };
-		} catch (error) {
-			// Every failure names its reason: unknown URL, tampered card, dead
-			// sidecar. A generic "could not add" tells the Consumer nothing they
-			// can act on.
-			if (error instanceof ContactError) return fail(400, { message: error.message, code: error.code });
-			throw error;
+			return { message: `Added ${card.name} (agent-commerce.json shop).` };
+		} catch (cardError) {
+			if (!(cardError instanceof ContactError) || URL_LEVEL_REFUSALS.has(cardError.code)) {
+				if (cardError instanceof ContactError) {
+					return fail(400, { message: cardError.message, code: cardError.code });
+				}
+				throw cardError;
+			}
+			try {
+				const server = await connectMcp(url);
+				saveGenericContact(server);
+				return {
+					message: `Connected to ${server.name} — ${server.tools.length} tool${server.tools.length === 1 ? '' : 's'} offered.`
+				};
+			} catch (mcpError) {
+				// Neither reading worked. The card's own refusal is usually the
+				// more informative one — a real shop that briefly 500'd reads
+				// better than "no tools" from the same failed fetch reinterpreted.
+				if (mcpError instanceof ContactError) {
+					return fail(400, { message: mcpError.message, code: mcpError.code });
+				}
+				throw mcpError;
+			}
 		}
 	},
 	forget: async ({ request }) => {

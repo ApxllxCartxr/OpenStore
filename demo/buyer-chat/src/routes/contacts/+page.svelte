@@ -7,16 +7,18 @@
 <div class="thread">
 	<h1 style="font-size:1.25rem">Shops</h1>
 	<p class="meta" style="margin-top:var(--s-1)">
-		Paste a shop's address. I fetch its card, check the key, and remember it.
+		Paste an agent-commerce.json shop's address and I fetch its card, check the key, and
+		remember it. Paste any other MCP server's address and I connect to it the same way Claude
+		does — no card, no pinned key, just whatever tools it tells me it has.
 	</p>
 
 	<form method="POST" action="?/add" class="add">
 		<label class="field">
-			<span class="meta">Card address</span>
+			<span class="meta">Shop or MCP server address</span>
 			<input
 				name="url"
 				class="mono"
-				placeholder="https://shop.example/.well-known/agent-commerce.json"
+				placeholder="https://shop.example/.well-known/agent-commerce.json or an MCP server URL"
 			/>
 		</label>
 		<button type="submit">Add shop</button>
@@ -59,9 +61,17 @@
 			<li class="contact">
 				<div>
 					<strong>{contact.name}</strong>
-					<div class="mono meta">
-						{contact.domain} · {contact.protocols.join(', ') || 'no protocols listed'}
-					</div>
+					{#if contact.kind === 'generic'}
+						<div class="mono meta">
+							{contact.domain} · MCP server · {contact.toolCount} tool{contact.toolCount === 1
+								? ''
+								: 's'}
+						</div>
+					{:else}
+						<div class="mono meta">
+							{contact.domain} · {contact.protocols.join(', ') || 'no protocols listed'}
+						</div>
+					{/if}
 				</div>
 				<form method="POST" action="?/forget" style="margin-left:auto">
 					<input type="hidden" name="domain" value={contact.domain} />

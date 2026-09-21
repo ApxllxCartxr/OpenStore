@@ -207,3 +207,124 @@ export async function call(
 	}
 	return (result?.structuredContent ?? {}) as ToolResult;
 }
+
+// ── Generic MCP — any server, not just this repo's own shops ───────────────
+//
+// The self-registration above is this repo's own admission scheme
+// (ADR-0012): a published Agent Profile, a fetched key, a bearer token. A
+// server that isn't one of this repo's shops has no reason to speak it —
+// most public MCP servers take no credential at all, or one this repo has no
+// story for yet (OAuth 2.1). So the generic path sends no Authorization
+// header, and a server that answers 401 gets a refusal that says so plainly
+// rather than a client that pretends to have tried harder than it did.
+
+export type ToolDescriptor = {
+	name: string;
+	description: string;
+	inputSchema: Record<string, unknown>;
+	annotations: {
+		readOnlyHint?: boolean;
+		destructiveHint?: boolean;
+		moneyPathHint?: boolean;
+		[key: string]: unknown;
+	};
+};
+
+async function rpc(
+	endpoint: string,
+	method: string,
+	params: Record<string, unknown> = {},
+	fetcher: typeof fetch = fetch
+): Promise<any> {
+	const response = await fetcher(endpoint, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params })
+	});
+	if (response.status === 401 || response.status === 403) {
+		throw new ShopError(
+			'auth-required',
+			`${new URL(endpoint).hostname} needs a credential this chat does not have a way to provide yet.`
+		);
+	}
+	const text = await response.text();
+	let body: any;
+	try {
+		body = JSON.parse(text);
+	} catch {
+		throw new ShopError('not-mcp', `${new URL(endpoint).hostname} did not answer with JSON-RPC.`);
+	}
+	if (!response.ok || body.error) {
+		throw new ShopError(
+			'refused',
+			String(body?.error?.message ?? `${new URL(endpoint).hostname} answered ${response.status}.`)
+		);
+	}
+	return body.result;
+}
+
+/** The handshake, and what the server says about itself — used once, at
+ *  add-contact time, to name the shop something better than its own
+ *  hostname when the server bothers to say who it is. */
+export async function initializeGeneric(
+	endpoint: string,
+	fetcher: typeof fetch = fetch
+): Promise<{ name: string | null }> {
+	const result = await rpc(
+		endpoint,
+		'initialize',
+		{ protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'Miro', version: '1' } },
+		fetcher
+	);
+	const name = result?.serverInfo?.name;
+	return { name: typeof name === 'string' && name ? name : null };
+}
+
+export async function listToolsGeneric(
+	endpoint: string,
+	fetcher: typeof fetch = fetch
+): Promise<ToolDescriptor[]> {
+	const result = await rpc(endpoint, 'tools/list', {}, fetcher);
+	const tools = Array.isArray(result?.tools) ? result.tools : [];
+	return tools
+		.filter((t: any) => typeof t?.name === 'string')
+		.map((t: any) => ({
+			name: String(t.name),
+			description: typeof t.description === 'string' ? t.description : '',
+			inputSchema: typeof t.inputSchema === 'object' && t.inputSchema ? t.inputSchema : { type: 'object' },
+			annotations: typeof t.annotations === 'object' && t.annotations ? t.annotations : {}
+		}));
+}
+
+export async function callGeneric(
+	endpoint: string,
+	tool: string,
+	args: Record<string, unknown> = {},
+	fetcher: typeof fetch = fetch
+): Promise<ToolResult> {
+	const result = await rpc(endpoint, 'tools/call', { name: tool, arguments: args }, fetcher);
+	if (result?.isError) {
+		const text = Array.isArray(result.content) ? result.content.map((c: any) => c?.text ?? '').join(' ') : '';
+		throw new ShopError('refused', text.trim() || 'That call was refused.');
+	}
+	// `structuredContent` is optional in the spec; a server that only returns
+	// `content` still gets something usable rather than an empty object —
+	// text is tried as JSON first (many servers just stringify their result),
+	// and kept as plain text otherwise.
+	if (result?.structuredContent && typeof result.structuredContent === 'object') {
+		return result.structuredContent as ToolResult;
+	}
+	const text = Array.isArray(result?.content)
+		? result.content
+				.map((c: any) => (typeof c?.text === 'string' ? c.text : ''))
+				.filter(Boolean)
+				.join('\n')
+		: '';
+	try {
+		const parsed = JSON.parse(text);
+		if (parsed && typeof parsed === 'object') return parsed as ToolResult;
+	} catch {
+		// Not JSON — fall through to the plain-text wrapper below.
+	}
+	return { text };
+}

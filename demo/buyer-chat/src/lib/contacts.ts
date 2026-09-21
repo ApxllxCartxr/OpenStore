@@ -18,6 +18,7 @@
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { db } from './session.ts';
+import { ShopError, initializeGeneric, listToolsGeneric, type ToolDescriptor } from './mcp/client.ts';
 
 export const METADATA_ADDRESSES = new Set(['169.254.169.254', 'fd00:ec2::254']);
 export const MAX_CARD_BYTES = 64 * 1024;
@@ -34,7 +35,8 @@ export class ContactError extends Error {
 			| 'too-large'
 			| 'redirected'
 			| 'key-changed'
-			| 'blocked',
+			| 'blocked'
+			| 'no-tools',
 		message: string
 	) {
 		super(message);
@@ -329,6 +331,63 @@ export function saveContact(card: Card, cardUrl: string): void {
 		card.jwksUrl,
 		JSON.stringify(card.jwks),
 		JSON.stringify(card.protocols),
+		new Date().toISOString()
+	);
+}
+
+// ── Generic MCP servers — not one of this repo's own shops ─────────────────
+//
+// No agent-commerce.json, no JWKS, no self-registration: connecting is the
+// same JSON-RPC handshake Claude Desktop's own "add an MCP server" flow
+// does, over the same SSRF-hardened fetch every Consumer-pasted URL goes
+// through (`checkUrl`, above — a URL is a URL regardless of what answers it).
+
+export type GenericServer = { domain: string; name: string; endpoint: string; tools: ToolDescriptor[] };
+
+/**
+ * Tried when a pasted URL did not answer like an agent-commerce.json card.
+ * `initialize` names the server (falling back to its hostname); `tools/list`
+ * is what actually makes it useful — a server with no tools is refused here
+ * rather than saved as a contact this chat can never do anything with.
+ */
+export async function connectMcp(
+	url: string,
+	fetcher: typeof fetch = fetch,
+	resolver?: (host: string) => Promise<string[]>
+): Promise<GenericServer> {
+	await checkUrl(url, resolver);
+	const domain = new URL(url).hostname;
+	let name: string | null;
+	let tools: ToolDescriptor[];
+	try {
+		({ name } = await initializeGeneric(url, fetcher));
+		tools = await listToolsGeneric(url, fetcher);
+	} catch (error) {
+		if (error instanceof ShopError) {
+			throw new ContactError(error.code === 'auth-required' ? 'blocked' : 'unreachable', error.message);
+		}
+		throw error;
+	}
+	if (!tools.length) {
+		throw new ContactError('no-tools', `${domain} answered, but tools/list named nothing to call.`);
+	}
+	return { domain, name: name ?? domain, endpoint: url, tools };
+}
+
+export function saveGenericContact(server: GenericServer): void {
+	db.prepare(
+		`INSERT INTO contacts (domain, name, category, card_url, jwks, kind, mcp_endpoint, tools, added_at)
+		 VALUES (?, ?, ?, ?, ?, 'generic', ?, ?, ?)
+		 ON CONFLICT (domain) DO UPDATE SET
+		   name = excluded.name, mcp_endpoint = excluded.mcp_endpoint, tools = excluded.tools`
+	).run(
+		server.domain,
+		server.name,
+		'mcp-server',
+		server.endpoint,
+		'{"keys":[]}',
+		server.endpoint,
+		JSON.stringify(server.tools),
 		new Date().toISOString()
 	);
 }

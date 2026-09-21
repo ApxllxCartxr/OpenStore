@@ -7,6 +7,7 @@ import {
 	assessTrust,
 	checkUrl,
 	confirmRotation,
+	connectMcp,
 	ContactError,
 	fetchCard,
 	forgetContact,
@@ -14,8 +15,10 @@ import {
 	isPublicAddress,
 	parseCard,
 	parseJwks,
-	saveContact
+	saveContact,
+	saveGenericContact
 } from '../src/lib/contacts.ts';
+import { db } from '../src/lib/session.ts';
 
 const resolver = (map: Record<string, string[]>) => async (host: string) =>
 	map[host] ?? ['93.184.216.34'];
@@ -172,5 +175,63 @@ describe('the contact book', () => {
 		expect(getContact('shop.test')).toBeNull();
 		// Server revocation is separate and authoritative. A chat that claimed
 		// to revoke would be telling the Consumer something it cannot do.
+	});
+});
+
+describe('connecting to a bare MCP server — not one of this repo\'s own shops', () => {
+	const publicResolver = resolver({ 'toybox.example': ['93.184.216.34'] });
+
+	function stub(handler: (body: any) => unknown) {
+		return (async (_url: string, init: RequestInit) => {
+			const body = JSON.parse(String(init.body));
+			return new Response(JSON.stringify(handler(body)), { status: 200 });
+		}) as unknown as typeof fetch;
+	}
+
+	it('goes through the same SSRF check any pasted URL does', async () => {
+		await expect(
+			connectMcp('https://internal.example/mcp', undefined, resolver({ 'internal.example': ['10.0.0.5'] }))
+		).rejects.toThrow(ContactError);
+	});
+
+	it('names the server from its own handshake and caches its tools', async () => {
+		const fetcher = stub((body) =>
+			body.method === 'initialize'
+				? { jsonrpc: '2.0', id: body.id, result: { serverInfo: { name: 'Toybox' } } }
+				: { jsonrpc: '2.0', id: body.id, result: { tools: [{ name: 'roll_dice' }] } }
+		);
+		const server = await connectMcp('https://toybox.example/mcp', fetcher, publicResolver);
+		expect(server).toEqual({
+			domain: 'toybox.example',
+			name: 'Toybox',
+			endpoint: 'https://toybox.example/mcp',
+			tools: [{ name: 'roll_dice', description: '', inputSchema: { type: 'object' }, annotations: {} }]
+		});
+	});
+
+	it('refuses a server with nothing to call — a contact this chat could never use', async () => {
+		const fetcher = stub((body) =>
+			body.method === 'initialize'
+				? { jsonrpc: '2.0', id: body.id, result: {} }
+				: { jsonrpc: '2.0', id: body.id, result: { tools: [] } }
+		);
+		await expect(connectMcp('https://toybox.example/mcp', fetcher, publicResolver)).rejects.toMatchObject({
+			code: 'no-tools'
+		});
+	});
+
+	it('round-trips through saveGenericContact and getContact-adjacent storage', async () => {
+		const fetcher = stub((body) =>
+			body.method === 'initialize'
+				? { jsonrpc: '2.0', id: body.id, result: {} }
+				: { jsonrpc: '2.0', id: body.id, result: { tools: [{ name: 'roll_dice' }] } }
+		);
+		const server = await connectMcp('https://toybox.example/mcp', fetcher, publicResolver);
+		saveGenericContact(server);
+		const row = db.prepare(`SELECT * FROM contacts WHERE domain = ?`).get('toybox.example') as any;
+		expect(row.kind).toBe('generic');
+		expect(row.mcp_endpoint).toBe('https://toybox.example/mcp');
+		expect(JSON.parse(row.tools)).toEqual(server.tools);
+		forgetContact('toybox.example');
 	});
 });

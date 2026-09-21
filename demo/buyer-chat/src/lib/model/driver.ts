@@ -326,21 +326,38 @@ export class OpenRouterDriver implements ModelDriver {
 		return turn.kind === 'calls' ? turn.calls : [];
 	}
 
-	/** The full turn: either tool calls to run, or something to say. */
-	async step(turns: Turn[], tools: string[]): Promise<ToolTurn> {
+	/** The full turn: either tool calls to run, or something to say.
+	 *
+	 *  `schemas` overrides the constructor's fixed map when given — the
+	 *  closed set never needs it (`TOOL_SCHEMAS` never changes), but a
+	 *  connected generic MCP server's tools do, per request, since which
+	 *  servers are connected can change between one message and the next. A
+	 *  driver instance is cached per model choice (driver.ts's `byChoice`),
+	 *  so its own tool schemas cannot be — those live in the caller. */
+	async step(turns: Turn[], tools: string[], schemas?: Record<string, { description: string; parameters: object }>): Promise<ToolTurn> {
+		const toolSchemas = schemas ?? this.toolSchemas;
+		// The closed set's own names are hyphenated (`add-line`); a generic
+		// MCP server's are whatever that server chose, underscores as often
+		// as not (this demo's own toy server: `roll_dice`). A blind
+		// underscore-to-hyphen reversal on the way back was written for the
+		// closed set alone and silently turned `roll_dice` into `roll-dice`
+		// — a name nothing declares — once a generic tool's name was one it
+		// had never had to consider. The map below round-trips whatever each
+		// name actually needed, in either direction, instead of guessing.
+		const openaiNames = new Map<string, string>();
 		const body = {
 			model: this.model,
 			messages: [{ role: 'system', content: this.systemPrompt }, ...toOpenAI(turns)],
 			tools: tools.flatMap((name) => {
-				const schema = this.toolSchemas[name];
+				const schema = toolSchemas[name];
 				if (!schema) return [];
+				const openaiName = name.replace(/-/g, '_');
+				openaiNames.set(openaiName, name);
 				return [
 					{
 						type: 'function',
 						function: {
-							// OpenAI-style tool names allow no hyphens, and every tool
-							// here has one. Mapped back on the way in.
-							name: name.replace(/-/g, '_'),
+							name: openaiName,
 							description: schema.description,
 							parameters: schema.parameters
 						}
@@ -387,7 +404,8 @@ export class OpenRouterDriver implements ModelDriver {
 		if (rawCalls.length) {
 			const calls: ToolCall[] = [];
 			for (const call of rawCalls) {
-				const name = String(call?.function?.name ?? '').replace(/_/g, '-');
+				const sent = String(call?.function?.name ?? '');
+				const name = openaiNames.get(sent) ?? sent;
 				if (!tools.includes(name)) continue; // a name the shop lacks is dropped, not sent
 				let args: Record<string, unknown> = {};
 				try {

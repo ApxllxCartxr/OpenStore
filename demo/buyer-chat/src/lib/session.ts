@@ -63,6 +63,22 @@ db.exec(`
 	  jwks_url    TEXT NOT NULL DEFAULT '',
 	  jwks        TEXT NOT NULL,
 	  protocols   TEXT NOT NULL DEFAULT '[]',
+	  -- 'openstore' (an agent-commerce.json shop, self-registers, TOFU-pinned
+	  -- keys, the closed 14-tool set) or 'generic' (a bare MCP server: no
+	  -- card, no key pinning, whatever tools its own tools/list names). Kept
+	  -- as a column rather than inferred from jwks emptiness so a future
+	  -- third kind is a value, not a new column meaning "and also this".
+	  kind        TEXT NOT NULL DEFAULT 'openstore',
+	  -- Where tools/call is actually POSTed. Equal to https://<domain>/agent/mcp
+	  -- for an openstore shop; the server's own URL, verbatim, for a generic
+	  -- one — an arbitrary MCP server has no reason to live at a predictable
+	  -- path under its domain the way this repo's own shops do.
+	  mcp_endpoint TEXT NOT NULL DEFAULT '',
+	  -- tools/list's answer, cached at add time so dispatch and the model's
+	  -- own tool schema never need a round trip just to know what a generic
+	  -- server offers. Always '[]' for an openstore shop — its tools are the
+	  -- closed set, not a per-shop fact worth caching.
+	  tools       TEXT NOT NULL DEFAULT '[]',
 	  added_at    TEXT NOT NULL
 	);
 	-- What the sidecar told us about an order. Status and reason code only —
@@ -97,6 +113,15 @@ const contactColumns = (db.prepare(`PRAGMA table_info(contacts)`).all() as { nam
 );
 if (!contactColumns.includes('jwks_url')) {
 	db.exec(`ALTER TABLE contacts ADD COLUMN jwks_url TEXT NOT NULL DEFAULT ''`);
+}
+if (!contactColumns.includes('kind')) {
+	db.exec(`ALTER TABLE contacts ADD COLUMN kind TEXT NOT NULL DEFAULT 'openstore'`);
+}
+if (!contactColumns.includes('mcp_endpoint')) {
+	db.exec(`ALTER TABLE contacts ADD COLUMN mcp_endpoint TEXT NOT NULL DEFAULT ''`);
+}
+if (!contactColumns.includes('tools')) {
+	db.exec(`ALTER TABLE contacts ADD COLUMN tools TEXT NOT NULL DEFAULT '[]'`);
 }
 
 const messageColumns = (db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[]).map(
