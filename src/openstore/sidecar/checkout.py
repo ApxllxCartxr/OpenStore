@@ -58,6 +58,10 @@ from openstore.sidecar.trait.client import TraitClient
 from openstore.sidecar.trait.errors import TraitError
 from openstore.sidecar.trait.models import Destination, Line, Quote
 
+#: §16.7. The Provider's link lifetime, and the ceiling on how long a `confirmed`
+#: order may hold stock — the sweeper releases at whichever comes first.
+PAYMENT_LINK_SECONDS = 900
+
 #: How long a Consumer has to approve before the quote is re-read. The Quote's
 #: own validity, not an inventory hold — no stock is held until the tap.
 CHECKOUT_TTL = timedelta(hours=24)
@@ -97,6 +101,14 @@ class Pending:
     payer_handle: str = ""
     status: OrderStatus = OrderStatus.PENDING
     receipt_id: str = ""
+    #: The three moments `expires_at` is measured from (§16.7). Held here rather
+    #: than re-derived from `expiry_utc`, because the payment window is measured
+    #: from the tap and the Quote's validity from creation — one string cannot
+    #: carry both, and guessing one from the other is how a 15-minute hold
+    #: becomes a 24-hour one.
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    confirmed_at: datetime | None = None
+    link_expires_at: datetime | None = None
 
 
 @dataclass
@@ -248,7 +260,7 @@ _STATUS_ATTEMPT: dict[OrderStatus, int] = {
 }
 
 
-async def _set_status(
+async def set_status(
     ctx: CheckoutContext, order_id: str, status: OrderStatus, reason: str = ""
 ) -> None:
     assert ctx.trait is not None
@@ -301,7 +313,8 @@ async def start(
     quote, quote_bytes = await ctx.trait.quote(
         lines, destination, fulfillment_option_id=fulfillment_option_id, discount_code=discount_code
     )
-    expiry = (datetime.now(UTC) + CHECKOUT_TTL).isoformat().replace("+00:00", "Z")
+    created_at = datetime.now(UTC)
+    expiry = (created_at + CHECKOUT_TTL).isoformat().replace("+00:00", "Z")
 
     # The **attested** price per line, exactly as the Gate will use it. The
     # Authority is taken over this hash and the Gate recomputes it at the tap:
@@ -339,6 +352,7 @@ async def start(
         cart_hash=digest,
         total_minor=quote.total_minor,
         discount_code=discount_code,
+        created_at=created_at,
     )
     ctx.pending[checkout.order_id] = checkout
     token = ctx.tokens.issue_tap(checkout.order_id, digest, quote.total_minor)
@@ -422,8 +436,9 @@ async def tap(
     # Stock is held here and nowhere earlier: `pending` holds none, and an agent
     # that never reaches a human tap must not be able to reserve inventory.
     await ctx.trait.reserve(checkout.order_id, checkout.lines, discount_code=checkout.discount_code)
-    await _set_status(ctx, checkout.order_id, OrderStatus.CONFIRMED)
+    await set_status(ctx, checkout.order_id, OrderStatus.CONFIRMED)
     checkout.status = OrderStatus.CONFIRMED
+    checkout.confirmed_at = datetime.now(UTC)
 
     if checkout.method is PaymentMethod.CASH_ON_DELIVERY:
         # ADR-0018: no Ledger entry at order time and no Provider at all. The
@@ -440,9 +455,15 @@ async def tap(
         )
 
     link = await ctx.provider.make_link(
-        checkout.order_id, decision.total_minor, decision.quote.currency, expires_in_seconds=900
+        checkout.order_id,
+        decision.total_minor,
+        decision.quote.currency,
+        expires_in_seconds=PAYMENT_LINK_SECONDS,
     )
     checkout.link_id = link.link_id
+    # The hold must never outlive the link it was taken for, so the sweeper is
+    # given the Provider's own deadline rather than assuming the default window.
+    checkout.link_expires_at = checkout.confirmed_at + timedelta(seconds=link.expires_in_seconds)
     ctx.by_link[link.link_id] = checkout.order_id
     ctx.decisions[checkout.order_id] = decision
     return TapResult(checkout=checkout, decision=decision, pay_url=link.url)
@@ -485,7 +506,7 @@ async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = ""
 
     if settlement.status is not OrderStatus.PAID:
         checkout.status = settlement.status
-        await _set_status(
+        await set_status(
             ctx,
             checkout.order_id,
             settlement.status,
@@ -497,7 +518,7 @@ async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = ""
         )
 
     await ctx.trait.commit(checkout.order_id)
-    await _set_status(ctx, checkout.order_id, OrderStatus.PAID)
+    await set_status(ctx, checkout.order_id, OrderStatus.PAID)
     checkout.status = OrderStatus.PAID
     checkout.receipt_id = await _seal(ctx, checkout, decision, entries=entries)
     return checkout
@@ -587,7 +608,7 @@ async def cancel(ctx: CheckoutContext, order_id: str, *, reason: str = "") -> Pe
                     # close escrow-zero on an entry that balances nothing.
                     await ledger.release(checkout.order_id, held, checkout.quote.currency)
 
-    await _set_status(ctx, checkout.order_id, OrderStatus.CANCELLED, reason or "cancelled")
+    await set_status(ctx, checkout.order_id, OrderStatus.CANCELLED, reason or "cancelled")
     checkout.status = OrderStatus.CANCELLED
     if checkout.link_id:
         await ctx.provider.cancel(checkout.link_id)
@@ -611,6 +632,6 @@ async def collect_cash(ctx: CheckoutContext, order_id: str) -> Pending:
     assert ctx.trait is not None
     async with session_scope(ctx.sessionmaker) as session:
         await collect(decision, Ledger(session))
-    await _set_status(ctx, order_id, OrderStatus.PAID)
+    await set_status(ctx, order_id, OrderStatus.PAID)
     checkout.status = OrderStatus.PAID
     return checkout

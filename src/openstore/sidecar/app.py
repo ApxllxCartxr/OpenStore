@@ -9,9 +9,10 @@ Consumer is actually looking at.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """
     import httpx
 
+    from openstore.sidecar import sweeper
     from openstore.sidecar.admission.oauth import Admission
     from openstore.sidecar.admission.profile import ProfileFetcher
     from openstore.sidecar.checkout import CheckoutContext
@@ -147,7 +149,26 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         settings.openstore_merchant_domain or "unset",
         settings.trait_base_url or "NOT CONFIGURED - the feed will be empty",
     )
+
+    # The expiry sweeper. Without it `expires_at` is a sentence in the spec: an
+    # abandoned tap holds Merchant stock until this process restarts, which is
+    # an availability hole any self-registered stranger can open at will. It
+    # runs only with a trait to release through — a sweeper with no Merchant
+    # would move statuses nobody can act on.
+    sweeper_task: asyncio.Task[None] | None = None
+    if trait is not None:
+        sweeper_task = asyncio.create_task(sweeper.run_forever(checkout_context))
+    else:
+        logging.getLogger("openstore").warning(
+            "NO SWEEPER: there is no trait to release stock through, so nothing expires."
+        )
+
     yield
+
+    if sweeper_task is not None:
+        sweeper_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweeper_task
     if engine is not None:
         await engine.dispose()
 

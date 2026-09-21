@@ -97,3 +97,47 @@ async def test_the_public_origin_reaches_the_card(monkeypatch: pytest.MonkeyPatc
         OPENSTORE_PUBLIC_ORIGIN="http://spoiledduckie.localhost",
     )
     assert surface.public_origin == "http://spoiledduckie.localhost"
+
+
+async def test_boot_starts_the_expiry_sweeper_when_there_is_a_merchant(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The sweeper is the wiring that makes `expires_at` mean anything. It was
+    a pure function nothing ever called, so an abandoned tap held Merchant stock
+    until the process restarted."""
+    import asyncio
+
+    from openstore.sidecar.app import app, lifespan
+
+    monkeypatch.setenv("OPENSTORE_MERCHANT_DOMAIN", "spoiledduckie.localhost")
+    monkeypatch.setenv("TRAIT_BASE_URL", "http://merchant.internal")
+    monkeypatch.setenv("TRAIT_HMAC_SECRET", "conformance-secret")
+    monkeypatch.setenv("SIDECAR_SIGNING_KEY_PATH", str(tmp_path / "keys.json"))
+    get_settings.cache_clear()
+
+    before = {t.get_coro().__qualname__ for t in asyncio.all_tasks()}  # type: ignore[union-attr]
+    async with lifespan(app):
+        running = {t.get_coro().__qualname__ for t in asyncio.all_tasks()}  # type: ignore[union-attr]
+        started = running - before
+        assert any("run_forever" in name for name in started), started
+    # And it is cancelled at shutdown rather than left running against a
+    # disposed engine.
+    after = {t.get_coro().__qualname__ for t in asyncio.all_tasks()}  # type: ignore[union-attr]
+    assert not any("run_forever" in name for name in after - before)
+
+
+async def test_boot_says_so_when_there_is_no_sweeper(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No trait means nothing to release stock through. That is reported, not
+    discovered later as orders that never expire."""
+    import logging
+
+    from openstore.sidecar.app import app, lifespan
+
+    monkeypatch.setenv("OPENSTORE_MERCHANT_DOMAIN", "spoiledduckie.localhost")
+    get_settings.cache_clear()
+    with caplog.at_level(logging.WARNING, logger="openstore"):
+        async with lifespan(app):
+            pass
+    assert any("NO SWEEPER" in record.message for record in caplog.records)
