@@ -31,6 +31,10 @@ class ReceiptStore:
     def get(self, receipt_id: str) -> Bundle | None:
         return self._by_id.get(receipt_id)
 
+    def all(self) -> list[Bundle]:
+        """Every sealed receipt, oldest first — the console's board reads this."""
+        return list(self._by_id.values())
+
     def clear(self) -> None:
         self._by_id.clear()
 
