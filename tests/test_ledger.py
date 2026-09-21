@@ -21,7 +21,22 @@ async def test_a_hold_closes_by_release(ledger: Ledger) -> None:
     await ledger.reserve("ord_2", 1000, INR)
     await ledger.release("ord_2", 1000, INR)
     await ledger.assert_invariants("ord_2", closed=True)
-    assert (await ledger.position("ord_2")).net_cash_minor == 0
+    position = await ledger.position("ord_2")
+    assert position.net_cash_minor == 0
+    assert position.released_minor == 1000
+
+
+async def test_release_cannot_exceed_the_hold(ledger: Ledger) -> None:
+    await ledger.reserve("ord_2b", 1000, INR)
+    with pytest.raises(LedgerError, match="exceeds"):
+        await ledger.release("ord_2b", 1001, INR)
+
+
+async def test_a_single_paisa_still_open_is_still_a_hold_to_release(ledger: Ledger) -> None:
+    await ledger.reserve("ord_2c", 1000, INR)
+    await ledger.release("ord_2c", 999, INR)
+    await ledger.release("ord_2c", 1, INR, attempt=2)
+    assert (await ledger.position("ord_2c")).open_holds_minor == 0
 
 
 async def test_a_second_reserve_on_an_open_hold_is_refused(ledger: Ledger) -> None:
@@ -30,6 +45,27 @@ async def test_a_second_reserve_on_an_open_hold_is_refused(ledger: Ledger) -> No
     await ledger.reserve("ord_3", 1000, INR)
     with pytest.raises(LedgerError, match="already holds"):
         await ledger.reserve("ord_3", 1000, INR, attempt=2)
+
+
+async def test_a_reserve_is_allowed_again_once_the_first_hold_closed(ledger: Ledger) -> None:
+    """The guard blocks a second *open* hold, not a second order on an id
+    that already closed one — `reserved_minor` alone (the cumulative total
+    ever held) is not the signal; `open_holds_minor` is."""
+    await ledger.reserve("ord_3b", 1000, INR)
+    await ledger.release("ord_3b", 1000, INR)
+    await ledger.reserve("ord_3b", 500, INR, attempt=2)
+    assert (await ledger.position("ord_3b")).open_holds_minor == 500
+
+
+async def test_a_second_reserve_is_refused_even_against_a_single_paisa_still_open(
+    ledger: Ledger,
+) -> None:
+    """The guard is "any open hold blocks it", not "a hold above some
+    threshold" — a partial release leaving one paisa open still refuses."""
+    await ledger.reserve("ord_3c", 1000, INR)
+    await ledger.release("ord_3c", 999, INR)
+    with pytest.raises(LedgerError, match="already holds 1 paise"):
+        await ledger.reserve("ord_3c", 500, INR, attempt=2)
 
 
 async def test_releasing_nothing_is_refused(ledger: Ledger) -> None:
@@ -50,6 +86,20 @@ async def test_capture_cannot_exceed_the_hold(ledger: Ledger) -> None:
     await ledger.reserve("ord_5", 1000, INR)
     with pytest.raises(LedgerError, match="exceeds"):
         await ledger.capture("ord_5", 1001, INR)
+
+
+async def test_a_single_paisa_still_open_is_still_a_hold_to_capture(ledger: Ledger) -> None:
+    """The "no hold" and "exceeds the hold" guards are `<= 0` / `> 0` against
+    the open balance, not against some larger threshold — a hold whittled
+    down to one paisa by a partial release is still capturable, and still
+    caps what can be taken from it."""
+    await ledger.reserve("ord_5b", 1000, INR)
+    await ledger.release("ord_5b", 999, INR)
+    with pytest.raises(LedgerError, match="exceeds the 1 held"):
+        await ledger.capture("ord_5b", 2, INR)
+    entry = await ledger.capture("ord_5b", 1, INR)
+    assert entry.closes_hold is True
+    assert (await ledger.position("ord_5b")).open_holds_minor == 0
 
 
 # ── Refunds are bounded, and partials both write ─────────────────────────────
@@ -89,6 +139,15 @@ async def test_over_refund_is_refused(ledger: Ledger) -> None:
     assert (await ledger.position("ord_8")).refundable_minor == 0
 
 
+async def test_a_zero_refund_is_refused(ledger: Ledger) -> None:
+    """Distinct from `_append`'s general "negative amount" guard: a refund of
+    exactly zero is not negative, but there is nothing to give back."""
+    await ledger.reserve("ord_8b", 10000, INR)
+    await ledger.capture("ord_8b", 10000, INR)
+    with pytest.raises(LedgerError, match="is not an amount"):
+        await ledger.refund("ord_8b", 0, INR, refund_id="r1")
+
+
 async def test_refunding_an_uncaptured_order_is_refused(ledger: Ledger) -> None:
     await ledger.reserve("ord_9", 10000, INR)
     with pytest.raises(LedgerError, match="exceeds"):
@@ -119,6 +178,11 @@ async def test_a_reversal_after_a_full_refund_lands_net_negative_and_alerts(
 async def test_a_reversal_needs_no_capture_at_all(ledger: Ledger) -> None:
     await ledger.reversal("ord_11", 500, INR, reversal_id="rev_x")
     assert (await ledger.position("ord_11")).reversed_minor == 500
+
+
+async def test_a_zero_reversal_is_refused(ledger: Ledger) -> None:
+    with pytest.raises(LedgerError, match="is not an amount"):
+        await ledger.reversal("ord_11b", 0, INR, reversal_id="rev_y")
 
 
 # ── COD writes nothing until collection ──────────────────────────────────────
@@ -176,3 +240,16 @@ async def test_position_is_derived_not_stored(ledger: Ledger) -> None:
     second = await ledger.position("ord_15")
     assert first.net_cash_minor == 5000
     assert second.net_cash_minor == 4000
+
+
+async def test_assert_invariants_closed_raises_on_an_order_still_open(ledger: Ledger) -> None:
+    """The `closed=True` check has never been made to fail before: every other
+    call site is a positive assertion. An unclosed hold on one order, checked
+    while another order in the same ledger is clean, is also what proves the
+    check reads *this* order's position rather than a generically-empty one."""
+    await ledger.reserve("ord_16", 1000, INR)
+    await ledger.reserve("ord_17", 500, INR)
+    await ledger.capture("ord_17", 500, INR)
+    await ledger.assert_invariants("ord_17", closed=True)
+    with pytest.raises(LedgerError, match="still holds 1000 paise"):
+        await ledger.assert_invariants("ord_16", closed=True)
