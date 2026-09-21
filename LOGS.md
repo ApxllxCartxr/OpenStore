@@ -66,6 +66,16 @@ Verified live: switched the running deploy to `scripted` (`running: scripted`), 
 
 Remaining from the original ask: thinking blocks, and true "paste any MCP server, not just this repo's shops" genericity. The latter is architecturally the largest piece left — `OpenRouterDriver` already takes its tool-schema map as a constructor argument rather than hardcoding it internally, which means the driver itself doesn't need to change; what's still closed is `+page.server.ts`'s hard `TOOLS.includes(call.name)` filter (drops any tool name outside the 14-name OpenStore set before the model's call ever reaches dispatch) and the contacts flow requiring an `agent-commerce.json` card rather than accepting a bare MCP endpoint. Sized at a full session's work on its own to do to this codebase's standard, not a bolt-on.
 
+## 2026-09-22 · Thinking blocks, from the model's own reasoning
+
+Closed the last Claude.ai-surface item. OpenRouter's `reasoning` request parameter is a documented no-op for models that don't support it, so no capability probing was needed — just ask, and use whatever comes back. `OpenRouterDriver.step()` now captures `message.reasoning` and carries it on `ToolTurn`, on both the text-turn and calls-turn variants: a turn that ends in tool calls still reasoned its way there, and a calls-turn produces no chat message of its own to carry it on, so it gets its own empty-text row timestamped ahead of the tool cards it led to.
+
+Stored verbatim on a new `messages.thinking` column, rendered as a collapsed disclosure above the message it belongs to — the same convention Claude.ai uses, and the same "never paraphrase a value that could then be wrong with no way to tell" rule everything else on this page already follows. Both transcript export formats carry it too.
+
+Verified live against the real running model (`openai/gpt-oss-20b`): asked "what totes do you have?", got three genuine reasoning blocks across the search → read-item → describe turns, each one actual model reasoning about what to do next — not a placeholder — rendered as three collapsed disclosures.
+
+Phase 2's original seven-item list is now six done; the seventh (true "paste any MCP server" genericity) starts next.
+
 ---
 
 # Morning report
