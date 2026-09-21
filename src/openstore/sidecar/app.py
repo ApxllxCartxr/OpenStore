@@ -112,6 +112,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     provider = _provider_for(settings)
     _configure_webhooks(settings, provider)
     policy = Policy()
+    passkey_rp = _passkey_rp_for(settings, merchant_domain, policy)
     tokens = TokenStore()
     checkout_context = CheckoutContext(
         trait=trait,
@@ -125,6 +126,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         public_origin=settings.openstore_public_origin,
         deploy_pseudonym_key=settings.deploy_pseudonym_key.encode(),
         demo=settings.openstore_demo_mode,
+        passkey_rp=passkey_rp,
     )
     configure_checkout(checkout_context)
     # The approve page reads the same token store the tap spends from — two
@@ -136,6 +138,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             merchant_domain=merchant_domain,
             merchant_name=settings.webauthn_rp_name or "This shop",
             enabled_methods=policy.enabled_methods,
+            passkey_enabled=passkey_rp is not None,
             demo=settings.openstore_demo_mode,
         )
     )
@@ -212,6 +215,37 @@ def _provider_for(settings: Settings) -> Any:
     from openstore.sidecar.provider.fake import FakeProvider
 
     return FakeProvider()
+
+
+def _passkey_rp_for(settings: Settings, merchant_domain: str, policy: Any) -> Any:
+    """The passkey Relying Party, or `None`.
+
+    **The RP ID decides which passkeys exist** (ADR-0008), so it is configuration
+    and never derived from a request header — an origin that could name itself
+    could claim another shop's credentials. It falls back to the Merchant domain,
+    which is the same value in every correct install and is stated rather than
+    assumed.
+
+    `None` when the Merchant has not enabled the kind, and the approve page then
+    offers no passkey button: offering a ceremony that the Gate will refuse
+    teaches the Consumer that the page lies.
+    """
+    from openstore.sidecar.authority.passkey import PasskeyRP
+    from openstore.sidecar.core.codes import AuthorityKind
+
+    log = logging.getLogger("openstore")
+    if AuthorityKind.PASSKEY not in policy.enabled_authority_kinds:
+        log.warning("passkey ceremony off: this Merchant has not enabled the kind")
+        return None
+
+    rp_id = settings.webauthn_rp_id or merchant_domain
+    origin = settings.openstore_public_origin or f"https://{rp_id}"
+    log.warning("passkey ceremony wired: rp_id=%s origin=%s", rp_id, origin)
+    return PasskeyRP(
+        rp_id=rp_id,
+        origin=origin,
+        rp_name=settings.webauthn_rp_name or "This shop",
+    )
 
 
 def _configure_webhooks(settings: Settings, provider: Any) -> None:

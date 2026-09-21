@@ -141,3 +141,53 @@ async def test_boot_says_so_when_there_is_no_sweeper(
         async with lifespan(app):
             pass
     assert any("NO SWEEPER" in record.message for record in caplog.records)
+
+
+async def test_boot_wires_a_passkey_rp_the_approve_page_can_use(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`AuthorityKind.PASSKEY` was in the closed set from hour 0 with no module
+    behind it, so the strongest claim the system can make was enum-level only."""
+    from openstore.sidecar import checkout as flow
+    from openstore.sidecar.app import app, lifespan
+    from openstore.sidecar.console.approve import get_context as approve_context
+
+    monkeypatch.setenv("OPENSTORE_MERCHANT_DOMAIN", "spoiledduckie.localhost")
+    monkeypatch.setenv("OPENSTORE_PUBLIC_ORIGIN", "http://spoiledduckie.localhost")
+    monkeypatch.setenv("SIDECAR_SIGNING_KEY_PATH", str(tmp_path / "keys.json"))
+    get_settings.cache_clear()
+
+    async with lifespan(app):
+        rp = flow.get_context().passkey_rp
+        assert rp is not None
+        # The RP ID decides which passkeys exist, so it is configuration and
+        # never a request header.
+        assert rp.rp_id == "spoiledduckie.localhost"
+        assert rp.origin == "http://spoiledduckie.localhost"
+        assert approve_context().passkey_enabled is True
+
+
+async def test_boot_offers_no_ceremony_when_the_merchant_has_not_enabled_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from openstore.sidecar import checkout as flow
+    from openstore.sidecar.app import app, lifespan
+    from openstore.sidecar.console.approve import get_context as approve_context
+    from openstore.sidecar.core.codes import AuthorityKind
+    from openstore.sidecar.gate.policy import Policy
+
+    monkeypatch.setenv("OPENSTORE_MERCHANT_DOMAIN", "spoiledduckie.localhost")
+    monkeypatch.setenv("SIDECAR_SIGNING_KEY_PATH", str(tmp_path / "keys.json"))
+    get_settings.cache_clear()
+
+    without = Policy(
+        enabled_authority_kinds=frozenset(
+            k for k in Policy().enabled_authority_kinds if k is not AuthorityKind.PASSKEY
+        )
+    )
+    # Patched at the source module: `lifespan` imports `Policy` when it runs, so
+    # a name patched on `app` is never the one it looks up.
+    monkeypatch.setattr("openstore.sidecar.gate.policy.Policy", lambda: without)
+    async with lifespan(app):
+        assert flow.get_context().passkey_rp is None
+        assert approve_context().passkey_enabled is False

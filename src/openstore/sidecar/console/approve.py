@@ -24,6 +24,7 @@ What happens here, in order:
 from __future__ import annotations
 
 import html
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs
@@ -49,6 +50,10 @@ class ApproveContext:
     enabled_methods: frozenset[PaymentMethod] = frozenset(
         {PaymentMethod.UPI, PaymentMethod.CASH_ON_DELIVERY}
     )
+    passkey_enabled: bool = False
+    """Whether this Merchant accepts the `passkey` Authority **and** this deploy
+    has an RP to run the ceremony with. Both, because offering a ceremony that
+    cannot complete teaches the Consumer that the page lies."""
     demo: bool = True
 
 
@@ -68,6 +73,98 @@ def _e(value: Any) -> str:
     return html.escape(str(value))
 
 
+#: The passkey ceremony, as the browser runs it.
+#:
+#: The server decides everything here: this reads options, hands them to the
+#: authenticator, and posts the response back. The one thing it must get right is
+#: that the **same** challenge carries through the fallback — and it does not
+#: choose that either, because `finish` hands the challenge back.
+_PASSKEY_SCRIPT = """(function () {
+  var button = document.getElementById('passkey-btn');
+  if (!button || !window.PublicKeyCredential) { return; }
+  var status = document.getElementById('passkey-status');
+  var token = __TOKEN__;
+
+  function fromB64(value) {
+    var raw = atob(value.replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, function (c) { return c.charCodeAt(0); });
+  }
+  function toB64(buffer) {
+    var bytes = new Uint8Array(buffer), out = '';
+    for (var i = 0; i < bytes.length; i++) { out += String.fromCharCode(bytes[i]); }
+    return btoa(out).replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/[=]+$/, '');
+  }
+  function post(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json().then(function (j) {
+      if (!r.ok) { throw new Error(j.error ? j.error.detail : 'that did not work'); }
+      return j;
+    }); });
+  }
+
+  function run(stage, options) {
+    options.challenge = fromB64(options.challenge);
+    if (stage === 'enrollment') {
+      options.user.id = fromB64(options.user.id);
+      (options.excludeCredentials || []).forEach(function (c) { c.id = fromB64(c.id); });
+      return navigator.credentials.create({ publicKey: options }).then(function (cred) {
+        return {
+          id: cred.id, rawId: toB64(cred.rawId), type: cred.type,
+          response: {
+            clientDataJSON: toB64(cred.response.clientDataJSON),
+            attestationObject: toB64(cred.response.attestationObject)
+          }
+        };
+      });
+    }
+    (options.allowCredentials || []).forEach(function (c) { c.id = fromB64(c.id); });
+    return navigator.credentials.get({ publicKey: options }).then(function (cred) {
+      return {
+        id: cred.id, rawId: toB64(cred.rawId), type: cred.type,
+        response: {
+          clientDataJSON: toB64(cred.response.clientDataJSON),
+          authenticatorData: toB64(cred.response.authenticatorData),
+          signature: toB64(cred.response.signature),
+          userHandle: cred.response.userHandle ? toB64(cred.response.userHandle) : null
+        }
+      };
+    });
+  }
+
+  function finish(stage, credential) {
+    return post('/agentic/approve/passkey/finish', {
+      t: token, stage: stage, credential: credential
+    }).then(function (done) {
+      if (done.next) {
+        // The authenticator gave no attestation, so nothing it signed proves
+        // agreement to this basket yet. Second prompt, same challenge.
+        status.textContent = 'One more tap — your device did not vouch for itself the first time.';
+        return run(done.next, done.options).then(function (c) { return finish(done.next, c); });
+      }
+      status.textContent = 'Authorized on this device. Approving…';
+      document.querySelector('form').submit();
+    });
+  }
+
+  button.addEventListener('click', function () {
+    button.disabled = true;
+    status.textContent = 'Waiting for your device…';
+    post('/agentic/approve/passkey/begin', { t: token }).then(function (started) {
+      return run(started.stage, started.options).then(function (c) {
+        return finish(started.stage, c);
+      });
+    }).catch(function (err) {
+      button.disabled = false;
+      status.textContent = err.message || 'That did not work. You can still pay the usual way.';
+    });
+  });
+})();
+"""
+
+
 def render_approve(
     *,
     merchant_name: str,
@@ -76,6 +173,7 @@ def render_approve(
     expires_in_seconds: int,
     enabled_methods: frozenset[PaymentMethod],
     demo: bool,
+    passkey_enabled: bool = False,
 ) -> str:
     """The page of record.
 
@@ -136,6 +234,30 @@ def render_approve(
         for m in sorted(enabled_methods, key=lambda m: m.value)
     )
 
+    # Enrollment happens **inside** this ceremony: there are no accounts here, so
+    # roaming five shops costs five taps and not five signups. The challenge the
+    # device signs is this basket's own binding, which is why the button can say
+    # what it says without overclaiming.
+    passkey_block = (
+        """<section id="passkey">
+<h2>Or authorize with a passkey</h2>
+<p class="note muted">Your device signs this exact basket and this exact amount. Nothing is
+stored on your side and you are not creating an account — the passkey exists to agree to this
+purchase.</p>
+<button class="tap" type="button" id="passkey-btn">Authorize with a passkey</button>
+<p class="note" id="passkey-status" role="status"></p>
+</section>"""
+        if passkey_enabled
+        else ""
+    )
+
+    # The ceremony's own script, and **only** when the shop runs one. A page that
+    # always carried it would ship dead code to every Consumer and make "is the
+    # passkey path on here?" unanswerable by looking.
+    passkey_script = (
+        _PASSKEY_SCRIPT.replace("__TOKEN__", json.dumps(token)) if passkey_enabled else ""
+    )
+
     demo_banner = (
         "<div class='banner'><strong>Demo</strong> — no real money moves, and this receipt "
         "is marked as a demo receipt.</div>"
@@ -192,6 +314,8 @@ Applying one re-prices the basket and you will approve the new total.</p>
 {methods}
 </section>
 
+{passkey_block}
+
 <p class="note">This link is good for <span id="countdown">{_e(expires_in_seconds)}</span> seconds
 and can be used once.</p>
 <button class="tap" type="submit">Approve {_e(format_rupees(quote.get("total_minor", 0)))}</button>
@@ -201,7 +325,11 @@ and can be used once.</p>
 amount and nothing else — the agent never holds a payment credential.</p>
 </main>
 <script>
-// A visible clock, because "this expires" with no number is a sentence nobody
+// The passkey ceremony. The server decides everything: this reads options,
+// hands them to the authenticator, and posts the response back. The one thing
+// it must get right is that the *same* challenge carries through the fallback —
+// and it does not choose that either, because `finish` hands it back.
+{passkey_script}// A visible clock, because "this expires" with no number is a sentence nobody
 // acts on. The server is the authority; this is only the display.
 (function () {{
   var el = document.getElementById('countdown');
@@ -243,6 +371,7 @@ def approve(request: Request) -> HTMLResponse | JSONResponse:
             expires_in_seconds=remaining,
             enabled_methods=_context.enabled_methods,
             demo=_context.demo,
+            passkey_enabled=_context.passkey_enabled,
         )
     )
 
@@ -341,6 +470,144 @@ async def approve_tap(request: Request) -> HTMLResponse:
         status_code=303,
         content="",
         headers={"location": result.pay_url},
+    )
+
+
+# ── The passkey ceremony ─────────────────────────────────────────────────────
+#
+# Two routes, both authenticated by the tap token exactly like the page around
+# them. They run **before** the token is spent, because the ceremony is what the
+# Consumer is doing when they agree — the spend happens when the form posts.
+
+
+def _checkout_for(token: str) -> Any:
+    """The checkout this tap token belongs to, or a refusal.
+
+    Read through the live money path rather than from a copy: the challenge is
+    built from the `cart_hash` and total, and a stale copy would bind the
+    ceremony to a basket the Gate is about to disagree with.
+    """
+    from openstore.sidecar import checkout as flow
+
+    ctx = flow.get_context()
+    checkout = ctx.pending.get(ctx.by_token.get(token, ""))
+    if checkout is None:
+        raise TraitError(ReasonCode.NOT_FOUND, "That approval link is not valid.")
+    return checkout
+
+
+def _passkey_refusal(exc: TraitError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content=exc.to_payload())
+
+
+@router.post("/approve/passkey/begin")
+async def passkey_begin(request: Request) -> JSONResponse:
+    """Options for this tap's ceremony, over a challenge that **is** the binding."""
+    from openstore.sidecar import checkout as flow
+
+    ctx = flow.get_context()
+    if ctx.passkey_rp is None:
+        return _passkey_refusal(
+            TraitError(
+                ReasonCode.AUTHORITY_KIND_NOT_ENABLED,
+                "This shop does not run a passkey ceremony.",
+            )
+        )
+    body = await request.json()
+    token = str(body.get("t", ""))
+    try:
+        checkout = _checkout_for(token)
+        # Unspent and unexpired, checked here as well as at the tap: running a
+        # ceremony against a dead token would spend a human's attention on an
+        # agreement that can never be used.
+        record = ctx.tokens.taps.get(token)
+        if record is None or record.spent:
+            raise TraitError(ReasonCode.AUTHORITY_STALE, "That approval link is no longer open.")
+        stage, options = ctx.passkey_rp.begin(
+            token=token,
+            cart_hash=checkout.cart_hash,
+            total_minor=checkout.total_minor,
+            currency=checkout.quote.currency,
+            expiry_utc=checkout.expiry_utc,
+            credential_ids=[str(c) for c in body.get("credential_ids", [])],
+        )
+    except TraitError as exc:
+        return _passkey_refusal(exc)
+    return JSONResponse({"stage": stage, "options": options})
+
+
+@router.post("/approve/passkey/finish")
+async def passkey_finish(request: Request) -> JSONResponse:
+    """Verify the ceremony, or ask for the second prompt.
+
+    A `create()` that carried no attestation signed nothing verifiable as
+    agreement to this basket, so this hands back assertion options over **the
+    same challenge** rather than recording an Authority. Two prompts, named, and
+    the count reaches the Transcript.
+    """
+    from openstore.sidecar import checkout as flow
+
+    ctx = flow.get_context()
+    if ctx.passkey_rp is None:
+        return _passkey_refusal(
+            TraitError(
+                ReasonCode.AUTHORITY_KIND_NOT_ENABLED,
+                "This shop does not run a passkey ceremony.",
+            )
+        )
+    body = await request.json()
+    token = str(body.get("t", ""))
+    stage = str(body.get("stage", ""))
+    credential = body.get("credential")
+    if not isinstance(credential, dict):
+        return _passkey_refusal(
+            TraitError(ReasonCode.AUTHORITY_MISSING, "That ceremony carried no credential.")
+        )
+
+    try:
+        checkout = _checkout_for(token)
+        if stage == "enrollment":
+            verified = ctx.passkey_rp.verify_enrollment(
+                token=token,
+                credential=credential,
+                cart_hash=checkout.cart_hash,
+                total_minor=checkout.total_minor,
+            )
+            if verified is None:
+                return JSONResponse(
+                    {
+                        # Named distinctly from a first-prompt assertion so the
+                        # prompt count in the Transcript is the truth rather
+                        # than whichever the client claims.
+                        "next": "assertion-fallback",
+                        "options": ctx.passkey_rp.options_for(token, checkout.cart_hash),
+                        "why": (
+                            "Your device did not vouch for itself, so nothing it signed yet "
+                            "proves agreement to this basket."
+                        ),
+                    }
+                )
+        else:
+            verified = ctx.passkey_rp.verify_assertion(
+                token=token,
+                credential=credential,
+                cart_hash=checkout.cart_hash,
+                total_minor=checkout.total_minor,
+                # The second prompt of a fallback. One prompt would have meant an
+                # attested enrollment, which returns above.
+                prompts=2 if stage == "assertion-fallback" else 1,
+            )
+    except TraitError as exc:
+        return _passkey_refusal(exc)
+
+    # Held against the token, consumed by that token's tap.
+    ctx.passkeys[token] = verified
+    return JSONResponse(
+        {
+            "next": None,
+            "ceremony": verified.ceremony.value,
+            "prompts": verified.prompts,
+        }
     )
 
 

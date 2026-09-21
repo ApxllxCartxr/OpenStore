@@ -37,7 +37,17 @@ from openstore.sidecar.protocols.agent_routes import get_surface
 router = APIRouter(prefix="/agentic")
 
 #: Paths inside `/agentic` that are NOT Merchant-session authenticated.
-PUBLIC_AGENTIC_PATHS = frozenset({"/agentic/approve", "/agentic/static/tokens.css"})
+PUBLIC_AGENTIC_PATHS = frozenset(
+    {
+        "/agentic/approve",
+        # The passkey ceremony is the Consumer agreeing, so it is authenticated
+        # by the same one-time tap token as the page it runs on and by nothing
+        # else. Behind the Merchant session it could never run at all.
+        "/agentic/approve/passkey/begin",
+        "/agentic/approve/passkey/finish",
+        "/agentic/static/tokens.css",
+    }
+)
 
 
 @dataclass

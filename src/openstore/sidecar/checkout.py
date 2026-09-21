@@ -109,6 +109,11 @@ class Pending:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     confirmed_at: datetime | None = None
     link_expires_at: datetime | None = None
+    handle_source: HandleSource = HandleSource.PAYER_HANDLE
+    """Where `consumer_id` is derived from. A COD order authorized by the
+    `passkey` mechanism never touches a payment rail, so there is no VPA and the
+    credential id is the source instead — recorded rather than inferred, so a
+    verifier is never left guessing which derivation produced a pseudonym."""
 
 
 @dataclass
@@ -130,6 +135,13 @@ class CheckoutContext:
     against."""
     by_token: dict[str, str] = field(default_factory=dict)
     by_link: dict[str, str] = field(default_factory=dict)
+    passkey_rp: Any = None
+    """A `PasskeyRP`. `None` means this deploy runs no passkey ceremony, and the
+    approve page offers none rather than offering one that cannot complete."""
+    passkeys: dict[str, Any] = field(default_factory=dict)
+    """Completed ceremonies, keyed by the tap token they were taken over and
+    consumed by that token's tap. Never keyed by order: two taps of one order
+    are two agreements, and one may not stand in for the other."""
     merchant_domain: str = "spoiledduckie.localhost"
     public_origin: str = ""
     deploy_pseudonym_key: bytes = b""
@@ -172,15 +184,28 @@ async def _catalogue_facts(
     return group_of, tags_of, prices
 
 
-def _authority_for(method: PaymentMethod) -> tuple[AuthorityKind, IntentMechanism | None]:
-    """Which Authority a method terminates in (§6.5's table, not a choice made here).
+def _authority_for(
+    method: PaymentMethod, *, passkey: bool = False
+) -> tuple[AuthorityKind, IntentMechanism | None]:
+    """Which Authority a tap terminates in (§6.5's table, not a choice made here).
 
-    Cash has no rail to authenticate against, so it takes `confirmed-intent`
-    with an explicit mechanism. Everything else terminates in the payer's own
-    PSP, which is `upi-pin` — it lands with the money rather than before it.
+    A completed passkey ceremony changes the *kind*, never the money: on the
+    prepaid path it is `passkey` itself, binding the cart to the payer's device
+    where `upi-pin` would have bound only the amount; on cash it is the
+    `passkey` mechanism of `confirmed-intent`. The payment still moves the same
+    way afterwards — a passkey is evidence of agreement, not a credential.
+
+    Without one, cash has no rail to authenticate against and takes
+    `confirmed-intent` / `upi-verify`, and everything else terminates in the
+    payer's own PSP, which is `upi-pin` — landing with the money rather than
+    before it.
     """
     if method is PaymentMethod.CASH_ON_DELIVERY:
-        return AuthorityKind.CONFIRMED_INTENT, IntentMechanism.UPI_VERIFY
+        return AuthorityKind.CONFIRMED_INTENT, (
+            IntentMechanism.PASSKEY if passkey else IntentMechanism.UPI_VERIFY
+        )
+    if passkey:
+        return AuthorityKind.PASSKEY, None
     return AuthorityKind.UPI_PIN, None
 
 
@@ -221,7 +246,7 @@ def _consumer_id(ctx: CheckoutContext, checkout: Pending) -> str:
     if not (ctx.deploy_pseudonym_key and checkout.payer_handle):
         return ""
     return derive_consumer_id(
-        ctx.deploy_pseudonym_key, checkout.payer_handle, source=HandleSource.PAYER_HANDLE
+        ctx.deploy_pseudonym_key, checkout.payer_handle, source=checkout.handle_source
     )
 
 
@@ -403,7 +428,24 @@ async def tap(
     except TraitError as exc:
         raise CheckoutRefused(exc.code, exc.detail) from None
 
-    kind, mechanism = _authority_for(checkout.method)
+    # Consumed, not read: a ceremony answers one tap. Popped after the token is
+    # spent so a refused tap cannot leave an agreement lying about for the next.
+    verified = ctx.passkeys.pop(token, None)
+    if verified is not None and verified.cart_hash != checkout.cart_hash:
+        # Belt and braces over the challenge itself, which already covers the
+        # cart. This catches the ceremony being carried to a different checkout,
+        # which the challenge cannot see.
+        raise CheckoutRefused(
+            ReasonCode.AUTHORITY_STALE,
+            "that passkey was used to agree to a different basket.",
+        )
+
+    kind, mechanism = _authority_for(checkout.method, passkey=verified is not None)
+    if verified is not None:
+        # There is no payment rail on the cash path, so the credential id is the
+        # only handle a `consumer_id` can come from (A4, ADR-0011).
+        checkout.handle_source = HandleSource.CREDENTIAL_ID
+        checkout.payer_handle = verified.credential_id
     authority = Authority(
         kind=kind,
         mechanism=mechanism,
@@ -411,7 +453,11 @@ async def tap(
         # Saying it is present here would put a false statement into signed
         # evidence.
         present=kind is not AuthorityKind.UPI_PIN,
-        ceremony="assertion" if kind is not AuthorityKind.UPI_PIN else None,
+        ceremony=(
+            verified.ceremony.value
+            if verified is not None
+            else ("assertion" if kind is not AuthorityKind.UPI_PIN else None)
+        ),
         bound_cart_hash=checkout.cart_hash,
         bound_amount_minor=checkout.total_minor,
     )
@@ -481,7 +527,10 @@ async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = ""
     decision = ctx.decisions.get(order_id)
     if decision is None:
         raise CheckoutRefused(ReasonCode.NOT_FOUND, "That checkout has no decision to settle.")
-    if payer_handle:
+    if payer_handle and checkout.handle_source is HandleSource.PAYER_HANDLE:
+        # A passkey order already derived its pseudonym from the credential id,
+        # and letting the rail's handle overwrite it would silently change which
+        # derivation the Transcript claims.
         checkout.payer_handle = payer_handle
     assert ctx.trait is not None
 
