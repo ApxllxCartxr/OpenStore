@@ -105,12 +105,28 @@ function dial(domain: string): string {
 	return `${scheme}://${domain}`;
 }
 
+/** A shop that hangs — a bad deploy, a network partition — used to hang this
+ *  call forever with it: nothing here ever timed out. This repo's own shops
+ *  are more trusted than a generic Consumer-pasted server, but "more
+ *  trusted" is not "never fails to answer". */
+const SHOP_FETCH_TIMEOUT_MS = 15_000;
+
 async function register(domain: string): Promise<Session> {
-	const response = await fetch(`${dial(domain)}/agent/register`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ name: 'OpenStore demo chat', profile_url: profileUrl() })
-	});
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), SHOP_FETCH_TIMEOUT_MS);
+	let response: Response;
+	try {
+		response = await fetch(`${dial(domain)}/agent/register`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ name: 'OpenStore demo chat', profile_url: profileUrl() }),
+			signal: controller.signal
+		});
+	} catch {
+		throw new ShopError('unreachable', `${domain} did not answer in time.`);
+	} finally {
+		clearTimeout(timer);
+	}
 	const body = (await response.json()) as Record<string, any>;
 	if (!response.ok) {
 		throw new ShopError(
@@ -147,12 +163,6 @@ export async function agentId(): Promise<string> {
  *  the same connection, so nothing needs the id to correlate a response back
  *  to its request. */
 let nextId = 1;
-
-/** A shop that hangs — a bad deploy, a network partition — used to hang this
- *  call forever with it: nothing here ever timed out. This repo's own shops
- *  are more trusted than a generic Consumer-pasted server, but "more
- *  trusted" is not "never fails to answer". */
-const SHOP_FETCH_TIMEOUT_MS = 15_000;
 
 export async function call(
 	domain: string,

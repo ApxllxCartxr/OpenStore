@@ -66,3 +66,21 @@ describe('OpenRouterDriver tool name round-trip', () => {
 		expect(turn).toEqual({ kind: 'text', text: 'I am not sure what to do next.', reasoning: null });
 	});
 });
+
+describe('OpenRouterDriver gives up on a model that never answers', () => {
+	// Nothing here ever timed out before this was added — a hung OpenRouter
+	// call hung the whole chat request behind it, live, forever.
+	it('does not hang the request indefinitely', async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+			return new Promise((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+			});
+		});
+		const driver = new OpenRouterDriver('key', 'model', 'system', {});
+		const pending = driver.step([], []).catch((error) => error);
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(await pending).toMatchObject({ message: expect.stringContaining('did not answer') });
+		vi.useRealTimers();
+	});
+});

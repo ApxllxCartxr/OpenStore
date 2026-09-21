@@ -14,6 +14,27 @@
 import { SYSTEM_PROMPT, TOOL_SCHEMAS } from '../tools/loop.ts';
 import type { Widget } from '../widgets.ts';
 
+/** A model API that never answers used to hang the whole request behind it
+ *  forever — no driver here ever set a timeout. Generation can legitimately
+ *  take a while (tool-calling, reasoning), so this is generous rather than
+ *  tight; the point is a ceiling existing at all. */
+const MODEL_FETCH_TIMEOUT_MS = 30_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), MODEL_FETCH_TIMEOUT_MS);
+	try {
+		return await fetch(url, { ...init, signal: controller.signal });
+	} catch (error) {
+		if ((error as Error)?.name === 'AbortError') {
+			throw new Error(`The model did not answer within ${MODEL_FETCH_TIMEOUT_MS / 1000}s.`);
+		}
+		throw error;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
 /** Something to say plus an interface to say it with: the driver asking the
@@ -107,7 +128,7 @@ export class OllamaDriver implements ModelDriver {
 	) {}
 
 	async plan(messages: Message[], tools: string[]): Promise<ToolCall[]> {
-		const response = await fetch(`${this.baseUrl}/api/chat`, {
+		const response = await fetchWithTimeout(`${this.baseUrl}/api/chat`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({
@@ -140,7 +161,7 @@ export class AnthropicDriver implements ModelDriver {
 	) {}
 
 	async plan(messages: Message[], tools: string[]): Promise<ToolCall[]> {
-		const response = await fetch('https://api.anthropic.com/v1/messages', {
+		const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
 			method: 'POST',
 			headers: {
 				'content-type': 'application/json',
@@ -373,7 +394,7 @@ export class OpenRouterDriver implements ModelDriver {
 			reasoning: { effort: 'medium' }
 		};
 
-		const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+		const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
 			method: 'POST',
 			headers: {
 				'content-type': 'application/json',
