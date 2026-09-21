@@ -36,9 +36,9 @@
 		<form method="POST" action="?/dispatch" style="display:flex;gap:0.5rem;flex-wrap:wrap" class="mono">
 			<input type="hidden" name="csrf" value={data.csrf} />
 			<input name="tracking_number" placeholder="Tracking number (optional)"
-				style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+				style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
 			<input name="carrier" placeholder="Carrier"
-				style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+				style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
 			<button type="submit">{order.invoice_number ? 'Update dispatch' : 'Record dispatch'}</button>
 		</form>
 		<p style="color:var(--comment);font-size:0.8125rem;max-width:60ch">
@@ -61,7 +61,7 @@
 			</form>
 			<form method="POST" action="?/rto">
 				<input type="hidden" name="csrf" value={data.csrf} />
-				<button type="submit" style="background:var(--bg-sunken);color:var(--ink)">Record RTO</button>
+				<button type="submit" style="background:var(--bg-sunken);color:var(--fg)">Record RTO</button>
 			</form>
 		</div>
 		<p style="color:var(--comment);font-size:0.8125rem;max-width:60ch">
@@ -78,9 +78,9 @@
 			<input type="hidden" name="csrf" value={data.csrf} />
 			<label>Amount (paise, at most {remaining})
 				<input name="amount_minor" type="number" min="1" max={remaining} value={remaining} required
-					style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" /></label>
+					style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" /></label>
 			<label>Reason<input name="reason"
-				style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" /></label>
+				style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" /></label>
 			<fieldset style="border:1px solid var(--line);padding:0.75rem">
 				<legend style="color:var(--comment)">Return stock to sale</legend>
 				{#each order.lines as line (line.sku)}
@@ -98,8 +98,8 @@
 	<form method="POST" action="?/reject" style="margin-top:1rem">
 		<input type="hidden" name="csrf" value={data.csrf} />
 		<input name="reason" placeholder="Reason" class="mono"
-			style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
-		<button type="submit" style="background:var(--bg-sunken);color:var(--ink)">Reject order</button>
+			style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
+		<button type="submit" style="background:var(--bg-sunken);color:var(--fg)">Reject order</button>
 	</form>
 {/if}
 

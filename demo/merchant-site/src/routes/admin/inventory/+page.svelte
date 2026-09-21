@@ -6,7 +6,7 @@
 
 <svelte:head><title>Inventory — shop ops</title></svelte:head>
 <form method="GET" style="margin-bottom:1rem" class="mono">
-	<select name="channel" style="min-height:44px;border:1px solid var(--line);background:var(--raised);color:inherit">
+	<select name="channel" style="min-height:44px;border:1px solid var(--line);background:var(--bg-raised);color:inherit">
 		<option value="">Every channel</option>
 		{#each channels as c (c)}<option value={c} selected={data.channel === c}>{c}</option>{/each}
 	</select>

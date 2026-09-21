@@ -28,9 +28,9 @@
 									<input type="hidden" name="csrf" value={data.csrf} />
 									<input type="hidden" name="sku" value={row.item.sku} />
 									<input name="price_minor" type="number" min="0" value={row.item.price_minor} aria-label="price in paise"
-										style="width:7rem;min-height:44px;padding:0 0.5rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+										style="width:7rem;min-height:44px;padding:0 0.5rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
 									<input name="available" type="number" min="0" value={row.item.available} aria-label="stock"
-										style="width:5rem;min-height:44px;padding:0 0.5rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+										style="width:5rem;min-height:44px;padding:0 0.5rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
 									<span style="align-self:center;color:var(--comment)">{row.item.hsn_sac} · {row.item.gst_rate_bp / 100}%</span>
 									<button type="submit">Save</button>
 								</form>

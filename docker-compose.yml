@@ -26,6 +26,7 @@ services:
           # demo's public URL — the chat fetching a shop card — needs the name
           # to mean Caddy here, or it dials itself and gets nothing.
           - spoiledduckie.localhost
+          - dogeared.localhost
           - chat.localhost
     restart: unless-stopped
 
@@ -102,10 +103,95 @@ services:
       - "127.0.0.1:3000:3000"
     restart: unless-stopped
 
+  # The second shop, and the point of it: the same two images as above with a
+  # different domain, a different database and a different catalogue. Nothing
+  # is forked — `sidecar-books` is the sidecar image, `store-books` is the
+  # merchant-site image, and everything that differs is an environment
+  # variable. A shop that needed its own build would mean this site is one
+  # shop with a schema rather than a template (ADR-0007: one deploy, one
+  # Merchant domain).
+  sidecar-books:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: dogeared.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://dogeared.localhost
+      WEBAUTHN_RP_ID: dogeared.localhost
+      WEBAUTHN_RP_NAME: Dog-Eared
+      SIDECAR_DATABASE_URL: postgresql+psycopg://scb_app:scb_app_dev@postgres:5432/sidecar_books
+      STORE_INTERNAL_URL: http://store-books:3000
+      TRAIT_BASE_URL: http://store-books:3000
+      TRAIT_HMAC_SECRET: conformance-secret-books
+      PAYMENT_PROVIDER: fake
+      # Its own pseudonym key: the same Consumer must not be linkable across
+      # two Merchants by a shared id (ADR-0011).
+      DEPLOY_PSEUDONYM_KEY: demo-books-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-books
+      # Its own keys on its own volume. Two Merchants sharing a signing key
+      # would make either one able to seal the other's receipts.
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - booksidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-books:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://de_app:de_app_dev@postgres:5432/dogeared
+      TRAIT_HMAC_SECRET: conformance-secret-books
+      SIDECAR_INTERNAL_URL: http://sidecar-books:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://dogeared.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      # Which shop this deploy is. Read at runtime by `src/lib/brand.ts`, so
+      # the image is the one built for SpoiledDuckie.
+      PUBLIC_SHOP_NAME: Dog-Eared
+      PUBLIC_SHOP_TAGLINE: "Books, secondhand and new, off Bidhan Sarani."
+      PUBLIC_SHOP_BLURB: a bookshop in Kolkata
+      PUBLIC_SHOP_ACCENT: "#6f9a8d"
+      SEED_PROFILE: dogeared
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      # Loopback only, like the first shop's: the nine doors live here and the
+      # edge refuses them.
+      - "127.0.0.1:3010:3000"
+    restart: unless-stopped
+
   buyer-chat:
     build:
       context: .
       dockerfile: demo/buyer-chat/Dockerfile
+    # Provider keys live in `.env.llm`, which Compose does not read for
+    # interpolation the way it reads `.env` — so the file is mounted as an
+    # env_file instead. Both are optional: a machine with neither still boots,
+    # and the driver below still defaults to the pinned planner.
+    #
+    # An `environment:` entry would WIN over these, so OPENROUTER_API_KEY is
+    # deliberately absent from the block below: naming it there as
+    # `${OPENROUTER_API_KEY:-}` resolves to the empty string when the shell has
+    # not exported it, and quietly overwrites the key this file just supplied.
+    env_file:
+      - path: .env.llm
+        required: false
+      - path: .env
+        required: false
     environment:
       PORT: "3001"
       # A real model when a key is present, the pinned planner otherwise. The
@@ -113,7 +199,6 @@ services:
       # a demo that needs somebody's API key to pass its own tests is one that
       # fails on the next laptop.
       CHAT_MODEL_DRIVER: ${CHAT_MODEL_DRIVER:-scripted}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-oss-20b}
       CHAT_DATABASE_PATH: /data/chat.db
       CHAT_KEY_PATH: /data/agent-key.json
@@ -124,7 +209,7 @@ services:
       # The chat dials the shop by its own domain (the edge answers to it on
       # this network), and names it as the one host it may reach over plain
       # http — the mirror of the sidecar's own exception.
-      OPENSTORE_DEV_PROFILE_HOSTS: spoiledduckie.localhost
+      OPENSTORE_DEV_PROFILE_HOSTS: spoiledduckie.localhost,dogeared.localhost
       # adapter-node assumes https when no protocol header is named, so the
       # origin it computes is https://<host> while the browser posts from
       # http://<host> — and SvelteKit's CSRF check refuses every form on the
@@ -161,3 +246,4 @@ volumes:
   pgdata:
   chatdata:
   sidecarkeys:
+  booksidecarkeys:

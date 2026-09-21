@@ -1,0 +1,215 @@
+/* Shop ops chrome.
+ *
+ * The same dashboard language as the sidecar's `/agentic` console: a sunken app
+ * ground with raised cards, a sidebar rail, and stat tiles above the detail. The
+ * two consoles cannot share a stylesheet across the root boundary, so the rules
+ * are written down in both places and the tokens do the actual agreeing.
+ *
+ * Loaded ON TOP of app.css, so the storefront's type scale, controls and
+ * spacing come through unchanged and only the shell differs.
+ */
+
+body {
+	background: var(--bg-sunken);
+}
+
+.admin-shell {
+	display: grid;
+	grid-template-columns: 1fr;
+	min-height: 100vh;
+}
+
+.admin-side {
+	background: var(--bg);
+	border-right: 1px solid var(--line);
+	padding: var(--s-2) 0;
+}
+.admin-brand {
+	padding: var(--s-1) var(--s-3) var(--s-2);
+}
+.admin-brand b {
+	display: block;
+	font-size: 0.875rem;
+	font-weight: 600;
+}
+.admin-brand span {
+	color: var(--muted);
+	font-size: var(--t-caption);
+}
+.admin-side nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px;
+	padding: 0 var(--s-1);
+}
+.admin-side nav a {
+	display: flex;
+	align-items: center;
+	flex: 1 1 auto;
+	min-height: 36px;
+	padding: 0 var(--s-1);
+	border-radius: var(--r-control);
+	color: var(--muted);
+	text-decoration: none;
+	font-size: var(--t-caption);
+}
+.admin-side nav a:hover {
+	background: var(--bg-sunken);
+	color: var(--fg);
+}
+.admin-side nav a[aria-current='page'] {
+	background: var(--bg-sunken);
+	color: var(--fg);
+	font-weight: 600;
+}
+.admin-who {
+	padding: var(--s-2) var(--s-3);
+	color: var(--muted);
+	font-size: var(--t-caption);
+}
+
+.admin-main {
+	padding: var(--s-3);
+	min-width: 0;
+}
+.admin-head {
+	margin-bottom: var(--s-3);
+}
+.admin-head h1 {
+	font-size: 1.0625rem;
+}
+.admin-head p {
+	margin-top: 2px;
+	color: var(--muted);
+	font-size: var(--t-caption);
+}
+
+/* A card is the unit of the dashboard, and `section` is one by default so the
+   markup reads as a document with stylesheets off. */
+.admin-main section,
+.admin-card {
+	background: var(--bg-raised);
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	padding: var(--s-3);
+	margin-bottom: var(--s-2);
+}
+.admin-main section h2 {
+	font-size: var(--t-caption);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--muted);
+	font-weight: 600;
+	margin-bottom: var(--s-2);
+}
+
+.tiles {
+	display: grid;
+	gap: var(--s-2);
+	grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+	margin-bottom: var(--s-2);
+}
+.tile {
+	background: var(--bg-raised);
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	padding: var(--s-3);
+}
+.tile .k {
+	color: var(--muted);
+	font-size: var(--t-caption);
+}
+/* Proportional figures on a standalone value: tabular digits pad every glyph to
+   the width of a zero, which makes a number like 121 look loose at this size.
+   Tabular stays where numbers align vertically, which is the tables below. */
+.tile .v {
+	font-size: 1.75rem;
+	font-weight: 600;
+	line-height: 1.15;
+	letter-spacing: -0.02em;
+	font-variant-numeric: proportional-nums;
+	margin-top: 2px;
+}
+.tile .s {
+	color: var(--muted);
+	font-size: var(--t-caption);
+	margin-top: 2px;
+}
+
+.admin-main table {
+	width: 100%;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+}
+.admin-main th,
+.admin-main td {
+	text-align: left;
+	padding: var(--s-1);
+	border-bottom: 1px solid var(--line);
+}
+.admin-main tr:last-child td {
+	border-bottom: 0;
+}
+.admin-main th {
+	font-size: var(--t-caption);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--muted);
+	font-weight: 600;
+}
+.admin-main td.num,
+.admin-main th.num {
+	text-align: right;
+}
+
+/* Charts. One hue for every mark, because each plot is a single series: a
+   second colour would encode nothing, and shading bars by their own height
+   double-encodes the height. `--accent` stays reserved for warnings. */
+.chart {
+	width: 100%;
+	height: auto;
+	display: block;
+	overflow: visible;
+}
+.chart .grid-line {
+	stroke: var(--line);
+	stroke-width: 1;
+}
+.chart .mark {
+	fill: var(--accent-2);
+	transition: fill 0.15s var(--ease);
+}
+.chart .mark:hover {
+	fill: var(--fg);
+}
+.chart .tick {
+	fill: var(--muted);
+	font-size: 10px;
+}
+.chart .val {
+	fill: var(--fg);
+	font-size: 10px;
+	font-weight: 600;
+}
+.chart-empty {
+	color: var(--muted);
+	text-align: center;
+	padding: var(--s-4) 0;
+}
+
+@media (min-width: 900px) {
+	.admin-shell {
+		grid-template-columns: 190px 1fr;
+	}
+	.admin-side {
+		position: sticky;
+		top: 0;
+		height: 100vh;
+	}
+	.admin-side nav {
+		flex-direction: column;
+	}
+	.admin-main {
+		padding: var(--s-4);
+	}
+}

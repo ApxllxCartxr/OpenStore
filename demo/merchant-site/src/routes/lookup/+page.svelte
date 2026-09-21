@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { formatRupees } from '$lib/pricing.ts';
+	import { BRAND } from '$lib/brand.ts';
 	import type { PageProps } from './$types';
 	let { form }: PageProps = $props();
 </script>
 
-<svelte:head><title>Find my order — SpoiledDuckie</title></svelte:head>
+<svelte:head><title>Find my order — {BRAND.name}</title></svelte:head>
 
 <h1 style="font-weight:600">Find my order</h1>
 <p style="max-width:60ch">
@@ -15,16 +16,16 @@
 <form method="POST" style="display:grid;gap:0.75rem;max-width:32rem;margin-top:1.5rem">
 	<label>Order link token
 		<input name="token" class="mono"
-			style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+			style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
 	</label>
 	<p style="color:var(--comment);margin:0">or</p>
 	<label>Order number
 		<input name="order_number" class="mono"
-			style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+			style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
 	</label>
 	<label>Email or phone on the order
 		<input name="contact"
-			style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+			style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
 	</label>
 	<button type="submit">Look up</button>
 </form>

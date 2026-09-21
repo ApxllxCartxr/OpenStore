@@ -58,6 +58,55 @@ http://spoiledduckie.localhost {
 	}
 }
 
+# The second shop. Same split, its own origin: a passkey and a tap token
+# are bound to the origin the Consumer is looking at, so two shops can
+# never share one (§10).
+http://dogeared.localhost {
+	# The sidecar's three mount points. Everything else is the store's.
+	handle /.well-known/* {
+		reverse_proxy sidecar-books:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-books:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-books:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-books:8000
+	}
+
+	# The Payment Provider's own callback. Public, and authenticated by the
+	# HMAC on its body rather than by who is calling — a Provider holds no
+	# token here and is not an agent.
+	handle /provider/* {
+		reverse_proxy sidecar-books:8000
+	}
+
+	# The nine doors are private-network only (§6.1). HMAC is the real
+	# protection, but a door that is not routable from the edge cannot be
+	# reached at all if that secret ever leaks — so the edge refuses it rather
+	# than forwarding it to be refused.
+	handle /trait* {
+		respond "Not found" 404
+	}
+
+	# The shop's own admin is session-authenticated and bound to the private
+	# network. It is not part of the public origin's contract.
+	handle /admin* {
+		respond "Not found" 404
+	}
+
+	handle {
+		reverse_proxy store-books:3000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
 http://chat.localhost {
 	reverse_proxy buyer-chat:3001
 

@@ -1,34 +1,376 @@
 /* The portfolio token layer, at full strength. The merchant site is the surface
-   that has to look like a shop somebody runs (§4). */
+   that has to look like a shop somebody runs (§4).
+
+   Every colour here resolves through `design/tokens.css`. Nothing below names a
+   literal colour, including the shadows: those are mixed from `--fg` so they
+   stay tinted to whichever theme is live instead of dropping pure black onto
+   warm paper. */
 @import 'tailwindcss';
 @import '../../../design/tokens.css';
 
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); }
+/* ---------------------------------------------------------------
+   Shape and rhythm.
+
+   ONE radius rule, applied everywhere: controls take `--radius`,
+   surfaces (cards, images, panels) take `--radius-lg`. A page that
+   mixes pill buttons into square cards reads as two designs.
+   --------------------------------------------------------------- */
+:root {
+	--s-1: 0.5rem;
+	--s-2: 0.75rem;
+	--s-3: 1rem;
+	--s-4: 1.5rem;
+	--s-5: 2.5rem;
+	--s-6: 4rem;
+	--s-7: 6rem;
+
+	--r-control: var(--radius);
+	--r-surface: var(--radius-lg);
+
+	--lift: color-mix(in srgb, var(--fg) 7%, transparent);
+	--lift-strong: color-mix(in srgb, var(--fg) 12%, transparent);
+	--ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* {
+	box-sizing: border-box;
+}
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+}
 
 /* Iosevka is load-bearing, not decoration: every price, SKU, reason code and
    hash. This is what makes the money surfaces look like instruments. */
-.mono, .price, .sku, code { font-family: 'Iosevka Term SS08', ui-monospace, monospace;
-  font-variant-numeric: tabular-nums; }
+.mono,
+.price,
+.sku,
+code {
+	font-family: 'Iosevka Term SS08', ui-monospace, monospace;
+	font-variant-numeric: tabular-nums;
+}
 
-/* EB Garamond, once per page. */
-.shop-name { font-family: 'EB Garamond', Georgia, serif; font-weight: 400; }
+/* EB Garamond, once per page: the shop name in the masthead and nowhere else.
+   Every other heading is Open Sauce Sans at 600, which is why headings below
+   set a weight but never a family. */
+.shop-name {
+	font-family: 'EB Garamond', Georgia, serif;
+	font-weight: 400;
+	letter-spacing: -0.01em;
+}
 
-.wrap { max-width: 72rem; margin: 0 auto; padding: 1.5rem 1rem; }
-a { color: inherit; }
-.grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
-.card { background: var(--raised); border: 1px solid var(--line); padding: 1rem; }
-.bucket { font-size: 0.8125rem; }
-.bucket[data-b='sold-out'] { color: var(--comment); }
-.bucket[data-b='low-stock'] { color: var(--accent); }
-.bucket[data-b='in-stock'] { color: var(--ok); }
-button, .button { min-height: 44px; padding: 0 1rem; border: 1px solid var(--line);
-  background: var(--accent); color: var(--paper); font: inherit; cursor: pointer; }
-button[disabled] { background: var(--bg-sunken); color: var(--comment); cursor: not-allowed; }
-:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-.option-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0; }
-.option { min-height: 44px; padding: 0 0.75rem; border: 1px solid var(--line); background: var(--raised); }
-.option[aria-pressed='true'] { border-color: var(--accent); }
-.option[data-unavailable='true'] { color: var(--comment); text-decoration: line-through; }
-.agent-panel { background: var(--bg-sunken); border: 1px solid var(--line); padding: 1rem; margin-top: 1.5rem; }
-@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+/* ---------------------------------------------------------------
+   Type scale, from the token layer rather than per-page inline sizes.
+   --------------------------------------------------------------- */
+h1,
+h2,
+h3 {
+	font-weight: 600;
+	line-height: 1.15;
+	letter-spacing: -0.02em;
+	text-wrap: balance;
+	margin: 0;
+}
+h1 {
+	font-size: var(--t-h1);
+}
+h2 {
+	font-size: var(--t-section);
+}
+h3 {
+	font-size: 1.0625rem;
+	letter-spacing: -0.01em;
+}
+p {
+	max-width: var(--measure);
+	margin: 0;
+}
+.lede {
+	font-size: 1.0625rem;
+	color: var(--muted);
+	line-height: 1.6;
+}
+.meta {
+	font-size: var(--t-caption);
+	color: var(--muted);
+}
+
+/* ---------------------------------------------------------------
+   Shell
+   --------------------------------------------------------------- */
+.wrap {
+	max-width: 72rem;
+	margin: 0 auto;
+	padding-inline: var(--s-3);
+}
+main.wrap {
+	padding-block: var(--s-5) var(--s-7);
+}
+a {
+	color: inherit;
+}
+
+.masthead {
+	border-bottom: 1px solid var(--line);
+	background: var(--bg);
+	position: sticky;
+	top: 0;
+	z-index: 10;
+}
+.masthead-inner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s-4);
+	min-height: 68px;
+}
+.masthead nav {
+	display: flex;
+	align-items: center;
+	gap: var(--s-4);
+	font-size: var(--t-caption);
+}
+.masthead nav a {
+	text-decoration: none;
+	color: var(--muted);
+	padding-block: 0.25rem;
+	border-bottom: 1px solid transparent;
+	transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.masthead nav a:hover {
+	color: var(--fg);
+	border-bottom-color: var(--accent);
+}
+
+.sitefoot {
+	border-top: 1px solid var(--line);
+	margin-top: var(--s-7);
+}
+.sitefoot-inner {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--s-2) var(--s-4);
+	align-items: baseline;
+	justify-content: space-between;
+	padding-block: var(--s-4);
+	font-size: var(--t-caption);
+	color: var(--muted);
+}
+.sitefoot a {
+	text-decoration: none;
+}
+.sitefoot a:hover {
+	text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------
+   Product cards
+   --------------------------------------------------------------- */
+.grid {
+	display: grid;
+	gap: var(--s-4);
+	grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+}
+
+.card {
+	background: var(--bg-raised);
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	padding: var(--s-3);
+}
+
+/* A product tile is a link, so the whole tile responds. The photo scales
+   inside a clipped frame rather than the tile moving under the cursor: the
+   grid stays still and only the thing being pointed at reacts. */
+.tile {
+	display: flex;
+	flex-direction: column;
+	gap: 0.375rem;
+	text-decoration: none;
+	border-radius: var(--r-surface);
+	transition: transform 0.25s var(--ease);
+}
+.tile-frame {
+	overflow: hidden;
+	border-radius: var(--r-surface);
+	border: 1px solid var(--line);
+	background: var(--bg-sunken);
+	aspect-ratio: 1;
+	margin-bottom: var(--s-2);
+}
+.tile-frame img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+	transition: transform 0.45s var(--ease);
+}
+.tile:hover .tile-frame img {
+	transform: scale(1.04);
+}
+.tile:hover {
+	transform: translateY(-2px);
+}
+.tile-name {
+	font-weight: 600;
+}
+.tile .price {
+	color: var(--muted);
+	font-size: var(--t-caption);
+}
+
+/* Availability is real semantic state, so it keeps its colour coding. */
+.bucket {
+	font-size: var(--t-caption);
+}
+.bucket[data-b='sold-out'] {
+	color: var(--comment);
+}
+.bucket[data-b='low-stock'] {
+	color: var(--accent);
+}
+.bucket[data-b='in-stock'] {
+	color: var(--ok);
+}
+
+/* ---------------------------------------------------------------
+   Controls
+
+   `color: var(--bg)` on the accent fill is the contrast pairing that
+   holds in both themes: paper on crimson in light, near-black on pink
+   in dark. It reads as an accident until you flip the theme.
+   --------------------------------------------------------------- */
+button,
+.button {
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--s-1);
+	padding: 0 var(--s-3);
+	border: 1px solid transparent;
+	border-radius: var(--r-control);
+	background: var(--accent);
+	color: var(--bg);
+	font: inherit;
+	font-weight: 500;
+	text-decoration: none;
+	cursor: pointer;
+	transition: transform 0.12s var(--ease), box-shadow 0.2s var(--ease),
+		background-color 0.2s var(--ease);
+}
+button:hover,
+.button:hover {
+	box-shadow: 0 4px 14px var(--lift);
+}
+button:active,
+.button:active {
+	transform: translateY(1px);
+}
+button.secondary,
+.button.secondary {
+	background: transparent;
+	color: var(--fg);
+	border-color: var(--line);
+}
+button.secondary:hover,
+.button.secondary:hover {
+	border-color: var(--fg);
+}
+button[disabled] {
+	background: var(--bg-sunken);
+	color: var(--comment);
+	border-color: var(--line);
+	cursor: not-allowed;
+	box-shadow: none;
+}
+:focus-visible {
+	outline: 2px solid var(--accent-2);
+	outline-offset: 2px;
+}
+
+/* Inputs carry a label above them, never a placeholder standing in for one. */
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.375rem;
+}
+.field > span {
+	font-size: var(--t-caption);
+	color: var(--muted);
+}
+input,
+select {
+	min-height: 44px;
+	padding: 0 var(--s-2);
+	border: 1px solid var(--line);
+	border-radius: var(--r-control);
+	background: var(--bg-raised);
+	color: inherit;
+	font: inherit;
+}
+input::placeholder {
+	color: var(--muted);
+}
+input:hover,
+select:hover {
+	border-color: var(--muted);
+}
+
+.option-row {
+	display: flex;
+	gap: var(--s-1);
+	flex-wrap: wrap;
+	margin: var(--s-1) 0;
+}
+.option {
+	min-height: 44px;
+	padding: 0 var(--s-2);
+	border: 1px solid var(--line);
+	border-radius: var(--r-control);
+	background: var(--bg-raised);
+	color: var(--fg);
+	font-weight: 400;
+}
+.option:hover {
+	border-color: var(--muted);
+	box-shadow: none;
+}
+.option[aria-pressed='true'] {
+	border-color: var(--accent);
+	box-shadow: inset 0 0 0 1px var(--accent);
+}
+.option[data-unavailable='true'] {
+	color: var(--comment);
+	text-decoration: line-through;
+}
+
+/* ---------------------------------------------------------------
+   The agent panel: the one surface on the shop that talks about
+   protocol rather than product, so it reads as an instrument.
+   --------------------------------------------------------------- */
+.agent-panel {
+	background: var(--bg-sunken);
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	padding: var(--s-4);
+	margin-top: var(--s-5);
+}
+.agent-panel code {
+	display: block;
+	word-break: break-all;
+	background: var(--bg);
+	border: 1px solid var(--line);
+	border-radius: var(--r-control);
+	padding: var(--s-2);
+	font-size: var(--t-caption);
+	margin-top: var(--s-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		animation: none !important;
+		transition: none !important;
+	}
+}

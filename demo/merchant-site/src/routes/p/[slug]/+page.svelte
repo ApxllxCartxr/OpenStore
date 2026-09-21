@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formatRupees } from '$lib/pricing.ts';
+	import { BRAND } from '$lib/brand.ts';
 	import { BUCKET_LABEL, type Bucket } from '$lib/availability.ts';
 	import type { PageProps } from './$types';
 
@@ -71,81 +72,217 @@
 </script>
 
 <svelte:head>
-	<title>{data.group.name} — SpoiledDuckie</title>
+	<title>{data.group.name} at {BRAND.name}</title>
 	{@html `<script type="application/ld+json">${jsonLd}<\/script>`}
 </svelte:head>
 
-{#if gallery.length}
-	<figure style="margin:0 0 1.5rem">
-		<img src={gallery[shown]} alt={resolved?.name ?? data.group.name} width="900" height="900"
-			style="width:100%;max-width:32rem;aspect-ratio:1;object-fit:cover;background:var(--line)" />
-		{#if gallery.length > 1}
-			<div class="option-row" style="margin-top:0.5rem">
-				{#each gallery as src, i (src)}
-					<button type="button" class="option" aria-pressed={shown === i}
-						aria-label="View photo {i + 1}" onclick={() => (shown = i)}
-						style="width:3.5rem;height:3.5rem;padding:0;overflow:hidden">
-						<img src={src} alt="" width="120" height="120"
-							style="width:100%;height:100%;object-fit:cover" />
-					</button>
-				{/each}
-			</div>
+<nav class="crumbs meta"><a href="/shop">Shop</a> / <span>{data.group.name}</span></nav>
+
+<article class="product">
+	<div class="gallery">
+		{#if gallery.length}
+			<figure class="shot">
+				<img
+					src={gallery[shown]}
+					alt={resolved?.name ?? data.group.name}
+					width="900"
+					height="900"
+					fetchpriority="high"
+				/>
+			</figure>
+			{#if gallery.length > 1}
+				<div class="option-row">
+					{#each gallery as src, i (src)}
+						<button
+							type="button"
+							class="option thumb"
+							aria-pressed={shown === i}
+							aria-label="View photo {i + 1}"
+							onclick={() => (shown = i)}
+						>
+							<img src={src} alt="" width="120" height="120" />
+						</button>
+					{/each}
+				</div>
+			{/if}
 		{/if}
-	</figure>
-{/if}
-
-<h1 style="font-weight:600">{data.group.name}</h1>
-<p style="max-width:60ch">{data.group.description}</p>
-
-{#each axes as [axis, values] (axis)}
-	<fieldset style="border:0;padding:0;margin:1rem 0">
-		<legend style="padding:0;color:var(--comment);font-size:0.8125rem">{axis}</legend>
-		<div class="option-row">
-			{#each values as value (value)}
-				{@const exists = combinationExists(axis, value)}
-				<button
-					type="button"
-					class="option"
-					aria-pressed={chosen[axis] === value}
-					data-unavailable={!exists}
-					disabled={!exists}
-					onclick={() => (chosen = { ...chosen, [axis]: value })}
-				>
-					{value}{!exists ? ' — not made' : ''}
-				</button>
-			{/each}
-		</div>
-	</fieldset>
-{/each}
-
-{#if resolved}
-	<div class="card" style="margin-top:1rem">
-		<div class="sku">{resolved.sku}</div>
-		<div class="price" style="font-size:1.25rem">{formatRupees(resolved.price_minor)}</div>
-		<div class="bucket" data-b={resolved.bucket}>{BUCKET_LABEL[resolved.bucket as Bucket]}</div>
 	</div>
-{:else}
-	<p class="mono" style="color:var(--comment)">Pick {axes.map(([a]) => a).join(' and ')} to see the price.</p>
-{/if}
 
-{#if data.addons.length}
-	<h2 style="font-size:1rem;margin-top:1.5rem">Add-ons</h2>
-	<ul class="mono" style="padding-left:1.25rem">
-		{#each data.addons as addon (addon.sku)}
-			<li>{addon.name} — {formatRupees(addon.price_minor)}</li>
+	<div class="buy">
+		<h1>{data.group.name}</h1>
+		<p class="lede">{data.group.description}</p>
+
+		{#each axes as [axis, values] (axis)}
+			<fieldset>
+				<legend>{axis}</legend>
+				<div class="option-row">
+					{#each values as value (value)}
+						{@const exists = combinationExists(axis, value)}
+						<button
+							type="button"
+							class="option"
+							aria-pressed={chosen[axis] === value}
+							data-unavailable={!exists}
+							disabled={!exists}
+							onclick={() => (chosen = { ...chosen, [axis]: value })}
+						>
+							{value}{!exists ? ' (not made)' : ''}
+						</button>
+					{/each}
+				</div>
+			</fieldset>
 		{/each}
-	</ul>
-	<p style="color:var(--comment);font-size:0.8125rem;max-width:60ch">
-		Add-ons attach to a line and are never sold alone. Gift-wrap on a charm-bar seat is taxed as
-		that service, not as goods.
-	</p>
-{/if}
+
+		{#if resolved}
+			<div class="card price-card">
+				<div class="price-row">
+					<span class="price">{formatRupees(resolved.price_minor)}</span>
+					<span class="bucket" data-b={resolved.bucket}
+						>{BUCKET_LABEL[resolved.bucket as Bucket]}</span
+					>
+				</div>
+				<div class="sku meta">{resolved.sku}</div>
+			</div>
+		{:else}
+			<p class="card meta">
+				Pick {axes.map(([a]) => a).join(' and ')} to see the price.
+			</p>
+		{/if}
+
+		{#if data.addons.length}
+			<section class="addons">
+				<h2>Add-ons</h2>
+				<ul>
+					{#each data.addons as addon (addon.sku)}
+						<li>
+							<span>{addon.name}</span>
+							<span class="price">{formatRupees(addon.price_minor)}</span>
+						</li>
+					{/each}
+				</ul>
+				<p class="meta">
+					Add-ons attach to a line and are never sold alone. Gift-wrap on a charm-bar seat is
+					taxed as that service, not as goods.
+				</p>
+			</section>
+		{/if}
+	</div>
+</article>
 
 <section class="agent-panel">
-	<h2 style="font-size:1rem;margin:0 0 0.5rem">Buy via your agent</h2>
-	<p style="max-width:60ch;margin:0 0 0.75rem">
-		Paste this card into any agent that speaks the protocol. It can browse and build a basket;
-		it cannot spend. Every purchase ends with you approving the exact amount on this domain.
+	<h2 style="font-size:1.0625rem">Buy via your agent</h2>
+	<p style="margin-top:var(--s-1)">
+		Paste this card into any agent that speaks the protocol. It can browse and build a basket; it
+		cannot spend. Every purchase ends with you approving the exact amount on this domain.
 	</p>
-	<code style="display:block;word-break:break-all;background:var(--paper);padding:0.75rem;border:1px solid var(--line)">{data.cardUrl}</code>
+	<code>{data.cardUrl}</code>
 </section>
+
+<style>
+	.crumbs {
+		margin-bottom: var(--s-3);
+	}
+	.crumbs a {
+		text-decoration: none;
+	}
+	.crumbs a:hover {
+		text-decoration: underline;
+	}
+
+	.product {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--s-5);
+		align-items: start;
+	}
+
+	.shot {
+		margin: 0 0 var(--s-2);
+		overflow: hidden;
+		border: 1px solid var(--line);
+		border-radius: var(--r-surface);
+		background: var(--bg-sunken);
+		aspect-ratio: 1;
+	}
+	.shot img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+	.thumb {
+		width: 3.5rem;
+		height: 3.5rem;
+		padding: 0;
+		overflow: hidden;
+	}
+	.thumb img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.buy {
+		display: flex;
+		flex-direction: column;
+		gap: var(--s-3);
+	}
+	fieldset {
+		border: 0;
+		padding: 0;
+		margin: 0;
+	}
+	legend {
+		padding: 0;
+		font-size: var(--t-caption);
+		color: var(--muted);
+	}
+
+	.price-card {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.price-row {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: var(--s-2);
+	}
+	.price-row .price {
+		font-size: 1.5rem;
+		font-weight: 600;
+	}
+
+	.addons h2 {
+		font-size: 1.0625rem;
+		margin-bottom: var(--s-1);
+	}
+	/* Name left, money right, one hairline between rows and none around the
+	   group: a rule under every row turns a three-item list into a ledger. */
+	.addons ul {
+		list-style: none;
+		margin: 0 0 var(--s-2);
+		padding: 0;
+	}
+	.addons li {
+		display: flex;
+		justify-content: space-between;
+		gap: var(--s-3);
+		padding-block: var(--s-1);
+	}
+	.addons li + li {
+		border-top: 1px solid var(--line);
+	}
+
+	@media (min-width: 900px) {
+		.product {
+			grid-template-columns: 1.05fr 0.95fr;
+			gap: var(--s-6);
+		}
+		.gallery {
+			position: sticky;
+			top: calc(68px + var(--s-4));
+		}
+	}
+</style>

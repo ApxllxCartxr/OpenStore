@@ -7,8 +7,8 @@
 <svelte:head><title>Orders — shop ops</title></svelte:head>
 <form method="GET" style="display:flex;gap:0.5rem;margin-bottom:1rem" class="mono">
 	<input name="q" value={data.query} placeholder="Order id"
-		style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
-	<select name="status" style="min-height:44px;border:1px solid var(--line);background:var(--raised);color:inherit">
+		style="min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit" />
+	<select name="status" style="min-height:44px;border:1px solid var(--line);background:var(--bg-raised);color:inherit">
 		<option value="">Any status</option>
 		{#each ['pending', 'confirmed', 'paid', 'cancelled', 'expired', 'failed', 'refunded', 'completed'] as s (s)}
 			<option value={s} selected={data.status === s}>{s}</option>
