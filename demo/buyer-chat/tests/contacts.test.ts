@@ -13,6 +13,7 @@ import {
 	getContact,
 	isPublicAddress,
 	parseCard,
+	parseJwks,
 	saveContact
 } from '../src/lib/contacts.ts';
 
@@ -93,8 +94,16 @@ describe('fetching a card', () => {
 		).rejects.toMatchObject({ code: 'unreachable' });
 	});
 
-	it('refuses a card with no keys, because nothing it says could be checked', () => {
-		expect(() => parseCard({ name: 'Shop' }, 'shop.example')).toThrow(/carries no keys/);
+	it('refuses a card that does not say where its keys live', () => {
+		// The card names its key source; it never carries keys inline. See
+		// `real-card.test.ts` for the same fetcher against the sidecar's own card.
+		expect(() => parseCard({ merchant: { name: 'Shop' } }, 'shop.example')).toThrow(
+			/where its keys live/
+		);
+	});
+
+	it('refuses a key set with no keys in it', () => {
+		expect(() => parseJwks({ keys: [] })).toThrow(/carries no keys/);
 	});
 
 	it('refuses something that is not a card at all', async () => {
@@ -143,6 +152,7 @@ describe('the contact book', () => {
 		category: 'accessories',
 		domain: 'shop.test',
 		protocols: ['mcp', 'ucp'],
+		jwksUrl: 'https://shop.test/.well-known/jwks.json',
 		jwks: { keys: [{ kid: 'k1' }] }
 	};
 
@@ -151,6 +161,10 @@ describe('the contact book', () => {
 
 	it('stores the JWKS at add time so it can be pinned later', () => {
 		expect(getContact('shop.test')?.jwks.keys[0]?.kid).toBe('k1');
+	});
+
+	it('pins where the keys came from, because rotation refetches that URL', () => {
+		expect(getContact('shop.test')?.jwksUrl).toBe('https://shop.test/.well-known/jwks.json');
 	});
 
 	it('forgetting deletes the local bookmark only', () => {

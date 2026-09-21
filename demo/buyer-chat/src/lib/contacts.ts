@@ -150,23 +150,31 @@ export type Card = {
 	category: string;
 	domain: string;
 	protocols: string[];
+	jwksUrl: string;
 	jwks: { keys: { kid?: string }[] };
 };
 
-export async function fetchCard(
-	cardUrl: string,
-	fetcher: typeof fetch = fetch,
+/** A card as read, before its keys have been fetched. */
+export type CardMeta = Omit<Card, 'jwks'>;
+
+async function fetchJson(
+	url: string,
+	what: 'card' | 'keys',
+	fetcher: typeof fetch,
 	resolver?: (host: string) => Promise<string[]>
-): Promise<Card> {
-	await checkUrl(cardUrl, resolver);
+): Promise<unknown> {
+	await checkUrl(url, resolver);
 
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 	let response: Response;
 	try {
-		response = await fetcher(cardUrl, { redirect: 'manual', signal: controller.signal });
+		response = await fetcher(url, { redirect: 'manual', signal: controller.signal });
 	} catch {
-		throw new ContactError('unreachable', 'That shop did not answer.');
+		throw new ContactError(
+			'unreachable',
+			what === 'card' ? 'That shop did not answer.' : 'That shop did not serve its keys.'
+		);
 	} finally {
 		clearTimeout(timer);
 	}
@@ -180,27 +188,97 @@ export async function fetchCard(
 	const text = await response.text();
 	if (text.length > MAX_CARD_BYTES) throw new ContactError('too-large', 'That card is too large.');
 
-	let card: unknown;
 	try {
-		card = JSON.parse(text);
+		return JSON.parse(text);
 	} catch {
-		throw new ContactError('not-a-card', 'That URL did not return a shop card.');
+		throw new ContactError(
+			'not-a-card',
+			what === 'card'
+				? 'That URL did not return a shop card.'
+				: 'That shop served something that is not a key set.'
+		);
 	}
-	return parseCard(card, new URL(cardUrl).hostname);
 }
 
-export function parseCard(document: unknown, domain: string): Card {
-	const card = document as Partial<Card> & { jwks?: { keys?: unknown } };
-	if (!card || typeof card !== 'object' || !Array.isArray(card.jwks?.keys) || !card.jwks.keys.length) {
-		throw new ContactError('not-a-card', 'That card carries no keys, so nothing it says can be checked.');
+/**
+ * **The card and the keys are two documents** (SPEC §V1). The card names where
+ * its keys live; it does not carry them. A fetcher that expected them inline
+ * would refuse every card this sidecar has ever served — which is exactly what
+ * it did, because the only cards it was ever tested against were hand-built
+ * fixtures of a shape nothing emits.
+ *
+ * Both fetches go through the same SSRF check, and the keys must live on the
+ * host the card came from: a card that sources its keys elsewhere is handing
+ * key custody to a third party, which defeats the pinning underneath it.
+ */
+export async function fetchCard(
+	cardUrl: string,
+	fetcher: typeof fetch = fetch,
+	resolver?: (host: string) => Promise<string[]>
+): Promise<Card> {
+	const document = await fetchJson(cardUrl, 'card', fetcher, resolver);
+	const meta = parseCard(document, new URL(cardUrl).hostname);
+	const keys = await fetchJson(meta.jwksUrl, 'keys', fetcher, resolver);
+	return { ...meta, jwks: parseJwks(keys) };
+}
+
+export function parseCard(document: unknown, domain: string): CardMeta {
+	const card = document as {
+		merchant?: { name?: unknown; domain?: unknown };
+		category?: unknown;
+		protocols?: unknown;
+		endpoints?: { jwks?: unknown };
+	};
+	if (!card || typeof card !== 'object') {
+		throw new ContactError('not-a-card', 'That URL did not return a shop card.');
 	}
+
+	// The host we fetched from is the identity; the card's own claim is just a
+	// claim. A card copied from another shop says that shop's domain, and
+	// believing it would pin the wrong keys under the wrong name.
+	const claimed = card.merchant?.domain;
+	if (typeof claimed === 'string' && claimed && claimed !== domain) {
+		throw new ContactError(
+			'not-a-card',
+			`That card claims to be ${claimed}, but we fetched it from ${domain}.`
+		);
+	}
+
+	const jwksUrl = card.endpoints?.jwks;
+	if (typeof jwksUrl !== 'string' || !jwksUrl) {
+		throw new ContactError(
+			'not-a-card',
+			'That card does not say where its keys live, so nothing it says could be checked.'
+		);
+	}
+	let keyHost: string;
+	try {
+		keyHost = new URL(jwksUrl).hostname;
+	} catch {
+		throw new ContactError('not-a-card', `${jwksUrl} is not a URL we can fetch keys from.`);
+	}
+	if (keyHost !== domain) {
+		throw new ContactError(
+			'not-a-card',
+			`That card sources its keys from ${keyHost}, which is not ${domain}.`
+		);
+	}
+
 	return {
-		name: String(card.name ?? domain),
+		name: String(card.merchant?.name ?? domain),
 		category: String(card.category ?? ''),
 		domain,
 		protocols: Array.isArray(card.protocols) ? card.protocols.map(String) : [],
-		jwks: card.jwks as Card['jwks']
+		jwksUrl
 	};
+}
+
+export function parseJwks(document: unknown): Card['jwks'] {
+	const jwks = document as { keys?: unknown };
+	if (!jwks || typeof jwks !== 'object' || !Array.isArray(jwks.keys) || !jwks.keys.length) {
+		throw new ContactError('not-a-card', 'That card carries no keys, so nothing it says can be checked.');
+	}
+	return jwks as Card['jwks'];
 }
 
 export type TrustResult =
@@ -240,14 +318,15 @@ export function confirmRotation(
 
 export function saveContact(card: Card, cardUrl: string): void {
 	db.prepare(
-		`INSERT INTO contacts (domain, name, category, card_url, jwks, protocols, added_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO contacts (domain, name, category, card_url, jwks_url, jwks, protocols, added_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (domain) DO UPDATE SET name = excluded.name, card_url = excluded.card_url`
 	).run(
 		card.domain,
 		card.name,
 		card.category,
 		cardUrl,
+		card.jwksUrl,
 		JSON.stringify(card.jwks),
 		JSON.stringify(card.protocols),
 		new Date().toISOString()
@@ -256,7 +335,15 @@ export function saveContact(card: Card, cardUrl: string): void {
 
 export function getContact(domain: string): (Card & { card_url: string }) | null {
 	const row = db.prepare(`SELECT * FROM contacts WHERE domain = ?`).get(domain) as
-		| { domain: string; name: string; category: string; card_url: string; jwks: string; protocols: string }
+		| {
+				domain: string;
+				name: string;
+				category: string;
+				card_url: string;
+				jwks_url: string;
+				jwks: string;
+				protocols: string;
+		  }
 		| undefined;
 	if (!row) return null;
 	return {
@@ -264,6 +351,7 @@ export function getContact(domain: string): (Card & { card_url: string }) | null
 		name: row.name,
 		category: row.category,
 		card_url: row.card_url,
+		jwksUrl: row.jwks_url,
 		jwks: JSON.parse(row.jwks),
 		protocols: JSON.parse(row.protocols)
 	};

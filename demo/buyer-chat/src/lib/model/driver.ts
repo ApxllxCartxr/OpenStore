@@ -11,6 +11,8 @@
  * running LLM to pass its own tests is a demo that fails on somebody else's
  * laptop.
  */
+import { SYSTEM_PROMPT, TOOL_SCHEMAS } from '../tools/loop.ts';
+
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
 export type Message = { role: 'consumer' | 'agent'; text: string };
@@ -170,8 +172,30 @@ export function parseCalls(raw: string, tools: string[]): ToolCall[] {
 	});
 }
 
+let held: ModelDriver | null = null;
+
+/** The driver for this process, built once.
+ *
+ *  `ScriptedDriver` walks a pinned sequence and keeps its position in the
+ *  instance, so building a new one per request restarts the conversation at
+ *  step 0 forever — which is exactly what happened: every message re-ran the
+ *  first `search` and the basket was never built.
+ */
 export function driverFromEnv(): ModelDriver {
+	if (!held) held = buildDriver();
+	return held;
+}
+
+function buildDriver(): ModelDriver {
 	const choice = process.env.CHAT_MODEL_DRIVER ?? 'scripted';
+	if (choice === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+		return new OpenRouterDriver(
+			process.env.OPENROUTER_API_KEY,
+			process.env.OPENROUTER_MODEL ?? 'openai/gpt-oss-20b',
+			SYSTEM_PROMPT,
+			TOOL_SCHEMAS
+		);
+	}
 	if (choice === 'ollama' && process.env.OLLAMA_MODEL) {
 		return new OllamaDriver(
 			process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
@@ -183,4 +207,137 @@ export function driverFromEnv(): ModelDriver {
 	}
 	// Falls back rather than failing: the demo must run with no model at all.
 	return new ScriptedDriver();
+}
+
+/**
+ * OpenRouter — a real model, calling tools natively.
+ *
+ * One API over many providers, so the demo is not tied to one vendor's key. The
+ * model proposes; **deterministic code still validates and executes**, and the
+ * sidecar refuses anything the Merchant would not allow. A model is a proposer
+ * here and never an authority, which is why a wrong model costs a refusal
+ * rather than a wrong charge.
+ *
+ * The conversation it sees includes every tool result verbatim, so it can read
+ * a price rather than remember one — and it is told, in its system prompt, that
+ * it may never state a number no tool returned.
+ */
+export type ToolTurn =
+	| { kind: 'calls'; calls: ToolCall[] }
+	| { kind: 'text'; text: string };
+
+/** One entry in what the model is shown: a message, or a tool call with its
+ *  result. Kept in order so the model sees the conversation as it happened. */
+export type Turn =
+	| { role: 'consumer' | 'agent'; text: string }
+	| { role: 'tool'; name: string; args: unknown; result: unknown };
+
+export class OpenRouterDriver implements ModelDriver {
+	readonly name: string;
+	constructor(
+		private readonly apiKey: string,
+		private readonly model: string,
+		private readonly systemPrompt: string,
+		private readonly toolSchemas: Record<string, { description: string; parameters: object }>
+	) {
+		this.name = `openrouter:${model}`;
+	}
+
+	/** The `ModelDriver` shape, for callers that only want the next calls. */
+	async plan(messages: Message[], tools: string[]): Promise<ToolCall[]> {
+		const turn = await this.step(messages as Turn[], tools);
+		return turn.kind === 'calls' ? turn.calls : [];
+	}
+
+	/** The full turn: either tool calls to run, or something to say. */
+	async step(turns: Turn[], tools: string[]): Promise<ToolTurn> {
+		const body = {
+			model: this.model,
+			messages: [{ role: 'system', content: this.systemPrompt }, ...toOpenAI(turns)],
+			tools: tools.flatMap((name) => {
+				const schema = this.toolSchemas[name];
+				if (!schema) return [];
+				return [
+					{
+						type: 'function',
+						function: {
+							// OpenAI-style tool names allow no hyphens, and every tool
+							// here has one. Mapped back on the way in.
+							name: name.replace(/-/g, '_'),
+							description: schema.description,
+							parameters: schema.parameters
+						}
+					}
+				];
+			}),
+			tool_choice: 'auto'
+		};
+
+		const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				authorization: `Bearer ${this.apiKey}`,
+				// OpenRouter attributes traffic with these; they are not secrets.
+				'http-referer': 'https://github.com/openstore/demo',
+				'x-title': 'OpenStore buyer chat'
+			},
+			body: JSON.stringify(body)
+		});
+
+		const text = await response.text();
+		if (!response.ok) {
+			throw new Error(`OpenRouter answered ${response.status}: ${text.slice(0, 200)}`);
+		}
+		let payload: any;
+		try {
+			payload = JSON.parse(text);
+		} catch {
+			throw new Error(`OpenRouter returned something that is not JSON: ${text.slice(0, 120)}`);
+		}
+		const choice = payload?.choices?.[0]?.message;
+		const rawCalls = choice?.tool_calls ?? [];
+		if (rawCalls.length) {
+			const calls: ToolCall[] = [];
+			for (const call of rawCalls) {
+				const name = String(call?.function?.name ?? '').replace(/_/g, '-');
+				if (!tools.includes(name)) continue; // a name the shop lacks is dropped, not sent
+				let args: Record<string, unknown> = {};
+				try {
+					args = JSON.parse(call?.function?.arguments || '{}');
+				} catch {
+					// Malformed arguments are dropped rather than guessed at.
+					continue;
+				}
+				calls.push({ name, args });
+			}
+			if (calls.length) return { kind: 'calls', calls };
+		}
+		return { kind: 'text', text: String(choice?.content ?? '').trim() || 'I am not sure what to do next.' };
+	}
+}
+
+function toOpenAI(turns: Turn[]): any[] {
+	const out: any[] = [];
+	for (const turn of turns) {
+		if (turn.role === 'tool') {
+			// The call and its result as an assistant/tool pair, so the model can
+			// read the shop's own numbers instead of recalling them.
+			const id = `call_${out.length}`;
+			out.push({
+				role: 'assistant',
+				tool_calls: [
+					{
+						id,
+						type: 'function',
+						function: { name: turn.name.replace(/-/g, '_'), arguments: JSON.stringify(turn.args) }
+					}
+				]
+			});
+			out.push({ role: 'tool', tool_call_id: id, content: JSON.stringify(turn.result).slice(0, 6000) });
+		} else {
+			out.push({ role: turn.role === 'consumer' ? 'user' : 'assistant', content: turn.text });
+		}
+	}
+	return out;
 }

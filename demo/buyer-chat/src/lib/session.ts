@@ -49,6 +49,7 @@ db.exec(`
 	  name        TEXT NOT NULL,
 	  category    TEXT NOT NULL DEFAULT '',
 	  card_url    TEXT NOT NULL,
+	  jwks_url    TEXT NOT NULL DEFAULT '',
 	  jwks        TEXT NOT NULL,
 	  protocols   TEXT NOT NULL DEFAULT '[]',
 	  added_at    TEXT NOT NULL
@@ -66,6 +67,17 @@ db.exec(`
 	  updated_at  TEXT NOT NULL
 	);
 `);
+
+// `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so
+// a column added later never reaches a database that predates it — and the
+// chat's DB lives in a volume that outlives any rebuild. Add it here or the
+// first contact write after an upgrade fails on a column that is not there.
+const contactColumns = (db.prepare(`PRAGMA table_info(contacts)`).all() as { name: string }[]).map(
+	(column) => column.name
+);
+if (!contactColumns.includes('jwks_url')) {
+	db.exec(`ALTER TABLE contacts ADD COLUMN jwks_url TEXT NOT NULL DEFAULT ''`);
+}
 
 /**
  * Column names this database may never grow.

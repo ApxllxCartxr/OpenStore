@@ -159,3 +159,150 @@ export function boundedSteps(steps: number): void {
 		throw new ToolError('step-limit', `This is taking too many steps (${MAX_STEPS} is the limit).`);
 	}
 }
+
+/**
+ * JSON Schemas for the tool set, for a model that calls tools natively.
+ *
+ * The sidecar's `_SCHEMAS` are a compact human listing (`"qty": "integer"`);
+ * these are what an OpenAI-style `tools` array needs. They are deliberately
+ * strict — a model that cannot express a call is better than one that invents
+ * a plausible-looking argument the shop will refuse.
+ */
+export const TOOL_SCHEMAS: Record<ToolName, { description: string; parameters: object }> = {
+	search: {
+		description: "Search this shop's catalogue by words the shopper used.",
+		parameters: {
+			type: 'object',
+			properties: { query: { type: 'string' } },
+			required: ['query']
+		}
+	},
+	'read-item': {
+		description: 'Read one product group: its options, variants, prices and availability.',
+		parameters: {
+			type: 'object',
+			properties: { group: { type: 'string', description: 'The group id from search.' } },
+			required: ['group']
+		}
+	},
+	'add-line': {
+		description:
+			'Add one resolved variant (a SKU, never a group) to the basket. Add-ons take the ' +
+			'SKU they hang off as `parent`.',
+		parameters: {
+			type: 'object',
+			properties: {
+				sku: { type: 'string' },
+				qty: { type: 'integer', minimum: 1 },
+				parent: { type: 'string' }
+			},
+			required: ['sku', 'qty']
+		}
+	},
+	'remove-line': {
+		description: 'Remove a line from the basket.',
+		parameters: {
+			type: 'object',
+			properties: { sku: { type: 'string' } },
+			required: ['sku']
+		}
+	},
+	'set-destination': {
+		description: 'Set where the order is delivered. Ask the shopper; never invent an address.',
+		parameters: {
+			type: 'object',
+			properties: {
+				destination: {
+					type: 'object',
+					properties: {
+						line1: { type: 'string' },
+						city: { type: 'string' },
+						state: { type: 'string', description: 'Two-letter Indian state code, e.g. KA.' },
+						postal_code: { type: 'string' }
+					},
+					required: ['line1', 'city', 'state', 'postal_code']
+				}
+			},
+			required: ['destination']
+		}
+	},
+	'set-contact': {
+		description: 'Set the email or phone the shop notifies. Ask the shopper; never invent one.',
+		parameters: {
+			type: 'object',
+			properties: {
+				contact: {
+					type: 'object',
+					properties: { email: { type: 'string' }, phone: { type: 'string' } }
+				}
+			},
+			required: ['contact']
+		}
+	},
+	'choose-fulfillment': {
+		description: 'Choose a delivery option. Call with no id first to see what is offered.',
+		parameters: { type: 'object', properties: { id: { type: 'string' } } }
+	},
+	'apply-public-code': {
+		description: 'Apply an advertised discount code. Private codes are entered by the shopper on the approve page, never here.',
+		parameters: {
+			type: 'object',
+			properties: { code: { type: 'string' } },
+			required: ['code']
+		}
+	},
+	'start-checkout': {
+		description:
+			'Ask the shop to quote and open a checkout. Needs lines, a destination, a contact and ' +
+			'a chosen delivery option.',
+		parameters: {
+			type: 'object',
+			properties: {
+				method: { type: 'string', enum: ['upi', 'cash-on-delivery'] }
+			}
+		}
+	},
+	'place-order': {
+		description:
+			'Get the approval link for the started checkout. This does NOT place an order — the ' +
+			'shopper approves the exact amount on the shop’s own page.',
+		parameters: { type: 'object', properties: {} }
+	},
+	'order-status': {
+		description: 'Check the status of an order.',
+		parameters: {
+			type: 'object',
+			properties: { order_id: { type: 'string' } },
+			required: ['order_id']
+		}
+	},
+	'cancel-order': {
+		description: 'Cancel an order before any money moves.',
+		parameters: {
+			type: 'object',
+			properties: { order_id: { type: 'string' }, reason: { type: 'string' } },
+			required: ['order_id']
+		}
+	},
+	'request-refund': {
+		description: 'Ask the shop to refund an order.',
+		parameters: {
+			type: 'object',
+			properties: { order_id: { type: 'string' }, reason: { type: 'string' } },
+			required: ['order_id']
+		}
+	}
+};
+
+/** What the agent may and may not do, stated to the model in its own terms. */
+export const SYSTEM_PROMPT = `You are a shopping agent talking to one shop through its tools.
+
+Hard rules, and they are not style preferences:
+- You NEVER state a price, total, tax, discount or stock count that did not come back from a tool. If you do not have it, call a tool or say you do not know.
+- You NEVER compute or estimate a total. The shop's own quote is the only total.
+- You CANNOT pay. \`place-order\` returns a link the shopper approves on the shop's own page; you hold no payment credential. Say so plainly rather than implying you can buy.
+- You NEVER invent a delivery address, an email or a phone number. Ask for them.
+- A SKU is what can be bought; a group cannot. Resolve options first with read-item.
+- When a tool refuses, tell the shopper the shop's reason in plain words. Do not retry blindly.
+
+Be brief. One or two sentences per turn.`;
