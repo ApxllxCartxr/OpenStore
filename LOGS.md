@@ -24,6 +24,16 @@ Landed and verified live against the running stack (`make up` + `make demo`, bot
 
 140 buyer-chat tests green (3 new), 582 Python tests green, 0 type errors both sides. Next: the remaining 8 stores (2 of 10 exist), thinking blocks + model switcher UI, and an explicitly-advisory consumer spend ceiling.
 
+## 2026-09-21 · Ten stores, live and seeded
+
+Phase 2 ask #2. Eight more shops (CircuitYard/electronics, IronList/hardware, PantryLine/grocery, Kettle & Grain/kitchenware, DeskField/stationery, Root & Leaf/plants, Playspool/toys, Furrow/pets), each its own state (GST-path diversity, matching the SpoiledDuckie/Dog-Eared pattern), own DB roles, own sidecar+store pair, own Caddy vhost — additive only, no sidecar code changes, exactly as the earlier survey predicted. Four deliberate cross-shop overlaps (AA batteries, filter coffee, a notebook shared with Dog-Eared's own SKU unchanged, a tennis-ball 3-pack) for the multi-merchant reasoning the operator asked for. SVG placeholders throughout, generator generalized to iterate every registered profile.
+
+Found and fixed along the way: `make seed` only ever seeded the first shop — Dog-Eared had no seed profile wired to `make up` at all since it was added. Genuinely never seeded by the automated path before this. `seed` now loops every store service.
+
+Verified on a fresh volume: `make down && make up && make demo` clean, 22 containers healthy, all ten storefronts + cards return 200, 582 Python tests green, both live suites green.
+
+**A real gap found while trying to verify the overlap SKUs live**: `shopsFor()` (loop.ts) — the function that fans an unaddressed call out across every known shop, or resolves it to the one shop a SKU can only mean — is fully implemented and unit-tested, but is never called anywhere in `+page.server.ts`. The running app only ever operates on `currentShop()`, the single most-recently-added contact. "Serve all 10 simultaneously" is not yet true of the actual chat flow, whatever the data model already supports. Next.
+
 ---
 
 # Morning report
