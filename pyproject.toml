@@ -32,6 +32,8 @@ dependencies = [
 # pytest invocations.
 openstore-verify = "openstore.sidecar.verify.cli:main"
 openstore-conform = "openstore.sidecar.conform.cli:main"
+# The backup drill. A keyfile nobody has restored is a hope, not a backup.
+openstore-keys = "openstore.sidecar.evidence.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]

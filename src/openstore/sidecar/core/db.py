@@ -16,9 +16,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
-from sqlalchemy import CursorResult
+from sqlalchemy import CursorResult, inspect
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -92,21 +93,93 @@ def register_tables() -> None:
         basket,  # noqa: F401
         checkout_store,  # noqa: F401
     )
-    from openstore.sidecar.authority import tokens  # noqa: F401
+    from openstore.sidecar.authority import (
+        passkey,  # noqa: F401
+        tokens,  # noqa: F401
+    )
     from openstore.sidecar.console import refunds  # noqa: F401
     from openstore.sidecar.evidence import store  # noqa: F401
     from openstore.sidecar.ledger import entries  # noqa: F401
 
 
 async def create_all(engine: AsyncEngine) -> None:
-    """Create the sidecar's tables.
+    """Create the sidecar's tables directly from the `MetaData`.
 
-    Used by tests and first boot. A real deployment migrates with alembic — a
-    schema that appears by import is a schema nobody reviewed.
+    For tests and for the demo. **A real deployment migrates with alembic** — a
+    schema that appears by import is a schema nobody reviewed, and one that
+    silently gains a column on the day someone edits a module is one nobody can
+    roll back. `ensure_schema` is what decides which of the two happens.
     """
     register_tables()
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
+
+
+async def schema_revision(engine: AsyncEngine) -> str | None:
+    """The alembic revision this database is at, or `None` if it has never been
+    migrated."""
+    async with engine.connect() as conn:
+
+        def read(sync_conn: Any) -> str | None:
+            inspector = inspect(sync_conn)
+            if "alembic_version" not in inspector.get_table_names():
+                return None
+            row = sync_conn.exec_driver_sql("SELECT version_num FROM alembic_version").first()
+            return str(row[0]) if row else None
+
+        return await conn.run_sync(read)
+
+
+def head_revision() -> str | None:
+    """The revision the checked-in migrations end at."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[4]
+    ini = root / "alembic.ini"
+    if not ini.exists():  # pragma: no cover - an installed wheel carries no migrations
+        return None
+    script = ScriptDirectory.from_config(Config(str(ini)))
+    return script.get_current_head()
+
+
+class SchemaNotMigrated(RuntimeError):
+    """The database is not at the revision this code expects."""
+
+
+async def ensure_schema(engine: AsyncEngine, *, demo: bool) -> str:
+    """Make the schema usable, or refuse to start.
+
+    **Demo boots itself; a real deploy does not.** `make up` on a laptop should
+    work with no second command, and a shop taking money should never have its
+    schema changed as a side effect of a process starting — that is how a
+    rollback leaves a table the old code cannot read, at the worst possible
+    moment.
+
+    Returns what it did, for the boot log.
+    """
+    at = await schema_revision(engine)
+    head = head_revision()
+
+    if demo:
+        if at is None:
+            await create_all(engine)
+            return "created from metadata (demo mode)"
+        return f"already at {at}"
+
+    if at is None:
+        raise SchemaNotMigrated(
+            "This database has never been migrated, so the sidecar will not start. "
+            "Run `alembic upgrade head` against SIDECAR_DATABASE_URL. (In demo mode "
+            "the schema is created on boot instead; this is not demo mode.)"
+        )
+    if head is not None and at != head:
+        raise SchemaNotMigrated(
+            f"This database is at revision {at}, and this code expects {head}. "
+            f"Run `alembic upgrade head` before starting, or deploy the version "
+            f"that matches."
+        )
+    return f"at {at}"
 
 
 @asynccontextmanager

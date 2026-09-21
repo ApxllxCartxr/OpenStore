@@ -53,7 +53,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from openstore.sidecar.checkout import configure as configure_checkout
     from openstore.sidecar.console.approve import ApproveContext
     from openstore.sidecar.console.approve import configure as configure_approve
-    from openstore.sidecar.core.db import create_all, make_engine, make_sessionmaker
+    from openstore.sidecar.core.db import ensure_schema, make_engine, make_sessionmaker
     from openstore.sidecar.evidence.store import get_receipt_store
     from openstore.sidecar.gate.policy import Policy
     from openstore.sidecar.protocols.agent_routes import AgentSurface
@@ -104,7 +104,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     sessionmaker = None
     if settings.sidecar_database_url:
         engine = make_engine(settings.sidecar_database_url)
-        await create_all(engine)
+        # Demo creates its schema; a deploy that takes money migrates instead,
+        # and refuses to start rather than changing a schema underneath itself.
+        schema = await ensure_schema(engine, demo=settings.openstore_demo_mode)
+        logging.getLogger("openstore").warning("schema: %s", schema)
         sessionmaker = make_sessionmaker(engine)
     else:
         logging.getLogger("openstore").warning(
@@ -242,6 +245,39 @@ def _passkey_rp_for(
     )
 
 
+def _export_new_keys(settings: Settings, keyring: Keyring, log: logging.Logger) -> None:
+    """Write the Merchant's backup copy, the once it is worth writing.
+
+    `SIDECAR_KEY_EXPORT_PATH` was a declared setting that reached nothing, which
+    is the same bug as the allowlist and the OAuth credentials before it: a
+    deploy could set it, believe it had a backup, and have none.
+
+    Written only on enrollment, because that is the only moment a key exists
+    that has never been backed up — and an export rewritten on every boot is one
+    that quietly follows a rotation the operator has not yet copied anywhere.
+    **A backup nobody has restored is a hope**, so the log says how to check it.
+    """
+    if not settings.sidecar_key_export_path:
+        log.warning(
+            "NO KEY EXPORT: a new signing key was enrolled and SIDECAR_KEY_EXPORT_PATH "
+            "is unset, so this shop's identity exists in exactly one place. Losing it "
+            "invalidates every receipt this shop ever issues."
+        )
+        return
+
+    from openstore.sidecar.evidence.keys import save
+
+    destination = Path(settings.sidecar_key_export_path)
+    save(keyring, destination, passphrase=settings.sidecar_signing_key_passphrase)
+    log.warning(
+        "key export written to %s. Move it somewhere this host cannot reach, then "
+        "prove it: `openstore-keys check %s --against %s`",
+        destination,
+        destination,
+        settings.sidecar_signing_key_path,
+    )
+
+
 def _configure_webhooks(settings: Settings, provider: Any) -> None:
     """Point the callback route at this deploy's secret, or at nothing.
 
@@ -307,6 +343,8 @@ def _load_keyring(settings: Settings, merchant_domain: str) -> Keyring | None:
         merchant_domain=merchant_domain,
         passphrase=settings.sidecar_signing_key_passphrase,
     )
+    if enrolled:
+        _export_new_keys(settings, keyring, log)
     log.warning(
         "signing keys %s: merchant=%s kid=%s path=%s",
         "ENROLLED (first boot for this keyfile)" if enrolled else "loaded",

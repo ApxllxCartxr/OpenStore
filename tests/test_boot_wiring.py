@@ -191,3 +191,50 @@ async def test_boot_offers_no_ceremony_when_the_merchant_has_not_enabled_it(
     async with lifespan(app):
         assert flow.get_context().passkey_rp is None
         assert approve_context().passkey_enabled is False
+
+
+# ── The key export, which was a setting that reached nothing ─────────────────
+
+
+def test_a_new_key_is_exported_where_the_deploy_asked(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """`SIDECAR_KEY_EXPORT_PATH` was declared, documented and wired to nothing —
+    so a deploy could set it, believe it had a backup, and have none."""
+    import logging
+
+    from openstore.sidecar.app import _export_new_keys
+    from openstore.sidecar.core.settings import Settings
+    from openstore.sidecar.evidence.keys import Keyring
+
+    keyring = Keyring(merchant_domain="shop.test")
+    keyring.enroll("k1")
+    export = tmp_path / "backup" / "keys.json"
+
+    settings = Settings(
+        sidecar_signing_key_path=str(tmp_path / "live.json"),
+        sidecar_key_export_path=str(export),
+    )
+    _export_new_keys(settings, keyring, logging.getLogger("test"))
+
+    assert export.exists(), "the export path was set and nothing was written to it"
+    from openstore.sidecar.evidence.cli import main
+
+    assert main(["check", str(export)]) == 0
+
+
+def test_no_export_path_is_a_loud_warning_not_a_silent_skip(
+    tmp_path: Path,
+    caplog,  # type: ignore[no-untyped-def]
+) -> None:
+    import logging
+
+    from openstore.sidecar.app import _export_new_keys
+    from openstore.sidecar.core.settings import Settings
+    from openstore.sidecar.evidence.keys import Keyring
+
+    keyring = Keyring(merchant_domain="shop.test")
+    keyring.enroll("k1")
+
+    with caplog.at_level(logging.WARNING):
+        _export_new_keys(Settings(), keyring, logging.getLogger("openstore"))
+
+    assert any("NO KEY EXPORT" in record.message for record in caplog.records)

@@ -2,7 +2,7 @@
 # before it runs is a bug in the install gate, not a documentation problem.
 
 .DEFAULT_GOAL := help
-.PHONY: help up down seed demo test check guardrails logs fmt
+.PHONY: help up down seed demo test check guardrails logs fmt woo migrate
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[1m%-12s\033[0m %s\n", $$1, $$2}'
@@ -72,6 +72,12 @@ woo: ## Check the WooCommerce plugin against the sidecar's own vectors
 		bash -c 'for f in $$(find /src/integrations/woocommerce -name "*.php"); do php -l "$$f" >/dev/null || exit 1; done'
 	docker run --rm -v "$(PWD):/src:ro" php:8.2-cli php /src/integrations/woocommerce/tests/run-vectors.php
 	docker run --rm -v "$(PWD):/src:ro" php:8.2-cli php /src/integrations/woocommerce/tests/run-signing.php
+
+migrate: ## Bring SIDECAR_DATABASE_URL up to the current schema
+	@# A real deploy runs this before starting: the sidecar refuses to boot
+	@# against a database it has not migrated, rather than changing a schema
+	@# underneath itself at the worst possible moment.
+	uv run alembic upgrade head
 
 fmt: ## Format the Python
 	uv run ruff check --fix src scripts tests

@@ -11,7 +11,8 @@ What is refused, over `src/openstore/sidecar/` by default:
 - `float(...)`
 - the `round()` builtin — it is banker's rounding, and §16.11 requires
   ROUND_HALF_UP; the two disagree on exactly the .5 cases money hits
-- true division `/` — `int / int` silently produces a float
+- true division `/` — `int / int` silently produces a float. A string literal on
+  either side is a `pathlib` join and not arithmetic, and is not flagged.
 
 `/` is genuinely needed for the tax extraction (§16.11 step 5), which is exact
 decimal arithmetic. That line carries `# money-lint: decimal` — loud, greppable,
@@ -79,8 +80,27 @@ class MoneyVisitor(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
+    @staticmethod
+    def _is_path_join(node: ast.BinOp) -> bool:
+        """`Path("a") / "b"` is a path, not arithmetic.
+
+        Added when the schema gate introduced `root / "alembic.ini"`. The rule
+        was directionally right and imprecise: it exists to catch `int / int`
+        silently becoming a float, and `pathlib`'s overload cannot produce a
+        number at all. Narrow on purpose — a **string literal** on either side,
+        which arithmetic never has.
+        """
+        for side in (node.left, node.right):
+            if isinstance(side, ast.Constant) and isinstance(side.value, str):
+                return True
+        return False
+
     def visit_BinOp(self, node: ast.BinOp) -> None:
-        if isinstance(node.op, ast.Div) and not self._allowed(node.lineno):
+        if (
+            isinstance(node.op, ast.Div)
+            and not self._is_path_join(node)
+            and not self._allowed(node.lineno)
+        ):
             self.problems.append(
                 (
                     node.lineno,
