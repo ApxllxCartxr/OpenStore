@@ -16,8 +16,8 @@ decision, every blocked item, and every cut.
 | **h0** contracts frozen | green | 17 closed sets, 3 `cart_hash` vectors, door + Quote schemas, `.env.example` |
 | **A1** skeleton + harness | green | boots behind the proxy split; 18 planted violations caught |
 | **A2** trait client + fake | green | conformance suite over real HTTP; `variant-required` at 5 doors |
-| **A3** gate + ledger + provider | green | 12 checks in order, both invariants, COD writes nothing at order time — and reached over HTTP since 09-21: `make demo` walks search → signed receipt through it |
-| **A4** authority + admission | **amber** | both admission routes work live since 09-21; still no `passkey.py`, so the passkey ceremony is enum-level only |
+| **A3** gate + ledger + provider | green | 12 checks in order, both invariants, COD writes nothing at order time — and reached over HTTP since 09-21: `make demo` walks search → signed receipt through it, now via the Provider's own callback rather than around it |
+| **A4** authority + admission | green | both admission routes work live since 09-21; `passkey.py` landed 09-21 and a whole passkey purchase runs against the stack — enrollment, the attestation fallback, `cart`/`payer-device` in a receipt the verifier calls VALID |
 | **A4c** agent signing kit | green | one fixture asserted by both suites; the chat publishes its Agent Profile and self-registers (09-21) |
 | **A5** evidence + verifier | green | exit 0/1/2; the sidecar holds a persisted key and seals a receipt at the end of every real purchase (09-21) |
 | **A6** four protocols | green | all four mounted and exercised over HTTP (09-21): one core, four envelopes, one total across all of them, ACP's completion refused with its reason |
@@ -29,7 +29,7 @@ decision, every blocked item, and every cut.
 | **B4** notifications | green | one per (order, kind); erased contact skips with a reason |
 | **C1–C5** buyer chat | green | air-gap is a build break; the agent computes nothing and now *does* something — composer, MCP client, consent prompts, and a real model over OpenRouter (09-21) |
 
-**470 Python tests, 36 merchant-site, 75 chat, 7 live purchase.** `ruff`, `mypy --strict`,
+**538 Python tests, 36 merchant-site, 75 chat, 8 live purchase.** `ruff`, `mypy --strict`,
 `svelte-check` on both roots, and four guardrails clean.
 
 > **Green here once meant only that the phase's tests passed.** Two 09-21
@@ -61,15 +61,24 @@ None. No gate required changing a frozen §6 contract.
 Closed 09-21: the money path has an HTTP entry point, all four protocols are
 mounted over one core, and the chat can talk to a shop with a real model.
 
-Still open, each absent rather than half-built:
+**All four remaining gaps closed 09-21** — see the entry below for what each one
+turned out to need. Every one is exercised against the running stack, not only
+by a suite.
 
-- **`request-refund` refuses as unwired.** A refund moves money and belongs to
-  the Merchant; an agent-initiated request needs a queue the console shows.
-- **No `passkey.py`.** `upi-pin` and `confirmed-intent` are live; the passkey
-  ceremony is enum-level only.
-- **No webhook route**, so the Provider's own callback path is unexercised.
-- **Pending checkouts live in memory and never expire.** The 24h window is
-  stated and not swept.
+Still open and named rather than forgotten:
+
+- **`prompts` is returned to the page and not written into the Transcript.** The
+  ceremony *name* is (`enrollment` vs `assertion`), which is what distinguishes
+  one prompt from two, so the count is derivable rather than recorded. Adding it
+  would change Transcript bytes, which are frozen.
+- **The refund queue is in memory**, like the Pending Carts beside it. The
+  Merchant's own book is the durable record of a refund; a restart loses open
+  asks, and the agent can ask again.
+- **Razorpay's adapter still raises `NotImplementedError`** for its four network
+  calls. `read_webhook` parses its real envelope, but nothing has been run
+  against Razorpay.
+- **F12's credit-note half** and the Registrar question in ADR-0025 still need
+  counsel.
 
 ## Cuts
 
@@ -90,6 +99,149 @@ the full health panel), **cut 4a** (admin trimmed to the operating path), **cut
    twice here and both times the rule was directionally right and imprecise.
 4. **F12's credit-note half is still open** and needs counsel, as does the
    Registrar question in ADR-0025.
+5. **The passkey challenge is the binding.** It is `sha256` over the cart hash,
+   amount, currency, domain and expiry — not a nonce with a remembered
+   association. If a change makes a ceremony verify against a basket it should
+   not, the change is wrong.
+6. **Three writers move an order's status**: the tap, the sweeper and the
+   Merchant's own actions. They serialize on door 8's `order_id:attempt` key and
+   nowhere else, so the Merchant is the arbiter — the sweeper re-reads and
+   corrects itself rather than holding a lock.
+
+---
+
+## 2026-09-21 · The four open gaps, closed — and one bug only the running shop could show
+
+The morning report listed four things absent "rather than half-built". All four
+are now built, each with the property that made it hard written into the code
+rather than into a comment about the code.
+
+### The expiry sweeper — `expires_at` now means something
+
+`gate/lifecycle.py` had known what to do with an order past its deadline since
+A4 and **nothing ever called it**. Pending checkouts lived in memory, the 24h
+window was a sentence in the spec, and an abandoned tap held Merchant stock until
+the process restarted — an availability hole any self-registered stranger could
+open at will, which is precisely what the lifecycle module's own docstring warns
+about.
+
+`sidecar/sweeper.py` runs it every 60s (§16.7). Three deadlines, three different
+acts: `pending` at 24h expires and returns nothing (nothing was held),
+`confirmed` prepaid releases stock through door 5 and closes the Ledger hold
+before the status moves, and a late COD parcel alerts in `/agentic` without being
+cancelled.
+
+**A test caught a real defect before the commit.** The first version acted on its
+in-memory status, and a stale copy applies the *wrong deadline*: a `confirmed`
+order swept as `pending` expires **without releasing the stock it is holding**,
+which is the exact failure the loop exists to prevent. The pass now confirms
+Merchant truth before acting — one extra door-8 read, and only for an order
+already past a deadline. `Pending` grew `created_at`, `confirmed_at` and
+`link_expires_at`, because one `expiry_utc` string cannot carry three deadlines
+measured from two moments, and the hold now takes the Provider's own link
+lifetime as its ceiling rather than assuming the default window.
+
+### The Provider's callback — mounted, and the demo now uses it
+
+`provider/webhooks.py` had held the HMAC check, the `event_id` dedupe and the
+reconcile since A3 with **nothing mounted in front of them**. The only way money
+ever finished moving was the demo's own Approve button calling `complete()`
+directly, which is the one shape a real Provider never uses.
+
+`POST /provider/webhook` is public and verified by HMAC on the raw bytes. The
+load-bearing sentence is that **the event is a trigger, never an instruction**:
+the body yields an event id and a link id and nothing else, and the handler then
+asks the Provider what it holds. A signed body claiming `paid` on an unsettled
+order *fails* that order rather than capturing — asserted directly, because that
+is the whole posture.
+
+The demo's Approve button now builds the body and HMAC the fake rail would POST
+and hands them to the same `deliver` the public route calls, so every `make demo`
+exercises signature verification, the dedupe and the state re-read. `WebhookEvent`
++ `read_webhook` on the Provider trait is abstract rather than defaulted: a
+guessed field name would silently yield an empty link id, which the route would
+read as "no checkout is waiting" rather than as the adapter bug it is.
+
+`PROVIDER_WEBHOOK_SECRET` is separate from `RAZORPAY_WEBHOOK_SECRET` because the
+latter is issued by Razorpay's own dashboard. **No secret means every webhook is
+refused**, demo mode included — there is no unauthenticated callback path.
+
+### `request-refund` — an ask, and a queue to put it in
+
+The tool had been in the closed set since hour 0 and refused as unwired, which
+was honest while there was nowhere for a request to go. The reason it could not
+simply be implemented is the shape of the product: a refund moves money and
+belongs to the Merchant, and **an agent that could refund could move money out of
+a shop it holds no credential for**.
+
+So the tool records an ask, and `/agentic` → Refunds shows it. A request carries
+no amount (the Merchant decides what to give back), there is one *open* request
+per order (a queue an agent can flood is the Merchant's attention spent by
+somebody else), and only an order with money in it can be asked about — before
+`paid` the instrument is a cancellation.
+
+`/agentic/refund` now closes the request that prompted it, and a new
+`/agentic/refund-decline` closes one without paying it and **writes no Ledger
+entry** — refusing to refund moves no money, and a `REVERSAL` for a refund that
+never happened would be a false entry in an append-only book. Without that half,
+an unhonoured request stays open forever and the board stops being work to do.
+
+### The passkey ceremony — a challenge that *is* the binding
+
+`AuthorityKind.PASSKEY` had been in the closed set since hour 0 with no module
+behind it, so the strongest claim the system can make was enum-level only.
+
+The challenge is **not a nonce**. It is `sha256` over the `cart_hash`, the exact
+amount, the currency, the Merchant domain and the expiry, so a signature over a
+swapped basket is a signature over a different challenge and fails. The binding
+is a property of the cryptography rather than of a server-side association
+nobody re-checks — which is what the ordinary build of this would have been.
+
+Under `fmt: none` nothing in a registration response proves agreement to a
+basket, so the server asks for an immediate assertion over the **same** challenge
+and records `ceremony = assertion`. Two prompts, named, and the count comes from
+the server's own fallback signal rather than from what the client claims. User
+verification is required and not preferred: "somebody touched a key" is not the
+human permission a spend rests on.
+
+A verified ceremony is consumed by the tap it was taken over — two taps of one
+order are two agreements — and changes the *kind*, never the money: `passkey`
+prepaid, `confirmed-intent`/`passkey` on cash. On the cash path the credential id
+becomes the `consumer_id` handle source, which is the one path with no payer
+handle at all, and `Pending` records which derivation was used so a verifier is
+never left guessing.
+
+Verification is `py_webauthn`, already a declared dependency — no hand-rolled
+CBOR or COSE. The tests drive a software authenticator that really signs.
+
+### Exercised live, and one bug that found
+
+`## OPEN — A3`'s lesson held again. With all four green in the suite, driving the
+running shop produced a **500 on `add-line`**: `Basket.add` accumulated
+quantities by mutating a frozen `Line`, so a second `add-line` for a SKU already
+in the basket raised `frozen_instance`. `Line` is frozen for a good reason — it
+is a value in the `cart_hash` preimage — so the fix replaces rather than mutates.
+Every suite was green over that.
+
+Against the running stack afterwards: a whole passkey purchase from search to a
+sealed receipt (`passkey`, `cart`/`payer-device`, `ceremony: assertion`, verifier
+`VALID`), the callback route refusing an unsigned POST `signature-invalid`/401
+through the proxy, the refunds board showing a real agent's ask, and the sweeper
+running clean. **538 Python tests**, `ruff`, `mypy --strict`, and all four
+guardrails green.
+
+## OPEN — refund queue
+
+`RefundRequestState` {`requested`, `approved`, `declined`} was added to
+`core/codes.py` and SPECS/PLAN.md §6.4 in one commit under §0's standing rule 1.
+It tracks the *ask* and never the money — the movement is `LedgerKind.REFUND` and
+the order's own `refunded` status, and conflating the two would let a request look
+like money the shop has already sent.
+
+`PROVIDER_WEBHOOK_SECRET` was added as a second named secret rather than reusing
+`RAZORPAY_WEBHOOK_SECRET` for every adapter (ladder step 4, conservative): a
+deploy that pasted Razorpay's dashboard secret into a generic variable would
+verify callbacks with a secret the Provider never agreed to.
 
 ---
 
