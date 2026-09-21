@@ -26,6 +26,7 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -243,4 +244,152 @@ def approve(request: Request) -> HTMLResponse | JSONResponse:
             enabled_methods=_context.enabled_methods,
             demo=_context.demo,
         )
+    )
+
+
+# ── The tap ──────────────────────────────────────────────────────────────────
+#
+# The page above has rendered a `<form method="POST">` since it was written and
+# there was nothing behind it, so the one button in the product 405'd. This is
+# it: the only route in the sidecar that may permit a spend.
+
+
+async def _form(request: Request) -> dict[str, str]:
+    """Read an `application/x-www-form-urlencoded` body.
+
+    Starlette's `request.form()` asserts `python-multipart` is installed even
+    for urlencoded bodies. The approve form posts three short fields and no
+    file, so this parses them directly rather than adding a dependency for a
+    capability the page does not use.
+    """
+    raw = (await request.body()).decode("utf-8", "replace")
+    return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+
+
+def _page(title: str, body: str, *, status: int = 200) -> HTMLResponse:
+    return HTMLResponse(
+        status_code=status,
+        content=(
+            f"<!doctype html><html lang=en><meta charset=utf-8>"
+            f"<meta name=viewport content='width=device-width,initial-scale=1'>"
+            f"<title>{_e(title)} — {_e(_context.merchant_name)}</title>"
+            f"<style>{CONSOLE_CSS}</style><main class=wrap>{body}</main></html>"
+        ),
+    )
+
+
+@router.post("/approve", response_class=HTMLResponse, response_model=None)
+async def approve_tap(request: Request) -> HTMLResponse:
+    """Spend the tap token, run the Gate for real, and move to payment.
+
+    A refusal renders the Gate's own reason. It is the Consumer's money and
+    their time: "something went wrong" would be the one thing this page must
+    never say.
+    """
+    from openstore.sidecar import checkout as flow
+
+    form = await _form(request)
+    token = form.get("t", "")
+    chosen = form.get("method", "")
+    ctx = flow.get_context()
+
+    method = None
+    if chosen:
+        try:
+            method = PaymentMethod(chosen)
+        except ValueError:
+            return _page(
+                "Not a payment method",
+                f"<h1>That is not a payment method</h1><p class=note>{_e(chosen)} is not one this "
+                f"shop accepts.</p>",
+                status=400,
+            )
+
+    try:
+        result = await flow.tap(ctx, token, method=method)
+    except flow.CheckoutRefused as refusal:
+        return _page(
+            "Not approved",
+            f"<h1>This approval could not be used</h1>"
+            f"<p class=note><code>{_e(refusal.code.value)}</code> — {_e(refusal.detail)}</p>"
+            f"<p class=note muted>No money has moved and nothing is held.</p>",
+            status=403,
+        )
+
+    if result.refused:
+        assert result.reason_code is not None
+        return _page(
+            "Refused",
+            f"<h1>The shop refused this order</h1>"
+            f"<p class=note><code>{_e(result.reason_code.value)}</code> — {_e(result.detail)}</p>"
+            f"<p class=note muted>No money has moved. The Gate checks the Merchant's own "
+            f"prices and stock again at the moment you approve, which is why this can "
+            f"differ from what the agent last saw.</p>",
+            status=409,
+        )
+
+    if result.receipt_id:
+        # Cash on delivery: authorized, nothing charged, receipt already sealed.
+        return _page(
+            "Order confirmed",
+            f"<h1>Order confirmed</h1>"
+            f"<p class=note>Paying cash on delivery. Nothing has been charged.</p>"
+            f"<p><a href='/receipt/{_e(result.receipt_id)}'>Your receipt</a></p>",
+        )
+
+    return HTMLResponse(
+        status_code=303,
+        content="",
+        headers={"location": result.pay_url},
+    )
+
+
+@router.get("/fake-pay/{link_id}", response_class=HTMLResponse, response_model=None)
+def fake_pay(link_id: str) -> HTMLResponse:
+    """The demo Provider's payment page.
+
+    `FakeProvider.make_link` has always returned this URL and the route did not
+    exist, so the money step dead-ended at a 404. It is deliberately ugly and
+    deliberately says what it is: nothing here touches a rail.
+    """
+    from openstore.sidecar import checkout as flow
+
+    ctx = flow.get_context()
+    order_id = ctx.by_link.get(link_id, "")
+    checkout = ctx.pending.get(order_id)
+    if checkout is None:
+        return _page("Unknown payment", "<h1>That payment link is not valid</h1>", status=404)
+
+    return _page(
+        "Demo payment",
+        f"<h1>Demo payment</h1>"
+        f"<p class=note>This is a <strong>fake rail</strong>. No money moves, and the receipt "
+        f"you get will say so.</p>"
+        f"<table><tr><th>Order</th><td><code>{_e(checkout.order_id)}</code></td></tr>"
+        f"<tr><th>Amount</th><td class=num>{_e(format_rupees(checkout.total_minor))}</td></tr></table>"
+        f"<form method=POST action='/agentic/fake-pay/{_e(link_id)}'>"
+        f"<input type=hidden name=outcome value=paid>"
+        f"<button class=tap type=submit>Pay {_e(format_rupees(checkout.total_minor))}</button>"
+        f"</form>",
+    )
+
+
+@router.post("/fake-pay/{link_id}", response_class=HTMLResponse, response_model=None)
+async def fake_pay_submit(link_id: str) -> HTMLResponse:
+    """The money arrives. Settle it, commit the stock, seal the receipt."""
+    from openstore.sidecar import checkout as flow
+
+    ctx = flow.get_context()
+    ctx.provider.approve(link_id)
+    try:
+        checkout = await flow.complete(ctx, link_id, payer_handle="demo@upi")
+    except flow.CheckoutRefused as refusal:
+        return _page(
+            "Not settled",
+            f"<h1>That payment did not settle</h1>"
+            f"<p class=note><code>{_e(refusal.code.value)}</code> — {_e(refusal.detail)}</p>",
+            status=409,
+        )
+    return HTMLResponse(
+        status_code=303, content="", headers={"location": f"/receipt/{checkout.receipt_id}"}
     )
