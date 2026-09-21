@@ -91,6 +91,7 @@ BASKET_TOOLS: frozenset[ToolName] = frozenset(
     {
         ToolName.ADD_LINE,
         ToolName.REMOVE_LINE,
+        ToolName.CLEAR_BASKET,
         ToolName.SET_DESTINATION,
         ToolName.SET_CONTACT,
         ToolName.CHOOSE_FULFILLMENT,
@@ -256,13 +257,25 @@ def tools_list(request: Request) -> JSONResponse:
     return JSONResponse({"tools": mcp.tools_list()})
 
 
+def _jsonrpc_error(id_: Any, code: int, message: str) -> JSONResponse:
+    """A protocol-level JSON-RPC error — malformed request, unknown method,
+    unknown tool. Distinct from a *tool* refusing, which is a successful
+    JSON-RPC response with `result.isError: true` (`mcp.call_error`) — the
+    transport worked, the tool just said no."""
+    return JSONResponse({"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}})
+
+
+def _jsonrpc_result(id_: Any, result: dict[str, Any]) -> JSONResponse:
+    return JSONResponse({"jsonrpc": "2.0", "id": id_, "result": result})
+
+
 @router.post("/agent/mcp")
 async def mcp_call(request: Request) -> JSONResponse:
-    """One entry point for the MCP tool set.
+    """JSON-RPC 2.0 (ADR-0026): `initialize`, `tools/list`, `tools/call`.
 
-    Scope-checked before the body runs. `place-order` is handled explicitly and
-    returns an approve URL — the one thing this surface must never do is place
-    an order.
+    Bearer auth and rate limits are checked before the body is even parsed as
+    JSON-RPC, because a request with no valid token isn't a request this
+    surface will dispatch regardless of what method it names.
     """
     agent = _bearer(request)
     if agent is None:
@@ -276,30 +289,63 @@ async def mcp_call(request: Request) -> JSONResponse:
     if refused:
         return refused
 
-    body = await request.json()
-    raw_name = str(body.get("tool", ""))
+    body_raw: Any = await request.json()
+    if not isinstance(body_raw, dict) or body_raw.get("jsonrpc") != "2.0":
+        bad_id = body_raw.get("id") if isinstance(body_raw, dict) else None
+        return _jsonrpc_error(bad_id, -32600, "Invalid Request: not a JSON-RPC 2.0 envelope")
+
+    body: dict[str, Any] = body_raw
+    id_ = body.get("id")
+    method = body.get("method")
+    raw_params = body.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+
+    if method == "initialize":
+        return _jsonrpc_result(
+            id_,
+            {
+                "protocolVersion": mcp.PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": _surface.merchant_name, "version": "1"},
+            },
+        )
+    if method == "notifications/initialized":
+        # A notification carries no id and gets no response body (MCP §2.5).
+        return JSONResponse(status_code=202, content=None)
+    if method == "tools/list":
+        return _jsonrpc_result(id_, {"tools": mcp.tools_list()})
+    if method != "tools/call":
+        return _jsonrpc_error(id_, -32601, f"Method not found: {method!r}")
+
+    raw_name = str(params.get("name", ""))
     try:
         tool = ToolName(raw_name)
     except ValueError:
-        return _refuse(ReasonCode.NOT_FOUND, f"{raw_name!r} is not a tool this shop has.")
+        return _jsonrpc_error(
+            id_, -32602, f"Invalid params: {raw_name!r} is not a tool this shop has."
+        )
 
     scope_refusal = mcp.check_scope(agent, tool)
     if scope_refusal:
-        return _refuse(
-            ReasonCode.AUTHORITY_MISSING,
-            f"{tool.value} needs the {TOOL_SCOPES[tool].value} scope.",
+        return _jsonrpc_result(
+            id_,
+            mcp.call_error(
+                ReasonCode.AUTHORITY_MISSING,
+                f"{tool.value} needs the {TOOL_SCOPES[tool].value} scope.",
+            ),
         )
 
     _surface.admission.note_call(agent.agent_id)
-    payload = body.get("input") if isinstance(body.get("input"), dict) else body
+    raw_arguments = params.get("arguments")
+    arguments: dict[str, Any] = raw_arguments if isinstance(raw_arguments, dict) else {}
     try:
-        result = await _run_tool(tool, agent.agent_id, payload)
+        result = await _run_tool(tool, agent.agent_id, arguments)
     except ToolRefused as refusal:
-        return _refuse(refusal.code, refusal.detail)
+        return _jsonrpc_result(id_, mcp.call_error(refusal.code, refusal.detail))
     except TraitError as exc:
         # The Merchant refused. Its reason is better than any we could invent.
-        return _refuse(exc.code, exc.detail)
-    return JSONResponse({"protocol": "mcp", "result": result})
+        return _jsonrpc_result(id_, mcp.call_error(exc.code, exc.detail))
+    return _jsonrpc_result(id_, mcp.call_result(result))
 
 
 async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -391,6 +437,8 @@ async def _dispatch(
         if not cart().remove(str(payload.get("sku", ""))):
             raise ToolRefused(ReasonCode.NOT_FOUND, "That SKU is not in the basket.")
         return await tools.summary(merchant(), cart())
+    if tool is ToolName.CLEAR_BASKET:
+        return tools.clear_basket(cart())
     if tool is ToolName.SET_DESTINATION:
         tools.set_destination(cart(), dict(payload.get("destination") or payload))
         return await tools.summary(merchant(), cart())
@@ -400,7 +448,18 @@ async def _dispatch(
     if tool is ToolName.CHOOSE_FULFILLMENT:
         option = str(payload.get("id", ""))
         if not option:
-            return await tools.fulfillment_options(merchant(), cart())
+            # No id is a question, not a choice. It answered with a bare list of
+            # options, which reads like a result — an agent said "done" over it
+            # and the basket still had no delivery chosen. The answer now says
+            # so in the body, so nothing downstream has to infer it.
+            offered = await tools.fulfillment_options(merchant(), cart())
+            return {
+                **offered,
+                "chosen": None,
+                "next": (
+                    "Nothing is chosen yet. Call choose-fulfillment again with one of these ids."
+                ),
+            }
         return await tools.choose_fulfillment(merchant(), cart(), option)
     if tool is ToolName.APPLY_PUBLIC_CODE:
         return await tools.apply_public_code(merchant(), cart(), str(payload.get("code", "")))
