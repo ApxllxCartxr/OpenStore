@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from openstore.sidecar.core.codes import PaymentMethod, ProviderOp
 
@@ -42,6 +43,22 @@ class PaymentStatus:
 
 
 @dataclass(frozen=True)
+class WebhookEvent:
+    """The two facts a callback body has to yield, and nothing more.
+
+    Deliberately not "what the event says happened": the body is a trigger, and
+    the sidecar asks `check_status` what the Provider actually holds. Parsing a
+    verdict out of here would make a forged-but-signed replay authoritative.
+    """
+
+    event_id: str
+    link_id: str
+    payer_handle: str = ""
+    """The payer's own handle where the rail gives one, for `consumer_id`
+    (ADR-0011). Empty is honest; a fabricated one is not."""
+
+
+@dataclass(frozen=True)
 class RefundResult:
     refund_id: str
     amount_minor: int
@@ -54,6 +71,11 @@ class PaymentProvider(ABC):
     `method-not-supported` naming what *is* enabled — at the Gate, not here."""
 
     name: str
+
+    webhook_signature_header: str = "x-openstore-signature"
+    """Where this Provider puts its HMAC. Declared by the adapter because it is
+    the adapter's own wire format, and read by the route — a header name guessed
+    at the call site is a signature nobody checks."""
 
     @abstractmethod
     def declared_methods(self) -> frozenset[PaymentMethod]:
@@ -86,6 +108,16 @@ class PaymentProvider(ABC):
     ) -> RefundResult:
         """Partial amounts are legal, so the Provider is given the refund's own
         id — the same reason the Ledger key carries it."""
+
+    @abstractmethod
+    def read_webhook(self, payload: dict[str, Any]) -> WebhookEvent:
+        """Pull the event id and the link id out of this Provider's envelope.
+
+        Abstract rather than defaulted: every rail shapes its callback
+        differently, and a default that guessed at field names would silently
+        yield an empty `link_id` — which the route would read as "no checkout is
+        waiting on that payment" rather than as the adapter bug it is.
+        """
 
     def supports(self, method: PaymentMethod) -> bool:
         return method in self.declared_methods()

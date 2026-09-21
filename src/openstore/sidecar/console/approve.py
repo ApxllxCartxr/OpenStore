@@ -376,20 +376,39 @@ def fake_pay(link_id: str) -> HTMLResponse:
 
 @router.post("/fake-pay/{link_id}", response_class=HTMLResponse, response_model=None)
 async def fake_pay_submit(link_id: str) -> HTMLResponse:
-    """The money arrives. Settle it, commit the stock, seal the receipt."""
+    """The money arrives — **through the Provider's callback, not around it**.
+
+    This used to call `complete()` directly, which meant the one path a real
+    Provider actually uses was the one path the demo never took. Now the fake
+    rail builds the body and HMAC it would POST and hands them to the same
+    `deliver` the public `/provider/webhook` route calls, so `make demo`
+    exercises signature verification, the `event_id` dedupe and the re-read of
+    Provider state every time it runs.
+    """
     from openstore.sidecar import checkout as flow
+    from openstore.sidecar.provider.routes import deliver
+    from openstore.sidecar.provider.webhooks import WebhookRejected
 
     ctx = flow.get_context()
     ctx.provider.approve(link_id)
+    body, signature = ctx.provider.webhook_for(link_id)
     try:
-        checkout = await flow.complete(ctx, link_id, payer_handle="demo@upi")
-    except flow.CheckoutRefused as refusal:
+        outcome = await deliver(body, signature)
+    except WebhookRejected as rejected:
+        return _page(
+            "Not settled",
+            f"<h1>That payment could not be confirmed</h1>"
+            f"<p class=note>The shop refused its own Provider's callback: {_e(rejected)}</p>",
+            status=409,
+        )
+    if outcome.reason_code is not None or not outcome.receipt_id:
         return _page(
             "Not settled",
             f"<h1>That payment did not settle</h1>"
-            f"<p class=note><code>{_e(refusal.code.value)}</code> — {_e(refusal.detail)}</p>",
+            f"<p class=note><code>{_e(outcome.reason_code.value if outcome.reason_code else outcome.status)}</code>"
+            f" — {_e(outcome.detail or outcome.status)}</p>",
             status=409,
         )
     return HTMLResponse(
-        status_code=303, content="", headers={"location": f"/receipt/{checkout.receipt_id}"}
+        status_code=303, content="", headers={"location": f"/receipt/{outcome.receipt_id}"}
     )

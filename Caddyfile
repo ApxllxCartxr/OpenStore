@@ -27,6 +27,13 @@ http://spoiledduckie.localhost {
 		reverse_proxy sidecar:8000
 	}
 
+	# The Payment Provider's own callback. Public, and authenticated by the
+	# HMAC on its body rather than by who is calling — a Provider holds no
+	# token here and is not an agent.
+	handle /provider/* {
+		reverse_proxy sidecar:8000
+	}
+
 	# The nine doors are private-network only (§6.1). HMAC is the real
 	# protection, but a door that is not routable from the edge cannot be
 	# reached at all if that secret ever leaks — so the edge refuses it rather

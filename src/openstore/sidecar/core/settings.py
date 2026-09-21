@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
+    provider_webhook_secret: str = ""
+    """The webhook secret for every adapter that is not Razorpay. Two names
+    rather than one shared value, because Razorpay's is issued by Razorpay's own
+    dashboard and a deploy that pasted it into a generic variable would verify
+    callbacks with a secret the Provider never agreed to. Unset means **every**
+    webhook is refused — there is no unauthenticated callback path."""
 
     # Admission (ADR-0012).
     oauth_client_id: str = ""
@@ -92,6 +98,13 @@ class Settings(BaseSettings):
     @property
     def dev_profile_hosts(self) -> tuple[str, ...]:
         return tuple(h.strip() for h in self.openstore_dev_profile_hosts.split(",") if h.strip())
+
+    @property
+    def webhook_secret(self) -> str:
+        """This deploy's callback secret, chosen by adapter and never guessed."""
+        if self.payment_provider == "razorpay":
+            return self.razorpay_webhook_secret
+        return self.provider_webhook_secret
 
     @property
     def has_live_provider_keys(self) -> bool:

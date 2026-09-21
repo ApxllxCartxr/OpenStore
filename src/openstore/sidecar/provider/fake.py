@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass, field
+from typing import Any
 
 from openstore.sidecar.core.codes import PaymentMethod
 from openstore.sidecar.provider.trait import (
@@ -21,6 +22,7 @@ from openstore.sidecar.provider.trait import (
     PaymentProvider,
     PaymentStatus,
     RefundResult,
+    WebhookEvent,
 )
 
 
@@ -40,6 +42,7 @@ class FakeProvider(PaymentProvider):
     """Every method, no rail."""
 
     name: str = "fake"
+    webhook_secret: str = "demo-webhook-secret"  # noqa: S105 - the demo rail, never a deployment one
     links: dict[str, _Link] = field(default_factory=dict)
     refunds: dict[str, RefundResult] = field(default_factory=dict)
     #: Set to make `make_link` raise after the link exists but before the caller
@@ -86,7 +89,45 @@ class FakeProvider(PaymentProvider):
         self.refunds[refund_id] = result
         return result
 
+    def read_webhook(self, payload: dict[str, Any]) -> WebhookEvent:
+        """The demo envelope. Note what it does **not** read: the body carries
+        an `outcome`, and nothing here looks at it — the route asks
+        `check_status` instead, which is the property that keeps a signed replay
+        from deciding anything."""
+        return WebhookEvent(
+            event_id=str(payload.get("event_id", "")),
+            link_id=str(payload.get("link_id", "")),
+            payer_handle=str(payload.get("payer_handle", "")),
+        )
+
     # ── demo controls, not part of the trait ─────────────────────────────────
+
+    def webhook_for(self, link_id: str, *, payer_handle: str = "demo@upi") -> tuple[bytes, str]:
+        """The body and signature this rail would POST, built the way it would
+        build them.
+
+        The demo's Approve button posts *this*, through the same public route a
+        real Provider uses. A callback path the demo routes around is a callback
+        path nobody has watched work — which is what it was.
+        """
+        import hashlib
+        import hmac
+        import json
+
+        link = self.links[link_id]
+        body = json.dumps(
+            {
+                "event_id": f"evt_{secrets.token_hex(8)}",
+                "link_id": link_id,
+                "order_id": link.order_id,
+                "outcome": "paid" if link.paid else "failed",
+                "payer_handle": payer_handle,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(self.webhook_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return body, signature
 
     def approve(self, link_id: str, *, amount_minor: int | None = None) -> _Link:
         """The Consumer pressed Approve. `amount_minor` overrides so a test can

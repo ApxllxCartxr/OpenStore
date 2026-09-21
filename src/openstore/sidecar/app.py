@@ -28,6 +28,7 @@ from openstore.sidecar.evidence.keys import Keyring, load_or_enroll
 from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
 from openstore.sidecar.protocols.agent_routes import get_surface
 from openstore.sidecar.protocols.agent_routes import router as agent_router
+from openstore.sidecar.provider.routes import router as provider_router
 from openstore.sidecar.verify.checks import verify
 
 
@@ -109,6 +110,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         )
 
     provider = _provider_for(settings)
+    _configure_webhooks(settings, provider)
     policy = Policy()
     tokens = TokenStore()
     checkout_context = CheckoutContext(
@@ -212,6 +214,50 @@ def _provider_for(settings: Settings) -> Any:
     return FakeProvider()
 
 
+def _configure_webhooks(settings: Settings, provider: Any) -> None:
+    """Point the callback route at this deploy's secret, or at nothing.
+
+    With no secret there is no verifier and every webhook is refused. That is
+    the conservative half of a choice with only one safe side: a route that
+    accepts an unsigned body is a route anyone can use to tell the sidecar that
+    money arrived.
+    """
+    from openstore.sidecar.provider.routes import WebhookContext
+    from openstore.sidecar.provider.routes import configure as configure_webhooks
+    from openstore.sidecar.provider.webhooks import WebhookVerifier
+
+    log = logging.getLogger("openstore")
+    secret = settings.webhook_secret
+    # The demo rail carries its own secret so the callback path is exercised by
+    # `make demo` rather than only by a test. It is not a deployment secret and
+    # a real adapter never reaches this branch.
+    if not secret and provider.name == "fake" and settings.openstore_demo_mode:
+        secret = provider.webhook_secret
+        log.warning("webhook secret: the demo rail's own, because none is configured")
+
+    if not secret:
+        configure_webhooks(WebhookContext(provider=provider))
+        log.warning(
+            "NO WEBHOOK SECRET: every Provider callback will be refused, so a payment can "
+            "only finish through a manual status check. Set %s.",
+            "RAZORPAY_WEBHOOK_SECRET"
+            if settings.payment_provider == "razorpay"
+            else "PROVIDER_WEBHOOK_SECRET",
+        )
+        return
+
+    configure_webhooks(
+        WebhookContext(
+            verifier=WebhookVerifier(secret=secret),
+            provider=provider,
+            signature_header=provider.webhook_signature_header,
+        )
+    )
+    log.warning(
+        "webhook route wired: /provider/webhook verifying %s", provider.webhook_signature_header
+    )
+
+
 def _load_keyring(settings: Settings, merchant_domain: str) -> Keyring | None:
     """The Merchant's signing keys, read from disk or minted once (ADR-0014).
 
@@ -258,6 +304,9 @@ app = FastAPI(
 # particular is authenticated by its one-time token and NOT by the Merchant
 # session, so it must reach its own handler.
 app.include_router(agent_router)
+# Public, and verified by HMAC rather than by who is calling — a Provider is not
+# an agent and holds no token here.
+app.include_router(provider_router)
 app.include_router(approve_router)
 app.include_router(merchant_actions_router)
 app.include_router(console_router)

@@ -13,6 +13,7 @@ deployment, this guards a caller that built an adapter by hand.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from openstore.sidecar.core.codes import PaymentMethod
 from openstore.sidecar.core.settings import BootRefused
@@ -21,6 +22,7 @@ from openstore.sidecar.provider.trait import (
     PaymentProvider,
     PaymentStatus,
     RefundResult,
+    WebhookEvent,
 )
 
 TEST_KEY_PREFIX = "rzp_test_"
@@ -35,6 +37,7 @@ class RazorpayProvider(PaymentProvider):
     key_secret: str
     demo_mode: bool = True
     name: str = "razorpay"
+    webhook_signature_header: str = "x-razorpay-signature"
 
     def __post_init__(self) -> None:
         if self.demo_mode and not self.key_id.startswith(TEST_KEY_PREFIX):
@@ -64,3 +67,24 @@ class RazorpayProvider(PaymentProvider):
         self, reference: str, amount_minor: int, currency: str, *, refund_id: str
     ) -> RefundResult:
         raise NotImplementedError("razorpay network calls land with A7")
+
+    def read_webhook(self, payload: dict[str, Any]) -> WebhookEvent:
+        """Razorpay's envelope: `id` on the event, and the payment link id under
+        `payload.payment_link.entity.id`.
+
+        Only the two identifiers are read. `event` ("payment_link.paid",
+        "payment_link.expired") is deliberately ignored — the route asks
+        `check_status` what Razorpay holds, so a replayed `paid` event for a
+        link Razorpay has since expired settles nothing.
+        """
+        entity = (
+            payload.get("payload", {}).get("payment_link", {}).get("entity", {})
+            if isinstance(payload.get("payload"), dict)
+            else {}
+        )
+        contact = entity.get("customer", {}) if isinstance(entity.get("customer"), dict) else {}
+        return WebhookEvent(
+            event_id=str(payload.get("id", "")),
+            link_id=str(entity.get("id", "")),
+            payer_handle=str(contact.get("contact", "")),
+        )

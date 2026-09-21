@@ -175,6 +175,14 @@ def test_the_caddyfile_routes_receipt_to_the_sidecar() -> None:
     assert "chat.localhost" in caddyfile, "both site blocks, or the third surface 404s"
 
 
+def test_the_caddyfile_routes_the_provider_callback_to_the_sidecar() -> None:
+    """The Provider POSTs from the public internet. An edge that does not route
+    it sends every payment confirmation to the storefront, and money that has
+    moved never reaches the Ledger."""
+    caddyfile = (REPO / "Caddyfile").read_text(encoding="utf-8")
+    assert "/provider/*" in caddyfile
+
+
 # ── The feed ─────────────────────────────────────────────────────────────────
 
 
