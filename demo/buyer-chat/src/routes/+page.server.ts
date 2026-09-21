@@ -24,6 +24,7 @@ import {
 import {
 	ALWAYS_ALLOWABLE,
 	MAX_STEPS,
+	READS,
 	TOOLS,
 	ToolError,
 	assertAddonHasParent,
@@ -33,6 +34,7 @@ import {
 	catalogueFrom,
 	consentNote,
 	hasMeaningfulArgs,
+	requiresFreshConsent,
 	validate,
 	type Seen,
 	type ToolName
@@ -334,7 +336,7 @@ async function runAgent(domain: string, driver: OpenRouterDriver): Promise<void>
 			// unchosen variant, an orphan add-on and an invented address, and a
 			// read proposes none of those.
 			const reads: ToolCall[] = [];
-			while (i < planned.length && ALWAYS_ALLOWABLE.has(planned[i]!.name)) {
+			while (i < planned.length && READS.has(planned[i]!.name)) {
 				reads.push(planned[i]!);
 				i += 1;
 			}
@@ -430,7 +432,7 @@ export const actions = {
 				askInstead(shop.domain, call, refused);
 				break;
 			}
-			if (!ALWAYS_ALLOWABLE.has(call.name) && !standing.has(call.name)) {
+			if (requiresFreshConsent(call.name as ToolName, standing)) {
 				awaiting = call;
 				addMessage(THREAD, 'agent', `I’d like to call ${call.name} next — details below, your call.`);
 				return { ok: true };

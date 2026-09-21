@@ -3,6 +3,7 @@
 	import type { PageProps } from './$types';
 	import type { Widget } from '$lib/widgets.ts';
 	import { renderMarkdown } from '$lib/markdown.ts';
+	import { ALWAYS_ALLOWABLE } from '$lib/tools/loop.ts';
 	let { data }: PageProps = $props();
 
 	/** Results worth showing as something other than JSON: what the shop
@@ -367,6 +368,13 @@
 					No amount is approved here. You will see the exact total, from the shop, and approve
 					it on the shop's own page.
 				</p>
+				<p class="meta" style="margin-top:var(--s-1)">
+					This click and the one on the shop's page are different things: this one only lets
+					Miro show you a total. Spending real money always needs a second, separate step on
+					{data.shop?.name ?? "the shop's"} own site — usually a passkey or a UPI PIN — which
+					Miro cannot see, hold, or complete for you. That is why nothing here ever asks you to
+					sign anything.
+				</p>
 			{:else if data.pendingNote}
 				<!-- Plain words beside the exact JSON, never instead of it: a note
 				     that replaced the request could be wrong with no way to tell. -->
@@ -399,7 +407,7 @@
 				<button name="verdict" value="allow-once" type="submit" disabled={deciding !== null}>
 					Allow once
 				</button>
-				{#if data.pending.name === 'search' || data.pending.name === 'read-item' || data.pending.name === 'order-status'}
+				{#if ALWAYS_ALLOWABLE.has(data.pending.name)}
 					<button
 						class="secondary"
 						name="verdict"
@@ -407,7 +415,7 @@
 						type="submit"
 						disabled={deciding !== null}
 					>
-						Always allow (reads only)
+						Always allow {data.pending.name} (never a spend step)
 					</button>
 				{/if}
 				<button

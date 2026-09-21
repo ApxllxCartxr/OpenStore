@@ -15,16 +15,19 @@ import {
 } from '../src/lib/quote.ts';
 import {
 	ALWAYS_ALLOWABLE,
+	READS,
 	assertAddonHasParent,
 	assertDestinationFromConsumer,
 	assertResolvedVariant,
 	boundedSteps,
+	catalogueFrom,
 	MAX_STEPS,
 	consentNote,
 	hasMeaningfulArgs,
 	permissionRequest,
 	requiresFreshConsent,
 	SCOPES,
+	shopsFor,
 	SYSTEM_PROMPT,
 	ToolError,
 	TOOLS,
@@ -107,17 +110,34 @@ describe('the rendered breakdown is verbatim', () => {
 });
 
 describe('permissions', () => {
-	it('never lets standing approval cover a spend step', () => {
-		const standing = new Set(TOOLS); // the Consumer said "always" to everything
+	it('never lets standing approval cover a spend step, even when the Consumer said "always" to everything', () => {
+		const standing = new Set(TOOLS);
 		expect(requiresFreshConsent('place-order', standing)).toBe(true);
 		expect(requiresFreshConsent('start-checkout', standing)).toBe(true);
-		expect(requiresFreshConsent('add-line', standing)).toBe(true);
-		// Reads and drafts only.
+		// cancel-order and request-refund share start-checkout's scope: both
+		// change an order's fate, which gets a fresh look every time too.
+		expect(requiresFreshConsent('cancel-order', standing)).toBe(true);
+		expect(requiresFreshConsent('request-refund', standing)).toBe(true);
+		// Reads and basket-building steps can carry standing approval.
 		expect(requiresFreshConsent('search', new Set(['search']))).toBe(false);
+		expect(requiresFreshConsent('add-line', new Set(['add-line']))).toBe(false);
 	});
 
-	it('only allows standing approval on reads', () => {
-		expect([...ALWAYS_ALLOWABLE].sort()).toEqual(['order-status', 'read-item', 'search']);
+	it('allows standing approval on everything short of the two scopes that move toward a spend', () => {
+		expect([...ALWAYS_ALLOWABLE].sort()).toEqual(
+			[
+				'add-line',
+				'apply-public-code',
+				'choose-fulfillment',
+				'clear-basket',
+				'order-status',
+				'read-item',
+				'remove-line',
+				'search',
+				'set-contact',
+				'set-destination'
+			].sort()
+		);
 	});
 
 	it('shows the exact request JSON, not a summary', () => {
@@ -134,6 +154,38 @@ describe('permissions', () => {
 
 	it('maps every tool to a scope', () => {
 		expect(Object.keys(SCOPES).sort()).toEqual([...TOOLS].sort());
+	});
+
+	it('READS is a strict subset of ALWAYS_ALLOWABLE, never the other way round', () => {
+		// ALWAYS_ALLOWABLE governs standing consent; READS governs which calls
+		// may skip the proposal guards and fan out to every shop unattended. A
+		// write can be always-allowed by the Consumer without qualifying for
+		// either of those — conflating the two once sent an unaddressed
+		// add-line to every shop the Consumer had.
+		for (const tool of READS) expect(ALWAYS_ALLOWABLE.has(tool)).toBe(true);
+		expect(ALWAYS_ALLOWABLE.size).toBeGreaterThan(READS.size);
+	});
+});
+
+describe('shopsFor — an unaddressed write never reaches a shop it was not meant for', () => {
+	const SD = 'spoiledduckie.localhost';
+	const DE = 'dogeared.localhost';
+	const shops = [
+		{ domain: SD, name: 'SpoiledDuckie' },
+		{ domain: DE, name: 'Dog-Eared' }
+	];
+	const seen = catalogueFrom([]);
+
+	it('fans an unaddressed read out to every known shop', () => {
+		expect(shopsFor({ name: 'search', args: { query: 'tote' } }, seen, shops).sort()).toEqual(
+			[SD, DE].sort()
+		);
+	});
+
+	it('never fans an unaddressed write out — it has to land somewhere exact', () => {
+		expect(() => shopsFor({ name: 'add-line', args: { sku: 'unknown-sku' } }, seen, shops)).toThrow(
+			ToolError
+		);
 	});
 });
 

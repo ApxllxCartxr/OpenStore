@@ -51,14 +51,28 @@ export const SCOPES: Record<ToolName, string> = {
 	'request-refund': 'start-checkout'
 };
 
-/** Reads and drafts only. **Standing approval never covers a spend step** — any
- *  cart-with-spend, checkout, or place-order needs a fresh Allow-once modal
- *  plus a fresh tap (ADR-0008). */
-export const ALWAYS_ALLOWABLE: ReadonlySet<string> = new Set([
-	'search',
-	'read-item',
-	'order-status'
-]);
+/** Every tool outside the two scopes that ever move a basket toward a spend
+ *  (`start-checkout`, `confirm`) — reads, and every basket-building step
+ *  short of pricing it. **Standing approval never covers a spend step**, and
+ *  neither does it cover `cancel-order`/`request-refund`: both share
+ *  `start-checkout`'s scope because they change an order's fate, which
+ *  deserves a fresh look each time rather than a rubber stamp. Mirrors the
+ *  sidecar's own `moneyPathHint` (ADR-0026) — the boundary is the scope
+ *  ladder, not a hand-picked list, so a new tool lands on the right side of
+ *  it without this set being edited. */
+export const ALWAYS_ALLOWABLE: ReadonlySet<string> = new Set(
+	(Object.keys(SCOPES) as ToolName[]).filter(
+		(tool) => SCOPES[tool] !== 'start-checkout' && SCOPES[tool] !== 'confirm'
+	)
+);
+
+/** Reads only — `search`, `read-item`, `order-status`. Not the same set as
+ *  `ALWAYS_ALLOWABLE` above: a write can be always-allowed by the Consumer
+ *  without being safe to run with no proposal guards or fan out to every
+ *  shop the Consumer has. Change nothing, so batching them concurrently, or
+ *  sending one with no shop named to every shop at once, costs only the
+ *  round trips. */
+export const READS: ReadonlySet<string> = new Set(['search', 'read-item', 'order-status']);
 
 export const MAX_STEPS = 24;
 
@@ -351,7 +365,7 @@ export function shopsFor(
 	// question about the shops the Consumer has, not about whichever one was
 	// added last. Reads change nothing, so asking all of them costs only the
 	// round trips — which run concurrently.
-	if (ALWAYS_ALLOWABLE.has(call.name) && !call.args?.order_id) {
+	if (READS.has(call.name) && !call.args?.order_id) {
 		return shops.map((shop) => shop.domain);
 	}
 
