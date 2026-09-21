@@ -112,6 +112,8 @@ Root cause: `svelte.config.js`'s CSRF `trustedOrigins` was `['http://127.0.0.1:3
 
 Fixed by naming all ten of this repo's own admin ports instead of one — still a fixed list on purpose (these are known demo ports, not something to infer from an incoming request), just the right size now. Rebuilt all ten store images; verified real logins (real credentials, real session cookie) succeed for CircuitYard and for the previously-broken Dog-Eared, with CircuitYard's dashboard rendering its own branding and live data afterward.
 
+While in there: ran the `openstore-conform` CLI's read-only suite (doors 1/2/9 — catalog, stock, quote) against all ten stores' trait implementations directly, not just the two it had ever been pointed at before. 10/10 on eight of them; PantryLine and Playspool score 9/10 with the tenth check (orphan Add-on refused) legitimately skipped — neither store's catalogue has an addon-tagged item, which is a fact about what they sell, not a gap. Full trait conformance confirmed across every store this session added.
+
 ---
 
 # Morning report
