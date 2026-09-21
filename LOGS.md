@@ -71,12 +71,12 @@ Still open and named rather than forgotten:
   ceremony *name* is (`enrollment` vs `assertion`), which is what distinguishes
   one prompt from two, so the count is derivable rather than recorded. Adding it
   would change Transcript bytes, which are frozen.
-- **The refund queue is in memory**, like the Pending Carts beside it. The
-  Merchant's own book is the durable record of a refund; a restart loses open
-  asks, and the agent can ask again.
-- **Razorpay's adapter still raises `NotImplementedError`** for its four network
-  calls. `read_webhook` parses its real envelope, but nothing has been run
-  against Razorpay.
+- ~~**The refund queue is in memory**~~ — closed 09-21. Every store the money
+  path depends on is a table now, and a restart mid-purchase is drilled against
+  the running stack rather than reasoned about.
+- **Razorpay's four network calls are implemented** as of 09-21, against the
+  documented API and its documented envelopes. Nothing has still been run
+  against Razorpay itself, which is a different and smaller gap than it was.
 - **F12's credit-note half** and the Registrar question in ADR-0025 still need
   counsel.
 
@@ -107,6 +107,142 @@ the full health panel), **cut 4a** (admin trimmed to the operating path), **cut
    Merchant's own actions. They serialize on door 8's `order_id:attempt` key and
    nowhere else, so the Merchant is the arbiter — the sweeper re-reads and
    corrects itself rather than holding a lock.
+
+---
+
+## 2026-09-21 · Four things an MVP needs, and the restart that used to cost money
+
+The morning report's "OPEN — what is still absent" list was about features. This
+entry is about the four things between a working demo and something a merchant
+who is not us could deploy: durability, an adoption path, a way to check a
+second implementation, and a deploy story. Plus Razorpay's four network calls,
+which had been `NotImplementedError` since A3.
+
+### The restart, which is the only one that cost money
+
+Six dicts held the sidecar's working state. The expensive one is the checkout:
+a Consumer taps, the process is replaced, and the Provider's callback arrives at
+a sidecar that has never seen the order. `complete` answered **"No checkout is
+waiting on that payment"** — with the money already moved, the stock still held,
+and the order sitting `confirmed` until the sweeper expired it.
+
+**Driven against the running stack both ways.** On `22c4785`, a checkout started
+before `docker compose restart sidecar` answers 404 at its own approve link. On
+`main`, the same drill taps, pays, and reads back a VALID receipt — and the
+receipt survives a second restart after sealing.
+
+Two things the port improved rather than merely persisted:
+
+- **Single-use is the UPDATE, not the check above it.** `spend_tap` is now
+  `UPDATE ... WHERE spent = false` and the loser sees `rowcount == 0`. The dict
+  version marked `spent` after reading it, which two concurrent taps both pass.
+- **One open refund ask per order is a partial unique index**, for the same
+  reason: two asks racing both read an empty queue.
+
+A bug the port introduced and a test caught before it shipped: folding the
+passkey challenge and the completed ceremony into one row made verifying delete
+the row a moment before the agreement was written to it, so **every passkey tap
+silently fell back to `upi-pin`**. Two tables now, with the two lifetimes they
+always had.
+
+`Pending` is no longer a shared mutable object. Callers read the row, so
+`result.checkout` is the copy the tap actually used — several tests were
+asserting on a snapshot from before the call they were testing.
+
+### WooCommerce, because ten doors is a build and nobody builds
+
+"Makes any Merchant site transactable" had a sample size of one, and it was a
+storefront written for this repository. `integrations/woocommerce/` is a plugin:
+WooCommerce stays the book of record, an agent's order appears in WooCommerce →
+Orders like any other, and the plugin decides nothing.
+
+Three places it refuses rather than accommodates. No SKU, not published. Stock
+management off, not published — "in stock" with no number is exactly the null
+this spec refuses. A shipping method that needs a cart to price itself is
+refused rather than guessed at. All three are counted by name on the admin
+screen, because they are invisible in WooCommerce's own.
+
+The reserve goes to `postmeta` directly with `WHERE CAST(meta_value AS SIGNED)
+>= qty`, because `wc_update_product_stock` decrements with no floor and would
+take stock to -1.
+
+Status is **derived from WooCommerce**, not from our own meta: eight trait
+statuses map onto WooCommerce's and `cancelled`/`expired` collide, so meta
+breaks that one tie and nothing else. A shopkeeper who completes an order in the
+admin has changed the truth.
+
+§16.11 now has a fourth independent implementation and the HMAC preimage a
+third, sharing no code on purpose — so `scripts/make_trait_vectors.py` writes
+down the inputs and the exact paise, `make guardrails` fails if Python drifts,
+and `make woo` fails if PHP does. Nine pricing cases and six signing cases, all
+passing first run, odd-paise SGST and three-way apportionment included.
+
+### `openstore-conform`, so nobody has to take our word for it
+
+The conformance suite ran against two implementations that happen to agree. The
+CLI points anywhere, reads door 1, and picks its own subjects — no hardcoded
+SKU, because a fixed one passes against the store it was written for and fails
+against every other.
+
+**It passes 18/18 against the TypeScript storefront unmodified**, which is the
+evidence that mattered: it was written against the fake.
+
+It writes to the store and gives every hold back — asserted, because a run that
+quietly consumed a shop's inventory would be the last one anybody allowed.
+`--read-only` is the subset that writes nothing. And because a conformance suite
+that has only seen conforming stores is untested, four real bugs are planted one
+at a time and each must produce a named failure.
+
+### Deploy, and a backup somebody has actually restored
+
+`core/db.py` said a real deployment migrates with alembic. There was no alembic
+directory. Generating the first migration found that the three passkey tables
+were registered on the shared `MetaData` only by whichever import ran first —
+`create_all` created them by luck, and the migration would have left them out.
+
+**Demo creates its schema; a deploy that takes money refuses to start against
+one it has not migrated.** A process that changes its schema as a side effect of
+starting is one whose rollback leaves a table the old code cannot read.
+
+`SIDECAR_KEY_EXPORT_PATH` was a declared, documented setting wired to nothing —
+the same bug as the SSRF allowlist and the OAuth credentials before it, and the
+worst one to have: a deploy could believe it had a backup of the shop's identity
+and have none. `openstore-keys check --against` is the other half, because a
+backup nobody has restored is a hope. The failure it exists to find is a backup
+taken before a rotation, which looks fine until every receipt sealed since
+verifies against nothing.
+
+### Razorpay
+
+Implemented over the Payment Links API. **No money has moved through it** — what
+is asserted is that it sends what the API reference documents and reads what its
+documented responses contain, with the test envelopes copied from those examples
+field for field.
+
+Reading the docs found a defect waiting for the first live deploy: Razorpay
+refuses an `expire_by` that is not **more than** fifteen minutes out, and §16.7's
+payment window is exactly fifteen minutes. Every link this sidecar asked for
+would have been refused at creation.
+
+Four more places a plausible implementation is wrong, each with a test:
+`partially_paid` is not paid; `amount_paid` and never `amount`; a refund is
+issued against the payment id and keyed by the refund's own id; and a duplicate
+`reference_id` is the **recovery path** rather than an error — it means a
+previous attempt created the link and crashed before storing it.
+
+The `razorpay` SDK dependency, declared and never imported, is gone: it is
+synchronous and would block the event loop for the length of every round trip.
+
+### What this still is not
+
+- **No money has moved through a real rail.** That is the next thing, and it is
+  also the first real test of ADR-0021's ECO/TCS boundary.
+- **The WooCommerce plugin has not run against a live WooCommerce.** Its PHP
+  parses, its arithmetic and its signatures agree with the sidecar's to the byte,
+  and that is a different claim from "installed and working".
+- **Nothing sweeps the checkouts table.** Bounded by order volume, never deleted.
+- **F12's credit-note half** and the Registrar question in ADR-0025 still need
+  counsel, unchanged.
 
 ---
 
