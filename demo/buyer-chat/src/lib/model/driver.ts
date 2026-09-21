@@ -204,22 +204,67 @@ export function parseCalls(raw: string, tools: string[]): ToolCall[] {
 	});
 }
 
-let held: ModelDriver | null = null;
+/** One instance per choice, not one for the process: `ScriptedDriver` walks a
+ *  pinned sequence and keeps its position in the instance, so rebuilding it
+ *  on every request restarts the conversation at step 0 forever — which is
+ *  exactly what happened before this was cached at all. Keyed by choice
+ *  (rather than a single `held`) so switching models mid-session and
+ *  switching back does not lose the scripted driver's position either. */
+const byChoice = new Map<string, ModelDriver>();
 
-/** The driver for this process, built once.
- *
- *  `ScriptedDriver` walks a pinned sequence and keeps its position in the
- *  instance, so building a new one per request restarts the conversation at
- *  step 0 forever — which is exactly what happened: every message re-ran the
- *  first `search` and the basket was never built.
- */
-export function driverFromEnv(): ModelDriver {
-	if (!held) held = buildDriver();
-	return held;
+export const DRIVER_CHOICES = ['scripted', 'openrouter', 'anthropic', 'ollama'] as const;
+export type DriverChoice = (typeof DRIVER_CHOICES)[number];
+
+export type DriverOption = { id: DriverChoice; label: string; configured: boolean };
+
+/** What can actually be picked — only what this process has a key or a model
+ *  configured for. A model switcher that offered an unconfigured driver
+ *  would be an option that fails the moment it's clicked. */
+export function availableDrivers(): DriverOption[] {
+	return [
+		{ id: 'scripted', label: 'Scripted (no model, pinned demo sequence)', configured: true },
+		{
+			id: 'openrouter',
+			label: `OpenRouter — ${process.env.OPENROUTER_MODEL ?? 'openai/gpt-oss-20b'}`,
+			configured: Boolean(process.env.OPENROUTER_API_KEY)
+		},
+		{
+			id: 'anthropic',
+			label: 'Anthropic — Claude',
+			configured: Boolean(process.env.ANTHROPIC_API_KEY)
+		},
+		{
+			id: 'ollama',
+			label: `Ollama — ${process.env.OLLAMA_MODEL ?? 'no model set'}`,
+			configured: Boolean(process.env.OLLAMA_MODEL)
+		}
+	];
 }
 
-function buildDriver(): ModelDriver {
-	const choice = process.env.CHAT_MODEL_DRIVER ?? 'scripted';
+/** `override`, when it names a configured driver, wins over
+ *  `CHAT_MODEL_DRIVER` — the Consumer's own switch in the chat UI over the
+ *  operator's deploy-time default. Anything else (unset, or naming a driver
+ *  this process has no key for) falls back the same way `buildDriver`
+ *  always has: to the env var, then to `scripted`. */
+export function driverFor(override: string | null): ModelDriver {
+	const options = availableDrivers();
+	const wanted = override ? options.find((o) => o.id === override && o.configured) : undefined;
+	const choice = wanted?.id ?? process.env.CHAT_MODEL_DRIVER ?? 'scripted';
+	let driver = byChoice.get(choice);
+	if (!driver) {
+		driver = buildDriver(choice);
+		byChoice.set(choice, driver);
+	}
+	return driver;
+}
+
+/** The process default: `driverFor(null)`. Kept for callers — tests, mostly
+ *  — that have no Consumer override to read. */
+export function driverFromEnv(): ModelDriver {
+	return driverFor(null);
+}
+
+function buildDriver(choice: string): ModelDriver {
 	if (choice === 'openrouter' && process.env.OPENROUTER_API_KEY) {
 		return new OpenRouterDriver(
 			process.env.OPENROUTER_API_KEY,

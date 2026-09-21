@@ -12,9 +12,20 @@
  * is rendered verbatim.
  */
 import { fail } from '@sveltejs/kit';
-import { THREAD, addMessage, createThread, getSetting, recordToolCall, thread, widgetFor } from '$lib/session.ts';
 import {
-	driverFromEnv,
+	THREAD,
+	addMessage,
+	clearSetting,
+	createThread,
+	getSetting,
+	recordToolCall,
+	setSetting,
+	thread,
+	widgetFor
+} from '$lib/session.ts';
+import {
+	availableDrivers,
+	driverFor,
 	isOffer,
 	OpenRouterDriver,
 	type Proposal,
@@ -59,6 +70,16 @@ function shopName(domain: string, shops: readonly Shop[]): string {
 	return shops.find((shop) => shop.domain === domain)?.name ?? domain;
 }
 
+const DRIVER_SETTING = 'model_driver_override';
+
+/** The Consumer's own switch, when it names a driver this process actually
+ *  has a key or a model for; the operator's deploy-time default otherwise —
+ *  `driverFor(null)` is exactly `buildDriver`'s old always-the-env-var
+ *  behaviour. */
+function currentDriver() {
+	return driverFor(getSetting(DRIVER_SETTING));
+}
+
 /** Resolve a call to the shop(s) it targets, without throwing: `shopsFor`'s
  *  `shop-required` is a question for the Consumer, not a bug, so every call
  *  site handles it the same way rather than repeating a try/catch. */
@@ -97,7 +118,9 @@ export async function load() {
 	}
 	return {
 		thread: thread(THREAD),
-		driver: driverFromEnv().name,
+		driver: currentDriver().name,
+		drivers: availableDrivers(),
+		driverChoice: getSetting(DRIVER_SETTING),
 		tools: [...TOOLS],
 		shops,
 		pending: awaiting
@@ -494,7 +517,7 @@ export const actions = {
 			return { ok: true };
 		}
 
-		const driver = driverFromEnv();
+		const driver = currentDriver();
 		if (driver instanceof OpenRouterDriver) {
 			await runAgent(shops, driver);
 			return { ok: true };
@@ -612,7 +635,7 @@ export const actions = {
 			recordToolCall(THREAD, domain, call.name, call.args, { error: refusal.code, detail: refusal.message });
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
-		const driver = driverFromEnv();
+		const driver = currentDriver();
 		if (driver instanceof OpenRouterDriver) await runAgent(shops, driver);
 		return { ok: true };
 	},
@@ -688,7 +711,7 @@ export const actions = {
 			addMessage(THREAD, 'agent', refusalText(refusal));
 		}
 		// A real model keeps going on its own once the call it asked for has run.
-		const driver = driverFromEnv();
+		const driver = currentDriver();
 		if (driver instanceof OpenRouterDriver) await runAgent(knownShops(), driver);
 		return { ok: true };
 	},
@@ -707,8 +730,25 @@ export const actions = {
 		awaiting = null;
 		// The scripted driver walks a pinned sequence, so a reset has to put it
 		// back to the start or the next conversation resumes mid-basket.
-		const driver = driverFromEnv() as { reset?: () => void };
+		const driver = currentDriver() as { reset?: () => void };
 		driver.reset?.();
+		return { ok: true };
+	},
+
+	/**
+	 * The model switcher. Only ever sets which *configured* driver answers —
+	 * `driverFor` already refuses to honour a choice this process has no key
+	 * or model for, so a stale or tampered value here just falls back to the
+	 * operator's own deploy-time default rather than failing the request.
+	 */
+	driver: async ({ request }) => {
+		const form = await request.formData();
+		const choice = String(form.get('choice') ?? '').trim();
+		if (!choice || choice === 'default') {
+			clearSetting(DRIVER_SETTING);
+			return { ok: true };
+		}
+		setSetting(DRIVER_SETTING, choice);
 		return { ok: true };
 	}
 };

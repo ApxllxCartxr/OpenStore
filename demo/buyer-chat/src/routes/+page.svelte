@@ -524,7 +524,24 @@
 			     one disclosure away instead of sitting in the conversation. -->
 			<details class="agent-meta">
 				<summary>Miro · buyer agent · {data.tools.length} tools · no payment credential</summary>
-				<p class="mono">driver: {data.driver}</p>
+				<p class="mono">running: {data.driver}</p>
+				<form method="POST" action="?/driver" use:enhance class="model-switch">
+					<label class="meta">
+						Model
+						<select
+							name="choice"
+							value={data.driverChoice ?? 'default'}
+							onchange={(e) => e.currentTarget.form?.requestSubmit()}
+						>
+							<option value="default">Deploy default</option>
+							{#each data.drivers as option (option.id)}
+								<option value={option.id} disabled={!option.configured}>
+									{option.label}{option.configured ? '' : ' (not configured)'}
+								</option>
+							{/each}
+						</select>
+					</label>
+				</form>
 			</details>
 			<form method="POST" action="?/reset" use:enhance>
 				<button class="link" type="submit">Reset thread</button>
