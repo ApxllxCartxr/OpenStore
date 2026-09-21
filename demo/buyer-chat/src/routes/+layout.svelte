@@ -4,9 +4,17 @@
 	let { children }: LayoutProps = $props();
 </script>
 
-<header style="border-bottom:1px solid var(--line);padding:0.75rem 1rem;display:flex;gap:1rem;align-items:center">
-	<span class="chat-name" style="font-size:1.25rem">Duckie</span>
-	<span class="mono" style="color:var(--comment);font-size:0.8125rem">a buyer agent, not a shop</span>
-	<a href="/contacts" class="mono" style="margin-left:auto">Shops</a>
+<header class="topbar">
+	<div class="topbar-inner">
+		<span class="chat-name" style="font-size:1.25rem">Miro</span>
+		<span class="meta">a buyer agent, not a shop</span>
+		<!-- A plain download link, not an action: the whole thread — every
+		     message and every tool call's exact request and response — as a
+		     Markdown file. `download` so it saves instead of navigating. -->
+		<a href="/transcript" download class="meta topbar-action" style="margin-left:auto">
+			Export transcript
+		</a>
+		<a href="/contacts" class="meta">Shops</a>
+	</div>
 </header>
 {@render children()}
