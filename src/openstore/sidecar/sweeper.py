@@ -102,9 +102,10 @@ async def sweep_once(ctx: CheckoutContext, *, now: datetime | None = None) -> li
     moment = now or datetime.now(UTC)
     done: list[Swept] = []
 
-    # A snapshot: `expire` mutates the maps this iterates, and a tap landing
-    # mid-pass would otherwise resize the dict under the loop.
-    for checkout in list(ctx.pending.values()):
+    # Read once at the top of the pass. Each order is then re-confirmed against
+    # the Merchant below before anything is done to it, so a tap that lands
+    # mid-pass is caught by that read rather than by this one.
+    for checkout in await ctx.store.live():
         action = _action_for(checkout, now=moment)
         if action is None:
             continue
@@ -137,6 +138,20 @@ async def sweep_once(ctx: CheckoutContext, *, now: datetime | None = None) -> li
             )
             with contextlib.suppress(Exception):
                 await _resync(ctx, checkout)
+
+    # The passkey working set ages out on the same pass. Without this, "a
+    # credential is kept for the purchase it was enrolled for and then it is
+    # gone" would be a sentence in a docstring rather than something that
+    # happens — and durable credentials that never expire are the account
+    # system v1 deliberately does not have.
+    if ctx.passkey_rp is not None and ctx.passkey_rp.sessionmaker is not None:
+        try:
+            forgotten = await ctx.passkey_rp.forget_expired(now=moment)
+        except Exception as exc:  # noqa: BLE001 - housekeeping must not stop the pass
+            _log.warning("could not sweep the passkey working set: %s", exc)
+        else:
+            if forgotten:
+                _log.warning("forgot %d expired passkey row(s)", forgotten)
     return done
 
 
@@ -186,10 +201,11 @@ async def expire(ctx: CheckoutContext, checkout: Pending, deadline: Deadline) ->
 
     if checkout.link_id:
         await ctx.provider.cancel(checkout.link_id)
-        ctx.by_link.pop(checkout.link_id, None)
+        checkout.link_id = ""
     # The approve link dies with the window it was minted for. Leaving it open
     # would render a page for an order the Merchant has already expired.
-    ctx.by_token.pop(checkout.tap_token, None)
+    checkout.tap_token = ""
+    await ctx.store.save(checkout)
 
     _log.warning(
         "expired %s (%s) after %s; stock %s",
@@ -227,6 +243,10 @@ async def _resync(ctx: CheckoutContext, checkout: Pending) -> None:
             order.status.value,
         )
         checkout.status = order.status
+        # Written back, so the next pass reads the corrected status rather than
+        # rediscovering the same drift — and so `/agentic` shows what the shop
+        # says rather than what this process last assumed.
+        await ctx.store.save(checkout)
 
 
 async def run_forever(

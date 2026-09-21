@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from conftest import point_stores_at
 from openstore.sidecar.core.canonical import pii_commit
 from openstore.sidecar.core.codes import AuthorityKind, LedgerKind, PaymentMethod
 from openstore.sidecar.evidence.bundle import (
@@ -439,7 +440,9 @@ def test_the_cli_opens_commitments_when_given_the_salt(keyring: Keyring, tmp_pat
     )
 
 
-def test_the_receipt_viewer_is_outside_the_console_auth_boundary(keyring: Keyring) -> None:
+async def test_the_receipt_viewer_is_outside_the_console_auth_boundary(
+    keyring: Keyring, sessionmaker
+) -> None:  # type: ignore[no-untyped-def]
     """`/agentic` is session-authenticated for the Merchant. A receipt that
     opens by unguessable id with no login cannot live there, or no Consumer
     could ever open their own."""
@@ -448,9 +451,12 @@ def test_the_receipt_viewer_is_outside_the_console_auth_boundary(keyring: Keyrin
     from openstore.sidecar.evidence.store import get_receipt_store
 
     bundle = _seal(keyring)
-    get_receipt_store().put(bundle)
     try:
         with TestClient(app) as client:
+            # After startup, which points the store at the environment's
+            # database — and a test has none.
+            point_stores_at(sessionmaker)
+            await get_receipt_store().put(bundle)
             response = client.get(f"/receipt/{bundle.receipt_id}")
             assert response.status_code == 200
             body = response.json()
@@ -459,14 +465,15 @@ def test_the_receipt_viewer_is_outside_the_console_auth_boundary(keyring: Keyrin
             assert sorted(body["verification"]["unopened"]) == ["contact", "destination"]
             assert not response.request.headers.get("cookie"), "no session was needed"
     finally:
-        get_receipt_store().clear()
+        point_stores_at(None)
 
 
-def test_an_unknown_receipt_id_is_not_found() -> None:
+async def test_an_unknown_receipt_id_is_not_found(sessionmaker) -> None:  # type: ignore[no-untyped-def]
     from fastapi.testclient import TestClient
     from openstore.sidecar.app import app
 
     with TestClient(app) as client:
+        point_stores_at(sessionmaker)
         response = client.get("/receipt/rcpt_doesnotexist")
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "not-found"

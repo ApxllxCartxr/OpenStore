@@ -15,7 +15,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from openstore.sidecar import checkout as flow
 from openstore.sidecar import sweeper
+from openstore.sidecar.authority.tokens import TokenStore
 from openstore.sidecar.checkout import CheckoutContext
+from openstore.sidecar.checkout_store import CheckoutStore
 from openstore.sidecar.core.codes import OrderStatus, PaymentMethod, ReasonCode
 from openstore.sidecar.core.db import create_all, make_engine, make_sessionmaker
 from openstore.sidecar.evidence.keys import Keyring
@@ -35,14 +37,17 @@ SKU = "SD-TOTE-BLK-M"
 async def ctx(trait: TraitClient) -> AsyncIterator[CheckoutContext]:
     engine = make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
+    maker = make_sessionmaker(engine)
     ring = Keyring(merchant_domain="spoiledduckie.localhost")
     ring.enroll("k1")
     yield CheckoutContext(
         trait=trait,
         provider=FakeProvider(),
         keyring=ring,
-        sessionmaker=make_sessionmaker(engine),
-        receipts=ReceiptStore(),
+        sessionmaker=maker,
+        tokens=TokenStore(sessionmaker=maker),
+        store=CheckoutStore(sessionmaker=maker),
+        receipts=ReceiptStore(sessionmaker=maker),
         merchant_domain="spoiledduckie.localhost",
         deploy_pseudonym_key=b"sweeper-test-key",
     )
@@ -100,7 +105,7 @@ async def test_an_expired_checkouts_approve_link_stops_opening(ctx: CheckoutCont
 
     await sweeper.sweep_once(ctx, now=checkout.created_at + PENDING_TTL + timedelta(minutes=1))
 
-    assert token not in ctx.by_token
+    assert await ctx.store.by_token(token) is None
     with pytest.raises(flow.CheckoutRefused) as refusal:
         await flow.tap(ctx, token)
     assert refusal.value.code is ReasonCode.NOT_FOUND
@@ -119,8 +124,10 @@ async def test_an_abandoned_tap_releases_its_stock_and_its_ledger_hold(
     assert not result.refused
     assert await _stock(ctx.trait) == before - 1
 
-    assert checkout.link_expires_at is not None
-    swept = await sweeper.sweep_once(ctx, now=checkout.link_expires_at + timedelta(seconds=1))
+    # Re-read: the tap wrote the link's deadline to the row, not to this copy.
+    confirmed = await ctx.store.get(checkout.order_id)
+    assert confirmed is not None and confirmed.link_expires_at is not None
+    swept = await sweeper.sweep_once(ctx, now=confirmed.link_expires_at + timedelta(seconds=1))
 
     assert [s.reason_code for s in swept] == [ReasonCode.PAYMENT_WINDOW_ELAPSED]
     assert swept[0].released_stock is True
@@ -137,11 +144,13 @@ async def test_the_hold_never_outlives_the_payment_link(ctx: CheckoutContext) ->
     checkout = await _start(ctx)
     await flow.tap(ctx, checkout.tap_token)
 
-    assert checkout.confirmed_at is not None and checkout.link_expires_at is not None
-    assert checkout.link_expires_at - checkout.confirmed_at == timedelta(
+    confirmed = await ctx.store.get(checkout.order_id)
+    assert confirmed is not None
+    assert confirmed.confirmed_at is not None and confirmed.link_expires_at is not None
+    assert confirmed.link_expires_at - confirmed.confirmed_at == timedelta(
         seconds=flow.PAYMENT_LINK_SECONDS
     )
-    assert await sweeper.sweep_once(ctx, now=checkout.link_expires_at - timedelta(seconds=1)) == []
+    assert await sweeper.sweep_once(ctx, now=confirmed.link_expires_at - timedelta(seconds=1)) == []
 
 
 async def test_a_paid_order_is_never_swept(ctx: CheckoutContext) -> None:
@@ -149,7 +158,8 @@ async def test_a_paid_order_is_never_swept(ctx: CheckoutContext) -> None:
     result = await flow.tap(ctx, checkout.tap_token)
     ctx.provider.approve(result.checkout.link_id)
     await flow.complete(ctx, result.checkout.link_id, payer_handle="demo@upi")
-    assert checkout.status is OrderStatus.PAID
+    paid = await ctx.store.get(checkout.order_id)
+    assert paid is not None and paid.status is OrderStatus.PAID
 
     far_future = datetime.now(UTC) + timedelta(days=365)
     assert await sweeper.sweep_once(ctx, now=far_future) == []
@@ -164,17 +174,19 @@ async def test_a_late_cod_parcel_alerts_and_is_not_cancelled(ctx: CheckoutContex
     get_console_store().overdue_holds.clear()
     checkout = await _start(ctx, PaymentMethod.CASH_ON_DELIVERY)
     await flow.tap(ctx, checkout.tap_token)
-    assert checkout.confirmed_at is not None
+    confirmed = await ctx.store.get(checkout.order_id)
+    assert confirmed is not None and confirmed.confirmed_at is not None
 
     swept = await sweeper.sweep_once(
-        ctx, now=checkout.confirmed_at + COD_DELIVERY_WINDOW + timedelta(minutes=1)
+        ctx, now=confirmed.confirmed_at + COD_DELIVERY_WINDOW + timedelta(minutes=1)
     )
 
     assert [s.reason_code for s in swept] == [ReasonCode.DELIVERY_WINDOW_ELAPSED]
     assert swept[0].alerted is True
     assert swept[0].to_status is None
     # A parcel that is late is not a parcel that is lost.
-    assert checkout.status is OrderStatus.CONFIRMED
+    still = await ctx.store.get(checkout.order_id)
+    assert still is not None and still.status is OrderStatus.CONFIRMED
     rows = get_console_store().overdue_holds
     assert [r["order_id"] for r in rows] == [checkout.order_id]
 
@@ -213,11 +225,20 @@ async def test_an_order_the_merchant_already_moved_is_left_alone(ctx: CheckoutCo
     nothing — rather than expiring an order that is already closed."""
     checkout = await _start(ctx)
     await flow.cancel(ctx, checkout.order_id, reason="consumer-walkaway")
-    checkout.status = OrderStatus.PENDING
+
+    # The stale copy, made stale deliberately: the row says `pending` while the
+    # Merchant says `cancelled`, which is exactly the state a tap landing
+    # between two passes produces.
+    stale = await ctx.store.get(checkout.order_id)
+    assert stale is not None
+    stale.status = OrderStatus.PENDING
+    stale.tap_token = checkout.tap_token
+    await ctx.store.save(stale)
 
     swept = await sweeper.sweep_once(
         ctx, now=checkout.created_at + PENDING_TTL + timedelta(minutes=1)
     )
 
     assert swept == []
-    assert checkout.status is OrderStatus.CANCELLED
+    corrected = await ctx.store.get(checkout.order_id)
+    assert corrected is not None and corrected.status is OrderStatus.CANCELLED

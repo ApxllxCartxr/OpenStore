@@ -101,8 +101,8 @@ def surface() -> Iterator[AgentSurface]:
 
 
 @pytest.fixture
-def tokens() -> Iterator[TokenStore]:
-    store = TokenStore()
+def tokens(sessionmaker) -> Iterator[TokenStore]:  # type: ignore[no-untyped-def]
+    store = TokenStore(sessionmaker=sessionmaker)
     configure_approve(ApproveContext(tokens=store, quotes={"ord_1": QUOTE}))
     yield store
     configure_approve(ApproveContext())
@@ -218,9 +218,9 @@ def test_place_order_refuses_when_no_checkout_has_been_started(
     assert "start-checkout" in response.json()["error"]["detail"]
 
 
-def test_place_order_returns_an_approve_url_and_never_an_order(
-    client: TestClient, surface: AgentSurface
-) -> None:
+async def test_place_order_returns_an_approve_url_and_never_an_order(
+    client: TestClient, surface: AgentSurface, sessionmaker
+) -> None:  # type: ignore[no-untyped-def]
     """The single most load-bearing sentence on this surface.
 
     What comes back is a link to the Merchant's own origin. The order it names
@@ -229,9 +229,19 @@ def test_place_order_returns_an_approve_url_and_never_an_order(
     that, and this surface has no way to reach it.
     """
     from openstore.sidecar import checkout as flow
+    from openstore.sidecar.checkout_store import CheckoutStore
 
     token = surface.admission.issue_for_stranger("agent_x")
-    context = flow.CheckoutContext(merchant_domain="spoiledduckie.localhost")
+    # A ready context: `place-order` refuses outright when the money path is
+    # unwired, which is a different assertion and has its own test.
+    context = flow.CheckoutContext(
+        merchant_domain="spoiledduckie.localhost",
+        trait=object(),
+        provider=object(),
+        keyring=object(),
+        sessionmaker=sessionmaker,
+        store=CheckoutStore(sessionmaker=sessionmaker),
+    )
     pending = flow.Pending(
         cart_id="cart_1",
         order_id="ord_1",
@@ -250,7 +260,7 @@ def test_place_order_returns_an_approve_url_and_never_an_order(
         total_minor=int(MINIMAL_QUOTE["total_minor"]),
         tap_token="tok_1",
     )
-    context.pending[pending.order_id] = pending
+    await context.store.save(pending)
     flow.configure(context)
     try:
         response = client.post(
@@ -294,21 +304,21 @@ def test_rate_limits_apply_per_agent(client: TestClient, surface: AgentSurface) 
 # ── The approve page ─────────────────────────────────────────────────────────
 
 
-def test_the_approve_page_is_reachable_without_the_merchant_session(
+async def test_the_approve_page_is_reachable_without_the_merchant_session(
     client: TestClient, tokens: TokenStore
 ) -> None:
     """A Consumer approving a spend is not the Merchant. Requiring the shop's
     login would make the whole flow impossible."""
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
+    tap = await tokens.issue_tap("ord_1", "cart-hash", 259700)
     response = client.get(f"/agentic/approve?t={tap.token}")
     assert response.status_code == 200
     assert not response.request.headers.get("cookie")
 
 
-def test_the_approve_page_renders_the_signed_quote_verbatim(
+async def test_the_approve_page_renders_the_signed_quote_verbatim(
     client: TestClient, tokens: TokenStore
 ) -> None:
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
+    tap = await tokens.issue_tap("ord_1", "cart-hash", 259700)
     body = client.get(f"/agentic/approve?t={tap.token}").text
 
     # Every figure from the Quote, and the total the Consumer is agreeing to.
@@ -322,17 +332,17 @@ def test_the_approve_page_renders_the_signed_quote_verbatim(
     assert "Nothing here was" in body and "calculated by the agent" in body
 
 
-def test_the_approve_page_offers_the_private_code_field(
+async def test_the_approve_page_offers_the_private_code_field(
     client: TestClient, tokens: TokenStore
 ) -> None:
     """A private code is entered here and never travels through the agent."""
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
+    tap = await tokens.issue_tap("ord_1", "cart-hash", 259700)
     body = client.get(f"/agentic/approve?t={tap.token}").text
     assert "Have a code?" in body
     assert "never travels through the agent" in body
 
 
-def test_the_approve_page_shows_only_the_enabled_methods(
+async def test_the_approve_page_shows_only_the_enabled_methods(
     client: TestClient, tokens: TokenStore
 ) -> None:
     configure_approve(
@@ -340,15 +350,15 @@ def test_the_approve_page_shows_only_the_enabled_methods(
             tokens=tokens, quotes={"ord_1": QUOTE}, enabled_methods=frozenset({PaymentMethod.UPI})
         )
     )
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
+    tap = await tokens.issue_tap("ord_1", "cart-hash", 259700)
     body = client.get(f"/agentic/approve?t={tap.token}").text
     assert 'value="upi"' in body
     assert 'value="cash-on-delivery"' not in body
 
 
-def test_the_approve_page_carries_a_countdown(client: TestClient, tokens: TokenStore) -> None:
+async def test_the_approve_page_carries_a_countdown(client: TestClient, tokens: TokenStore) -> None:
     """'This expires' with no number is a sentence nobody acts on."""
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
+    tap = await tokens.issue_tap("ord_1", "cart-hash", 259700)
     body = client.get(f"/agentic/approve?t={tap.token}").text
     assert 'id="countdown"' in body
     assert "can be used once" in body
@@ -358,25 +368,28 @@ def test_an_unknown_token_is_not_found(client: TestClient, tokens: TokenStore) -
     assert client.get("/agentic/approve?t=nope").status_code == 404
 
 
-def test_a_spent_token_is_refused(client: TestClient, tokens: TokenStore) -> None:
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
-    tokens.spend_tap(tap.token, cart_hash="cart-hash")
+async def test_a_spent_token_is_refused(client: TestClient, tokens: TokenStore) -> None:
+    tap = await tokens.issue_tap("ord_1", "cart-hash", 259700)
+    await tokens.spend_tap(tap.token, cart_hash="cart-hash")
     response = client.get(f"/agentic/approve?t={tap.token}")
     assert response.status_code == 403
     assert response.json()["error"]["code"] == ReasonCode.AUTHORITY_STALE.value
 
 
-def test_an_expired_token_is_refused(client: TestClient, tokens: TokenStore) -> None:
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
-    tap.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+async def test_an_expired_token_is_refused(client: TestClient, tokens: TokenStore) -> None:
+    tap = await tokens.issue_tap(
+        "ord_1", "cart-hash", 259700, now=datetime.now(UTC) - timedelta(minutes=10)
+    )
     body = client.get(f"/agentic/approve?t={tap.token}").text
     # The page still renders but the countdown is zero; the spend itself is
     # refused server-side by `spend_tap`, which is the authority.
     assert ">0<" in body or "0</span>" in body
 
 
-def test_the_demo_banner_says_no_real_money_moves(client: TestClient, tokens: TokenStore) -> None:
-    tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
+async def test_the_demo_banner_says_no_real_money_moves(
+    client: TestClient, tokens: TokenStore
+) -> None:
+    tap = await tokens.issue_tap("ord_1", "cart-hash", 259700)
     assert "no real money moves" in client.get(f"/agentic/approve?t={tap.token}").text
 
 

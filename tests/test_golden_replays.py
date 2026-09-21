@@ -46,6 +46,7 @@ from openstore.sidecar.trait.fake import FakeMerchant
 from openstore.sidecar.trait.models import Destination, Line
 from openstore.sidecar.trait.seed import SEED_ITEMS
 from openstore.sidecar.verify.checks import ExitCode, verify
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 DEST_B = Destination(line1="Dadar West", city="Mumbai", state="MH", postal_code="400028")
 CONTACT = {"email": "demo@spoiledduckie.test", "phone": "+919000000001"}
@@ -83,9 +84,10 @@ async def _run(
     merchant: FakeMerchant,
     ledger: Ledger,
     order_id: str,
+    sessionmaker: async_sessionmaker[AsyncSession],
 ) -> Replay:
     gate = Gate(trait, Policy())
-    tokens = TokenStore()
+    tokens = TokenStore(sessionmaker=sessionmaker)
     provider = FakeProvider()
     keyring = Keyring("spoiledduckie.localhost")
     keyring.enroll("k1")
@@ -137,8 +139,8 @@ async def _run(
     assert decision is not None
 
     # ── tap: a hold cannot be created without spending an approve token ──────
-    tap = tokens.issue_tap(order_id, decision.cart_hash, decision.total_minor)
-    spent = tokens.spend_tap(tap.token, cart_hash=decision.cart_hash)
+    tap = await tokens.issue_tap(order_id, decision.cart_hash, decision.total_minor)
+    spent = await tokens.spend_tap(tap.token, cart_hash=decision.cart_hash)
     assert spent.spent
 
     url = approve_url("spoiledduckie.localhost", tap.token)
@@ -231,12 +233,15 @@ def _render(protocol: Protocol, decision: Any, url: str) -> dict[str, Any]:
 
 @pytest.fixture
 async def replays(
-    trait: TraitClient, merchant: FakeMerchant, ledger: Ledger
+    trait: TraitClient,
+    merchant: FakeMerchant,
+    ledger: Ledger,
+    sessionmaker: async_sessionmaker[AsyncSession],
 ) -> dict[Protocol, Replay]:
     out: dict[Protocol, Replay] = {}
     for protocol in TOGGLE_ORDER:
         out[protocol] = await _run(
-            protocol, trait, merchant, ledger, f"ord_golden_{protocol.value}"
+            protocol, trait, merchant, ledger, f"ord_golden_{protocol.value}", sessionmaker
         )
     return out
 

@@ -34,9 +34,14 @@ key" is not the human permission a spend rests on.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import Column as Col
+from sqlalchemy import DateTime, Integer, String, Table, Text, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from webauthn import (
     generate_authentication_options,
     generate_registration_options,
@@ -56,7 +61,56 @@ from webauthn.helpers.structs import (
 
 from openstore.sidecar.core.canonical import canonical_bytes
 from openstore.sidecar.core.codes import Ceremony, ReasonCode
+from openstore.sidecar.core.db import rows_affected, session_scope
+from openstore.sidecar.core.tables import metadata
 from openstore.sidecar.trait.errors import TraitError
+
+#: How long a credential and a ceremony outlive the tap they were made for.
+#: **This is a deliberately short life, not an oversight.** There are no
+#: Consumer accounts in v1: a passkey enrolled to authorize one spend has no
+#: meaning after it, and a row that outlived the checkout would be the first
+#: half of an account system nobody asked for. Durable for the length of one
+#: purchase is what a restart mid-ceremony needs and no more; the sweeper
+#: deletes the rest.
+CEREMONY_TTL = timedelta(hours=24)
+
+#: One row per enrolled authenticator, for as long as its checkout lives.
+passkey_credentials = Table(
+    "passkey_credentials",
+    metadata,
+    Col("credential_id", String(255), primary_key=True),
+    Col("public_key", Text, nullable=False),
+    Col("sign_count", Integer, nullable=False),
+    Col("attestation_fmt", String(32), nullable=False),
+    Col("created_at", DateTime(timezone=True), nullable=False),
+)
+
+#: Challenges handed out and not yet spent, keyed by the tap token they belong
+#: to. Single-use, like the tap token itself.
+passkey_challenges = Table(
+    "passkey_challenges",
+    metadata,
+    Col("tap_token", String(64), primary_key=True),
+    Col("challenge", Text, nullable=False),
+    Col("created_at", DateTime(timezone=True), nullable=False),
+)
+
+#: Completed ceremonies, keyed by the tap token they were taken over and
+#: consumed by that token's tap.
+#:
+#: **A separate table from the challenge on purpose.** They were two dicts, and
+#: folding them into one row made verifying spend the challenge — deleting the
+#: row — a moment before the verified ceremony was written to it, so every
+#: passkey tap silently fell back to `upi-pin`. Two facts with different
+#: lifetimes: the challenge dies when it is answered, the agreement lives until
+#: its tap.
+passkey_ceremonies = Table(
+    "passkey_ceremonies",
+    metadata,
+    Col("tap_token", String(64), primary_key=True),
+    Col("verified", Text, nullable=False),
+    Col("created_at", DateTime(timezone=True), nullable=False),
+)
 
 #: Version-tagged so a future change to what the challenge covers is a different
 #: preimage rather than a silently different meaning for the same bytes.
@@ -137,14 +191,198 @@ class PasskeyRP:
     rp_id: str
     origin: str
     rp_name: str = "This shop"
-    credentials: dict[bytes, StoredCredential] = field(default_factory=dict)
-    #: Challenges handed out and not yet spent, keyed by the tap token they
-    #: belong to. Single-use, like the tap token itself.
-    pending: dict[str, bytes] = field(default_factory=dict)
+    sessionmaker: async_sessionmaker[AsyncSession] | None = None
+    """Where the ceremony's working set lives. Credentials and challenges were
+    two dicts until 09-21, which meant a restart between the browser prompt and
+    the Consumer answering it refused a ceremony that was halfway done — with
+    `authority-stale`, which reads to the Consumer as "you took too long"."""
+
+    def _maker(self) -> async_sessionmaker[AsyncSession]:
+        if self.sessionmaker is None:
+            raise RuntimeError(
+                "This PasskeyRP has no database, so a ceremony cannot outlive the request "
+                "that started it. Set SIDECAR_DATABASE_URL."
+            )
+        return self.sessionmaker
+
+    # ── the ceremony's working set ───────────────────────────────────────────
+
+    async def _put_challenge(self, token: str, challenge: bytes) -> None:
+        values = {
+            "tap_token": token,
+            "challenge": bytes_to_base64url(challenge),
+            "created_at": datetime.now(UTC),
+        }
+        async with session_scope(self._maker()) as session:
+            existing = (
+                await session.execute(
+                    select(passkey_challenges.c.tap_token).where(
+                        passkey_challenges.c.tap_token == token
+                    )
+                )
+            ).first()
+            if existing is None:
+                await session.execute(passkey_challenges.insert().values(**values))
+            else:
+                # A re-rendered approve page asks again for the same tap. The
+                # challenge is derived from the basket, so it is the same
+                # challenge, and rewriting it costs nothing.
+                await session.execute(
+                    passkey_challenges.update()
+                    .where(passkey_challenges.c.tap_token == token)
+                    .values(**values)
+                )
+
+    async def _challenge(self, token: str) -> bytes:
+        async with session_scope(self._maker()) as session:
+            row = (
+                await session.execute(
+                    select(passkey_challenges.c.challenge).where(
+                        passkey_challenges.c.tap_token == token
+                    )
+                )
+            ).first()
+        if row is None:
+            raise PasskeyRefused(
+                ReasonCode.AUTHORITY_STALE,
+                "that passkey ceremony has expired or was already used; start again",
+            )
+        return base64url_to_bytes(row.challenge)
+
+    async def _spend_challenge(self, token: str) -> None:
+        """Single-use, like the tap token it belongs to: a challenge that could
+        be answered twice is a replay of a human's agreement."""
+        async with session_scope(self._maker()) as session:
+            await session.execute(
+                passkey_challenges.delete().where(passkey_challenges.c.tap_token == token)
+            )
+
+    async def _put_credential(self, stored: StoredCredential) -> None:
+        values = {
+            "credential_id": bytes_to_base64url(stored.credential_id),
+            "public_key": bytes_to_base64url(stored.public_key),
+            "sign_count": stored.sign_count,
+            "attestation_fmt": stored.attestation_fmt,
+            "created_at": datetime.now(UTC),
+        }
+        async with session_scope(self._maker()) as session:
+            existing = (
+                await session.execute(
+                    select(passkey_credentials.c.credential_id).where(
+                        passkey_credentials.c.credential_id == values["credential_id"]
+                    )
+                )
+            ).first()
+            if existing is None:
+                await session.execute(passkey_credentials.insert().values(**values))
+            else:
+                # The sign count only ever moves forward; `created_at` is left
+                # where it was so the row still expires with its own checkout.
+                await session.execute(
+                    passkey_credentials.update()
+                    .where(passkey_credentials.c.credential_id == values["credential_id"])
+                    .values(
+                        public_key=values["public_key"],
+                        sign_count=values["sign_count"],
+                        attestation_fmt=values["attestation_fmt"],
+                    )
+                )
+
+    async def credential(self, credential_id: bytes) -> StoredCredential | None:
+        async with session_scope(self._maker()) as session:
+            row = (
+                await session.execute(
+                    select(passkey_credentials).where(
+                        passkey_credentials.c.credential_id == bytes_to_base64url(credential_id)
+                    )
+                )
+            ).first()
+        if row is None:
+            return None
+        return StoredCredential(
+            credential_id=base64url_to_bytes(row.credential_id),
+            public_key=base64url_to_bytes(row.public_key),
+            sign_count=row.sign_count,
+            attestation_fmt=row.attestation_fmt,
+        )
+
+    async def credentials_held(self) -> list[StoredCredential]:
+        async with session_scope(self._maker()) as session:
+            rows = (await session.execute(select(passkey_credentials))).all()
+        return [
+            StoredCredential(
+                credential_id=base64url_to_bytes(r.credential_id),
+                public_key=base64url_to_bytes(r.public_key),
+                sign_count=r.sign_count,
+                attestation_fmt=r.attestation_fmt,
+            )
+            for r in rows
+        ]
+
+    async def remember(self, token: str, verified: VerifiedPasskey) -> None:
+        """Hold a completed ceremony until its tap spends it.
+
+        Keyed by the tap token it was taken over, never by order: two taps of
+        one order are two agreements, and one may not stand in for the other.
+        """
+        values = {
+            "tap_token": token,
+            "verified": json.dumps(_verified_to_dict(verified)),
+            "created_at": datetime.now(UTC),
+        }
+        async with session_scope(self._maker()) as session:
+            # Inserted, not updated: verifying has just spent the challenge row
+            # this belongs to, and an UPDATE would write nothing at all.
+            await session.execute(
+                passkey_ceremonies.delete().where(passkey_ceremonies.c.tap_token == token)
+            )
+            await session.execute(passkey_ceremonies.insert().values(**values))
+
+    async def take(self, token: str) -> VerifiedPasskey | None:
+        """Consume the ceremony this tap agreed with, if there is one.
+
+        Consumed rather than read: a ceremony answers one tap, so a refused tap
+        must not leave an agreement lying about for the next one.
+        """
+        async with session_scope(self._maker()) as session:
+            row = (
+                await session.execute(
+                    select(passkey_ceremonies.c.verified).where(
+                        passkey_ceremonies.c.tap_token == token
+                    )
+                )
+            ).first()
+            if row is None:
+                return None
+            await session.execute(
+                passkey_ceremonies.delete().where(passkey_ceremonies.c.tap_token == token)
+            )
+        return _verified_from_dict(json.loads(row.verified))
+
+    async def forget_expired(self, *, now: datetime | None = None) -> int:
+        """Delete ceremonies and credentials older than one checkout's life.
+
+        This is what keeps "there are no Consumer accounts here" true now that
+        the rows are durable: a credential is kept for the purchase it was
+        enrolled for and then it is gone.
+        """
+        cutoff = (now or datetime.now(UTC)) - CEREMONY_TTL
+        async with session_scope(self._maker()) as session:
+            challenges = await session.execute(
+                passkey_challenges.delete().where(passkey_challenges.c.created_at < cutoff)
+            )
+            ceremonies = await session.execute(
+                passkey_ceremonies.delete().where(passkey_ceremonies.c.created_at < cutoff)
+            )
+            credentials = await session.execute(
+                passkey_credentials.delete().where(passkey_credentials.c.created_at < cutoff)
+            )
+        swept = (challenges, ceremonies, credentials)
+        return sum(rows_affected(result) for result in swept)
 
     # ── beginning ────────────────────────────────────────────────────────────
 
-    def begin(
+    async def begin(
         self,
         *,
         token: str,
@@ -166,14 +404,14 @@ class PasskeyRP:
             merchant_domain=self.rp_id,
             expiry_utc=expiry_utc,
         )
-        self.pending[token] = challenge
+        await self._put_challenge(token, challenge)
 
-        known = self._known(credential_ids)
+        known = await self._known(credential_ids)
         if known:
             return "assertion", self._assertion_options(challenge, known)
         return "enrollment", self._enrollment_options(challenge, token)
 
-    def _known(self, credential_ids: list[str] | None) -> list[StoredCredential]:
+    async def _known(self, credential_ids: list[str] | None) -> list[StoredCredential]:
         """Only credentials this RP actually holds. An id the browser offers that
         we have never seen is not a credential, it is a claim."""
         if not credential_ids:
@@ -181,7 +419,7 @@ class PasskeyRP:
         found = []
         for raw in credential_ids:
             try:
-                stored = self.credentials.get(base64url_to_bytes(raw))
+                stored = await self.credential(base64url_to_bytes(raw))
             except Exception:  # noqa: BLE001 - a malformed id is simply not one of ours
                 continue
             if stored is not None:
@@ -226,7 +464,7 @@ class PasskeyRP:
         )
         return dict(json.loads(options_to_json(options)))
 
-    def options_for(self, token: str, cart_hash: str) -> dict[str, Any]:
+    async def options_for(self, token: str, cart_hash: str) -> dict[str, Any]:
         """Re-issue assertion options over the challenge already handed out.
 
         Used by the attestation fallback, and it must be the **same** challenge:
@@ -235,12 +473,8 @@ class PasskeyRP:
         """
         import json
 
-        challenge = self.pending.get(token)
-        if challenge is None:
-            raise PasskeyRefused(
-                ReasonCode.AUTHORITY_STALE, "that passkey ceremony has expired; start again"
-            )
-        stored = list(self.credentials.values())
+        challenge = await self._challenge(token)
+        stored = await self.credentials_held()
         options = generate_authentication_options(
             rp_id=self.rp_id,
             challenge=challenge,
@@ -251,7 +485,7 @@ class PasskeyRP:
 
     # ── finishing ────────────────────────────────────────────────────────────
 
-    def verify_enrollment(
+    async def verify_enrollment(
         self, *, token: str, credential: dict[str, Any], cart_hash: str, total_minor: int
     ) -> VerifiedPasskey | None:
         """Verify a `create()` response.
@@ -262,7 +496,7 @@ class PasskeyRP:
         a `VerifiedPasskey` there would be the lie this whole module exists to
         avoid.
         """
-        challenge = self._challenge(token)
+        challenge = await self._challenge(token)
         try:
             verified = verify_registration_response(
                 credential=credential,
@@ -277,11 +511,13 @@ class PasskeyRP:
             ) from None
 
         fmt = verified.fmt.value if hasattr(verified.fmt, "value") else str(verified.fmt)
-        self.credentials[verified.credential_id] = StoredCredential(
-            credential_id=verified.credential_id,
-            public_key=verified.credential_public_key,
-            sign_count=verified.sign_count,
-            attestation_fmt=fmt,
+        await self._put_credential(
+            StoredCredential(
+                credential_id=verified.credential_id,
+                public_key=verified.credential_public_key,
+                sign_count=verified.sign_count,
+                attestation_fmt=fmt,
+            )
         )
 
         if fmt == AttestationFormat.NONE.value:
@@ -289,7 +525,7 @@ class PasskeyRP:
             # challenge. The credential exists; the agreement does not.
             return None
 
-        self.pending.pop(token, None)
+        await self._spend_challenge(token)
         return VerifiedPasskey(
             credential_id=bytes_to_base64url(verified.credential_id),
             ceremony=Ceremony.ENROLLMENT,
@@ -300,7 +536,7 @@ class PasskeyRP:
             prompts=1,
         )
 
-    def verify_assertion(
+    async def verify_assertion(
         self,
         *,
         token: str,
@@ -310,9 +546,9 @@ class PasskeyRP:
         prompts: int = 1,
     ) -> VerifiedPasskey:
         """Verify a `get()` response against the challenge this tap was issued."""
-        challenge = self._challenge(token)
+        challenge = await self._challenge(token)
         raw_id = base64url_to_bytes(str(credential.get("rawId") or credential.get("id", "")))
-        stored = self.credentials.get(raw_id)
+        stored = await self.credential(raw_id)
         if stored is None:
             raise PasskeyRefused(
                 ReasonCode.AUTHORITY_MISSING,
@@ -334,15 +570,15 @@ class PasskeyRP:
                 ReasonCode.AUTHORITY_STALE, f"that passkey ceremony did not verify: {exc}"
             ) from None
 
-        self.credentials[raw_id] = StoredCredential(
-            credential_id=stored.credential_id,
-            public_key=stored.public_key,
-            sign_count=verified.new_sign_count,
-            attestation_fmt=stored.attestation_fmt,
+        await self._put_credential(
+            StoredCredential(
+                credential_id=stored.credential_id,
+                public_key=stored.public_key,
+                sign_count=verified.new_sign_count,
+                attestation_fmt=stored.attestation_fmt,
+            )
         )
-        # Single-use, like the tap token it belongs to: a challenge that could be
-        # answered twice is a replay of a human's agreement.
-        self.pending.pop(token, None)
+        await self._spend_challenge(token)
         return VerifiedPasskey(
             credential_id=bytes_to_base64url(raw_id),
             ceremony=Ceremony.ASSERTION,
@@ -353,11 +589,26 @@ class PasskeyRP:
             prompts=prompts,
         )
 
-    def _challenge(self, token: str) -> bytes:
-        challenge = self.pending.get(token)
-        if challenge is None:
-            raise PasskeyRefused(
-                ReasonCode.AUTHORITY_STALE,
-                "that passkey ceremony has expired or was already used; start again",
-            )
-        return challenge
+
+def _verified_to_dict(verified: VerifiedPasskey) -> dict[str, Any]:
+    return {
+        "credential_id": verified.credential_id,
+        "ceremony": verified.ceremony.value,
+        "cart_hash": verified.cart_hash,
+        "total_minor": verified.total_minor,
+        "user_verified": verified.user_verified,
+        "attestation_fmt": verified.attestation_fmt,
+        "prompts": verified.prompts,
+    }
+
+
+def _verified_from_dict(body: dict[str, Any]) -> VerifiedPasskey:
+    return VerifiedPasskey(
+        credential_id=body["credential_id"],
+        ceremony=Ceremony(body["ceremony"]),
+        cart_hash=body["cart_hash"],
+        total_minor=body["total_minor"],
+        user_verified=body["user_verified"],
+        attestation_fmt=body["attestation_fmt"],
+        prompts=body["prompts"],
+    )

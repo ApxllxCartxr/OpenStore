@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
+from conftest import point_stores_at
 from fastapi.testclient import TestClient
 from openstore.sidecar.app import app
 from openstore.sidecar.console.merchant_actions import ActionContext, configure
@@ -30,23 +31,32 @@ from openstore.sidecar.trait.signing import (
     new_nonce,
     sign,
 )
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 SECRET = "conformance-secret"  # noqa: S105 - a test secret, never a deployment one
 
 
 @pytest.fixture(autouse=True)
-def _empty_queue() -> Iterator[None]:
-    get_refund_queue().requests.clear()
+async def _empty_queue(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[None]:
+    """The process-wide queue, pointed at this test's database — the same
+    single call `app.py` makes at startup."""
+    point_stores_at(sessionmaker)
     yield
-    get_refund_queue().requests.clear()
+    point_stores_at(None)
+
+
+@pytest.fixture
+def queue(sessionmaker: async_sessionmaker[AsyncSession]) -> RefundQueue:
+    return RefundQueue(sessionmaker=sessionmaker)
 
 
 # ── The queue itself ─────────────────────────────────────────────────────────
 
 
-def test_an_agent_can_ask_about_a_paid_order() -> None:
-    queue = RefundQueue()
-    request = queue.request(
+async def test_an_agent_can_ask_about_a_paid_order(queue: RefundQueue) -> None:
+    request = await queue.request(
         order_id="ord_1",
         agent_id="agent_a",
         reason="arrived damaged",
@@ -62,72 +72,71 @@ def test_an_agent_can_ask_about_a_paid_order() -> None:
 @pytest.mark.parametrize(
     "status", [OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.CANCELLED]
 )
-def test_an_order_with_no_money_in_it_cannot_be_refunded(status: OrderStatus) -> None:
+async def test_an_order_with_no_money_in_it_cannot_be_refunded(
+    status: OrderStatus, queue: RefundQueue
+) -> None:
     """Before it is paid the instrument is a cancellation, which is a different
     act with a different route and no money in it."""
-    queue = RefundQueue()
     with pytest.raises(TraitError) as refusal:
-        queue.request(order_id="ord_1", agent_id="agent_a", reason="", order_status=status)
+        await queue.request(order_id="ord_1", agent_id="agent_a", reason="", order_status=status)
     assert refusal.value.code is ReasonCode.CANCEL_NOT_ALLOWED
 
 
-def test_asking_twice_is_one_ask() -> None:
+async def test_asking_twice_is_one_ask(queue: RefundQueue) -> None:
     """A queue an agent can flood is the Merchant's attention spent by somebody
     else."""
-    queue = RefundQueue()
-    first = queue.request(
+    first = await queue.request(
         order_id="ord_1", agent_id="a", reason="late", order_status=OrderStatus.PAID
     )
-    second = queue.request(
+    second = await queue.request(
         order_id="ord_1", agent_id="a", reason="still late", order_status=OrderStatus.PAID
     )
 
     assert second.request_id == first.request_id
-    assert len(queue.requests) == 1
+    assert len(await queue.rows()) == 1
 
 
-def test_a_resolved_order_can_be_asked_about_again() -> None:
+async def test_a_resolved_order_can_be_asked_about_again(queue: RefundQueue) -> None:
     """One *open* request per order, not one ever. A second damaged parcel on a
     partially refunded order is a new ask."""
-    queue = RefundQueue()
-    first = queue.request(
+    first = await queue.request(
         order_id="ord_1", agent_id="a", reason="one", order_status=OrderStatus.PAID
     )
-    queue.resolve("ord_1", RefundRequestState.DECLINED, note="outside the window")
-    second = queue.request(
+    await queue.resolve("ord_1", RefundRequestState.DECLINED, note="outside the window")
+    second = await queue.request(
         order_id="ord_1", agent_id="a", reason="two", order_status=OrderStatus.REFUNDED
     )
 
     assert second.request_id != first.request_id
-    assert queue.requests[first.request_id].state is RefundRequestState.DECLINED
+    resolved = await queue.get(first.request_id)
+    assert resolved is not None
+    assert resolved.state is RefundRequestState.DECLINED
 
 
-def test_resolving_to_requested_is_refused() -> None:
-    queue = RefundQueue()
-    queue.request(order_id="ord_1", agent_id="a", reason="", order_status=OrderStatus.PAID)
+async def test_resolving_to_requested_is_refused(queue: RefundQueue) -> None:
+    await queue.request(order_id="ord_1", agent_id="a", reason="", order_status=OrderStatus.PAID)
     with pytest.raises(ValueError, match="not a resolution"):
-        queue.resolve("ord_1", RefundRequestState.REQUESTED)
+        await queue.resolve("ord_1", RefundRequestState.REQUESTED)
 
 
-def test_refunding_an_order_nobody_asked_about_is_not_an_error() -> None:
+async def test_refunding_an_order_nobody_asked_about_is_not_an_error(queue: RefundQueue) -> None:
     """The ordinary case. It must not fail because the queue is empty."""
-    assert RefundQueue().resolve("ord_nobody", RefundRequestState.APPROVED) is None
+    assert await queue.resolve("ord_nobody", RefundRequestState.APPROVED) is None
 
 
-def test_open_asks_sort_above_resolved_ones() -> None:
-    queue = RefundQueue()
-    queue.request(order_id="ord_1", agent_id="a", reason="", order_status=OrderStatus.PAID)
-    queue.resolve("ord_1", RefundRequestState.APPROVED)
-    queue.request(order_id="ord_2", agent_id="a", reason="", order_status=OrderStatus.PAID)
+async def test_open_asks_sort_above_resolved_ones(queue: RefundQueue) -> None:
+    await queue.request(order_id="ord_1", agent_id="a", reason="", order_status=OrderStatus.PAID)
+    await queue.resolve("ord_1", RefundRequestState.APPROVED)
+    await queue.request(order_id="ord_2", agent_id="a", reason="", order_status=OrderStatus.PAID)
 
-    assert [r["order_id"] for r in queue.rows()] == ["ord_2", "ord_1"]
+    assert [r["order_id"] for r in await queue.rows()] == ["ord_2", "ord_1"]
 
 
 # ── The console shows it ─────────────────────────────────────────────────────
 
 
-def test_the_console_has_a_refunds_tab_fed_by_the_live_queue() -> None:
-    get_refund_queue().request(
+async def test_the_console_has_a_refunds_tab_fed_by_the_live_queue() -> None:
+    await get_refund_queue().request(
         order_id="ord_seen",
         agent_id="agent_thumbprint",
         reason="arrived broken",
@@ -135,14 +144,14 @@ def test_the_console_has_a_refunds_tab_fed_by_the_live_queue() -> None:
     )
 
     assert "refunds" in dict(TABS)
-    body = page(build_state(get_console_store()), "refunds")
+    body = page(await build_state(get_console_store()), "refunds")
     assert "ord_seen" in body
     assert "arrived broken" in body
     assert "open" in body
 
 
-def test_an_empty_queue_says_so_rather_than_rendering_nothing() -> None:
-    body = page(build_state(get_console_store()), "refunds")
+async def test_an_empty_queue_says_so_rather_than_rendering_nothing() -> None:
+    body = page(await build_state(get_console_store()), "refunds")
     assert "No agent has asked for a refund." in body
 
 
@@ -150,9 +159,12 @@ def test_an_empty_queue_says_so_rather_than_rendering_nothing() -> None:
 
 
 @pytest.fixture
-def client(ledger: Ledger) -> Iterator[TestClient]:
+def client(ledger: Ledger, sessionmaker: async_sessionmaker[AsyncSession]) -> Iterator[TestClient]:
     configure(ActionContext(ledger_factory=lambda: ledger, secret=SECRET))
     with TestClient(app) as c:
+        # After startup: the lifespan has just replaced every store with one
+        # that has no database.
+        point_stores_at(sessionmaker)
         yield c
     configure(ActionContext())
 
@@ -178,7 +190,7 @@ async def test_a_refund_closes_the_request_that_prompted_it(
 ) -> None:
     await ledger.reserve("ord_r", 10000, "INR")
     await ledger.capture("ord_r", 10000, "INR")
-    request = get_refund_queue().request(
+    request = await get_refund_queue().request(
         order_id="ord_r", agent_id="a", reason="damaged", order_status=OrderStatus.PAID
     )
 
@@ -186,8 +198,12 @@ async def test_a_refund_closes_the_request_that_prompted_it(
 
     assert response.status_code == 200
     assert response.json()["closed_request_id"] == request.request_id
-    assert request.state is RefundRequestState.APPROVED
-    assert "4000 paise" in request.resolution_note
+    # Re-read, because the request is a row now and not a live object: asserting
+    # on the copy would pass even if nothing had been written back.
+    closed = await get_refund_queue().get(request.request_id)
+    assert closed is not None
+    assert closed.state is RefundRequestState.APPROVED
+    assert "4000 paise" in closed.resolution_note
 
 
 async def test_a_decline_closes_the_request_and_writes_no_ledger_entry(
@@ -195,7 +211,7 @@ async def test_a_decline_closes_the_request_and_writes_no_ledger_entry(
 ) -> None:
     """Refusing to refund moves no money, and a `REVERSAL` for a refund that
     never happened would be a false entry in an append-only book."""
-    request = get_refund_queue().request(
+    request = await get_refund_queue().request(
         order_id="ord_d", agent_id="a", reason="changed mind", order_status=OrderStatus.PAID
     )
 
@@ -205,8 +221,10 @@ async def test_a_decline_closes_the_request_and_writes_no_ledger_entry(
 
     assert response.status_code == 200
     assert response.json()["ledger_entries_written"] == 0
-    assert request.state is RefundRequestState.DECLINED
-    assert request.resolution_note == "outside the window"
+    closed = await get_refund_queue().get(request.request_id)
+    assert closed is not None
+    assert closed.state is RefundRequestState.DECLINED
+    assert closed.resolution_note == "outside the window"
     assert await ledger.entries("ord_d") == []
 
 
@@ -230,11 +248,12 @@ async def test_an_unsigned_decline_is_refused(client: TestClient) -> None:
 
 
 @pytest.fixture
-def agent_client() -> Iterator[TestClient]:
+def agent_client(sessionmaker: async_sessionmaker[AsyncSession]) -> Iterator[TestClient]:
     """Built **before** the surface fixture on purpose: the app's lifespan
     configures a surface of its own, so a surface installed first would be
     replaced the moment the client starts."""
     with TestClient(app) as c:
+        point_stores_at(sessionmaker)
         yield c
 
 
@@ -291,7 +310,7 @@ async def test_request_refund_queues_an_ask_and_promises_nothing(
     body = response.json()["result"]
     assert body["state"] == RefundRequestState.REQUESTED.value
     assert "No money has moved" in body["note"]
-    queued = get_refund_queue().open_for(created.order_id)
+    queued = await get_refund_queue().open_for(created.order_id)
     assert queued is not None and queued.agent_id == "agent_asker"
 
 
@@ -320,4 +339,4 @@ async def test_request_refund_on_an_unpaid_order_is_refused(
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == ReasonCode.CANCEL_NOT_ALLOWED.value
-    assert get_refund_queue().requests == {}
+    assert await get_refund_queue().rows() == []

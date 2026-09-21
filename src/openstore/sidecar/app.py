@@ -20,12 +20,15 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from openstore.sidecar.authority.tokens import TokenStore
+from openstore.sidecar.basket import BasketStore
+from openstore.sidecar.checkout_store import CheckoutStore
 from openstore.sidecar.console.approve import router as approve_router
 from openstore.sidecar.console.merchant_actions import router as merchant_actions_router
+from openstore.sidecar.console.refunds import configure_refunds
 from openstore.sidecar.console.routes import router as console_router
 from openstore.sidecar.core.settings import Settings, get_settings
 from openstore.sidecar.evidence.keys import Keyring, load_or_enroll
-from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
+from openstore.sidecar.evidence.store import ReceiptStore, configure_receipts, get_receipt_store
 from openstore.sidecar.protocols.agent_routes import get_surface
 from openstore.sidecar.protocols.agent_routes import router as agent_router
 from openstore.sidecar.provider.routes import router as provider_router
@@ -109,11 +112,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             "order can be taken."
         )
 
+    # Every durable store is pointed at the same database, here, once. A store
+    # that reached no database refuses loudly at its first write rather than
+    # quietly keeping state in a process that is about to be replaced.
+    configure_receipts(sessionmaker)
+    configure_refunds(sessionmaker)
+    get_surface().baskets = BasketStore(sessionmaker=sessionmaker)
+
     provider = _provider_for(settings)
     _configure_webhooks(settings, provider)
     policy = Policy()
-    passkey_rp = _passkey_rp_for(settings, merchant_domain, policy)
-    tokens = TokenStore()
+    passkey_rp = _passkey_rp_for(settings, merchant_domain, policy, sessionmaker)
+    tokens = TokenStore(sessionmaker=sessionmaker)
     checkout_context = CheckoutContext(
         trait=trait,
         policy=policy,
@@ -121,6 +131,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         provider=provider,
         keyring=keyring,
         sessionmaker=sessionmaker,
+        store=CheckoutStore(sessionmaker=sessionmaker),
         receipts=get_receipt_store(),
         merchant_domain=merchant_domain,
         public_origin=settings.openstore_public_origin,
@@ -134,7 +145,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_approve(
         ApproveContext(
             tokens=tokens,
-            quotes=_QuoteView(checkout_context),
             merchant_domain=merchant_domain,
             merchant_name=settings.webauthn_rp_name or "This shop",
             enabled_methods=policy.enabled_methods,
@@ -178,25 +188,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await engine.dispose()
 
 
-class _QuoteView(dict):  # type: ignore[type-arg]
-    """The approve page's quote lookup, backed by live checkouts.
-
-    `ApproveContext.quotes` is a plain dict of pre-computed quotes, which is
-    right for a unit test and wrong for a running shop: the page must render the
-    Quote the Merchant produced for *this* checkout. This reads it through
-    rather than copying it, so a re-quote cannot leave the page showing a stale
-    total.
-    """
-
-    def __init__(self, context: Any) -> None:
-        super().__init__()
-        self._context = context
-
-    def get(self, key: Any, default: Any = None) -> Any:  # noqa: D102
-        checkout = self._context.pending.get(key)
-        return checkout.quote.model_dump(mode="json") if checkout else default
-
-
 def _provider_for(settings: Settings) -> Any:
     """The Provider this deploy talks to (ADR-0013).
 
@@ -217,7 +208,9 @@ def _provider_for(settings: Settings) -> Any:
     return FakeProvider()
 
 
-def _passkey_rp_for(settings: Settings, merchant_domain: str, policy: Any) -> Any:
+def _passkey_rp_for(
+    settings: Settings, merchant_domain: str, policy: Any, sessionmaker: Any = None
+) -> Any:
     """The passkey Relying Party, or `None`.
 
     **The RP ID decides which passkeys exist** (ADR-0008), so it is configuration
@@ -245,6 +238,7 @@ def _passkey_rp_for(settings: Settings, merchant_domain: str, policy: Any) -> An
         rp_id=rp_id,
         origin=origin,
         rp_name=settings.webauthn_rp_name or "This shop",
+        sessionmaker=sessionmaker,
     )
 
 
@@ -411,7 +405,7 @@ def readyz() -> JSONResponse:
 
 
 @app.get("/receipt/{receipt_id}")
-def receipt(receipt_id: str) -> JSONResponse:
+async def receipt(receipt_id: str) -> JSONResponse:
     """The public receipt viewer.
 
     **Outside the console's auth boundary, deliberately.** `/agentic` is
@@ -424,7 +418,7 @@ def receipt(receipt_id: str) -> JSONResponse:
     between them is exactly the oracle the unguessable id exists to close.
     """
     store: ReceiptStore = get_receipt_store()
-    bundle = store.get(receipt_id)
+    bundle = await store.get(receipt_id)
     if bundle is None:
         return JSONResponse(
             status_code=404,

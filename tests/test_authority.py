@@ -21,6 +21,7 @@ from openstore.sidecar.core.codes import (
     ReasonCode,
 )
 from openstore.sidecar.trait.errors import TraitError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 KEY_A = b"deploy-key-for-shop-a"
 KEY_B = b"deploy-key-for-shop-b"
@@ -122,84 +123,98 @@ def test_the_payer_handle_does_not_appear_in_the_pseudonym() -> None:
 # ── Tap tokens ───────────────────────────────────────────────────────────────
 
 
-def test_a_hold_cannot_be_created_without_spending_a_tap_token() -> None:
-    store = TokenStore()
+async def test_a_hold_cannot_be_created_without_spending_a_tap_token(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    store = TokenStore(sessionmaker=sessionmaker)
     with pytest.raises(TraitError) as exc:
-        store.spend_tap("never-issued", cart_hash="abc")
+        await store.spend_tap("never-issued", cart_hash="abc")
     assert exc.value.code is ReasonCode.NOT_FOUND
 
 
-def test_a_tap_token_is_single_use() -> None:
-    store = TokenStore()
-    token = store.issue_tap("ord_1", "cart-hash", 259700)
-    store.spend_tap(token.token, cart_hash="cart-hash")
+async def test_a_tap_token_is_single_use(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+    store = TokenStore(sessionmaker=sessionmaker)
+    token = await store.issue_tap("ord_1", "cart-hash", 259700)
+    await store.spend_tap(token.token, cart_hash="cart-hash")
     with pytest.raises(TraitError, match="already been used"):
-        store.spend_tap(token.token, cart_hash="cart-hash")
+        await store.spend_tap(token.token, cart_hash="cart-hash")
 
 
-def test_a_tap_token_expires_in_five_minutes() -> None:
-    store = TokenStore()
+async def test_a_tap_token_expires_in_five_minutes(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    store = TokenStore(sessionmaker=sessionmaker)
     now = datetime.now(UTC)
-    token = store.issue_tap("ord_2", "cart-hash", 1000, now=now)
+    token = await store.issue_tap("ord_2", "cart-hash", 1000, now=now)
     assert token.expires_at - token.issued_at == timedelta(minutes=5)
     with pytest.raises(TraitError, match="expired"):
-        store.spend_tap(
+        await store.spend_tap(
             token.token, cart_hash="cart-hash", now=now + timedelta(minutes=5, seconds=1)
         )
 
 
-def test_a_tap_token_belongs_to_one_basket() -> None:
-    store = TokenStore()
-    token = store.issue_tap("ord_3", "cart-hash-a", 1000)
+async def test_a_tap_token_belongs_to_one_basket(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    store = TokenStore(sessionmaker=sessionmaker)
+    token = await store.issue_tap("ord_3", "cart-hash-a", 1000)
     with pytest.raises(TraitError, match="different basket"):
-        store.spend_tap(token.token, cart_hash="cart-hash-b")
+        await store.spend_tap(token.token, cart_hash="cart-hash-b")
 
 
-def test_a_destination_edit_after_render_invalidates_the_token() -> None:
+async def test_a_destination_edit_after_render_invalidates_the_token(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
     """Even though the total did not move. Anything shown on the approve page is
     covered on display, so an edit after render cannot redirect a parcel someone
     already paid for."""
-    store = TokenStore()
-    token = store.issue_tap(
+    store = TokenStore(sessionmaker=sessionmaker)
+    token = await store.issue_tap(
         "ord_4", "cart-hash", 259700, rendered_digest="digest-of-what-was-shown"
     )
     with pytest.raises(TraitError, match="something changed"):
-        store.spend_tap(token.token, cart_hash="cart-hash", rendered_digest="digest-after-the-edit")
+        await store.spend_tap(
+            token.token, cart_hash="cart-hash", rendered_digest="digest-after-the-edit"
+        )
 
 
 # ── Resume tokens ────────────────────────────────────────────────────────────
 
 
-def test_a_resume_token_is_session_bound() -> None:
+async def test_a_resume_token_is_session_bound(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
     """Holding the link is not enough. Bare order_id + chat_thread_id in a URL
     would hand anyone with the link someone else's checkout — the same IDOR the
     storefront's order lookup was fixed for."""
-    store = TokenStore()
-    token = store.issue_resume("ord_5", "thread_1", session_id="session_a")
+    store = TokenStore(sessionmaker=sessionmaker)
+    token = await store.issue_resume("ord_5", "thread_1", session_id="session_a")
     with pytest.raises(TraitError) as exc:
-        store.redeem_resume(token.token, session_id="session_b")
+        await store.redeem_resume(token.token, session_id="session_b")
     assert exc.value.code is ReasonCode.NOT_FOUND
     assert "not valid" in exc.value.detail, "a stranger is not told the link is real"
 
 
-def test_a_resume_token_resolves_both_ids_server_side() -> None:
-    store = TokenStore()
-    token = store.issue_resume("ord_6", "thread_2", session_id="s")
-    record = store.redeem_resume(token.token, session_id="s")
+async def test_a_resume_token_resolves_both_ids_server_side(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    store = TokenStore(sessionmaker=sessionmaker)
+    token = await store.issue_resume("ord_6", "thread_2", session_id="s")
+    record = await store.redeem_resume(token.token, session_id="s")
     assert (record.order_id, record.chat_thread_id) == ("ord_6", "thread_2")
     assert "ord_6" not in token.token, "the token is opaque, not a container"
 
 
-def test_a_resume_token_is_single_use() -> None:
-    store = TokenStore()
-    token = store.issue_resume("ord_7", "t", session_id="s")
-    store.redeem_resume(token.token, session_id="s")
+async def test_a_resume_token_is_single_use(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+    store = TokenStore(sessionmaker=sessionmaker)
+    token = await store.issue_resume("ord_7", "t", session_id="s")
+    await store.redeem_resume(token.token, session_id="s")
     with pytest.raises(TraitError):
-        store.redeem_resume(token.token, session_id="s")
+        await store.redeem_resume(token.token, session_id="s")
 
 
-def test_tokens_are_unguessable() -> None:
-    store = TokenStore()
-    issued = {store.issue_tap(f"ord_{n}", "c", 1).token for n in range(200)}
+async def test_tokens_are_unguessable(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+    store = TokenStore(sessionmaker=sessionmaker)
+    issued = {(await store.issue_tap(f"ord_{n}", "c", 1)).token for n in range(200)}
     assert len(issued) == 200
     assert all(len(t) >= 20 for t in issued)

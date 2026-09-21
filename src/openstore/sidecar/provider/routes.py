@@ -123,8 +123,7 @@ async def deliver(raw_body: bytes, signature: str) -> WebhookOutcome:
         return WebhookOutcome(status="duplicate", acted=False, order_id=event.link_id)
 
     checkout_ctx = flow.get_context()
-    order_id = checkout_ctx.by_link.get(event.link_id, "")
-    checkout = checkout_ctx.pending.get(order_id)
+    checkout = await checkout_ctx.store.by_link(event.link_id)
     if checkout is None:
         return WebhookOutcome(
             status="unknown-link",

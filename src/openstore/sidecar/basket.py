@@ -11,10 +11,32 @@ would eventually disagree with the shop about what a Consumer owes.
 
 from __future__ import annotations
 
+import json
 import secrets
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
+from sqlalchemy import Column as Col
+from sqlalchemy import DateTime, String, Table, Text, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from openstore.sidecar.core.db import session_scope
+from openstore.sidecar.core.tables import metadata
 from openstore.sidecar.trait.models import Destination, Line
+
+#: One row per agent. The whole basket, written whole.
+baskets = Table(
+    "baskets",
+    metadata,
+    Col("agent_id", String(128), primary_key=True),
+    Col("cart_id", String(64), nullable=False),
+    Col("lines", Text, nullable=False),
+    Col("destination", Text, nullable=False),
+    Col("contact", Text, nullable=False),
+    Col("fulfillment_option_id", String(64), nullable=False),
+    Col("discount_code", String(64), nullable=True),
+    Col("updated_at", DateTime(timezone=True), nullable=False),
+)
 
 
 @dataclass
@@ -58,12 +80,76 @@ class Basket:
 
 @dataclass
 class BasketStore:
-    baskets: dict[str, Basket] = field(default_factory=dict)
+    """Baskets in the sidecar's own database, one row per agent.
 
-    def for_agent(self, agent_id: str) -> Basket:
-        if agent_id not in self.baskets:
-            self.baskets[agent_id] = Basket(agent_id=agent_id)
-        return self.baskets[agent_id]
+    **Durable since 09-21.** A dict here meant a deploy in the middle of a
+    conversation dropped the Consumer's basket without telling either of them:
+    the agent's next call started an empty cart and the shop's side of the
+    conversation had simply forgotten. Nothing here is money, but a basket is
+    what the Consumer has spent their attention on.
 
-    def clear(self, agent_id: str) -> None:
-        self.baskets.pop(agent_id, None)
+    Read and written whole. A basket is small, it is touched once per tool call,
+    and the alternative — a line table the agent edits row by row — buys
+    nothing and invents a second place the cart can disagree with itself.
+    """
+
+    sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+    def _maker(self) -> async_sessionmaker[AsyncSession]:
+        if self.sessionmaker is None:
+            raise RuntimeError(
+                "This BasketStore has no database, so a basket cannot be kept between "
+                "tool calls. Set SIDECAR_DATABASE_URL."
+            )
+        return self.sessionmaker
+
+    async def for_agent(self, agent_id: str) -> Basket:
+        """This agent's basket, or a fresh one. Never another agent's: the row
+        is keyed by the admitted `agent_id` and nothing else is consulted."""
+        async with session_scope(self._maker()) as session:
+            row = (
+                await session.execute(select(baskets).where(baskets.c.agent_id == agent_id))
+            ).first()
+        if row is None:
+            return Basket(agent_id=agent_id)
+        destination = json.loads(row.destination) if row.destination else None
+        return Basket(
+            agent_id=row.agent_id,
+            cart_id=row.cart_id,
+            lines=[Line(**line) for line in json.loads(row.lines)],
+            destination=Destination(**destination) if destination else None,
+            contact=json.loads(row.contact),
+            fulfillment_option_id=row.fulfillment_option_id,
+            discount_code=row.discount_code,
+        )
+
+    async def save(self, basket: Basket) -> None:
+        """Write this agent's basket back, replacing what was there."""
+        values = {
+            "agent_id": basket.agent_id,
+            "cart_id": basket.cart_id,
+            "lines": json.dumps([line.model_dump(mode="json") for line in basket.lines]),
+            "destination": (
+                json.dumps(basket.destination.model_dump(mode="json")) if basket.destination else ""
+            ),
+            "contact": json.dumps(basket.contact),
+            "fulfillment_option_id": basket.fulfillment_option_id,
+            "discount_code": basket.discount_code,
+            "updated_at": datetime.now(UTC),
+        }
+        async with session_scope(self._maker()) as session:
+            existing = (
+                await session.execute(
+                    select(baskets.c.agent_id).where(baskets.c.agent_id == basket.agent_id)
+                )
+            ).first()
+            if existing is None:
+                await session.execute(baskets.insert().values(**values))
+            else:
+                await session.execute(
+                    baskets.update().where(baskets.c.agent_id == basket.agent_id).values(**values)
+                )
+
+    async def clear(self, agent_id: str) -> None:
+        async with session_scope(self._maker()) as session:
+            await session.execute(baskets.delete().where(baskets.c.agent_id == agent_id))

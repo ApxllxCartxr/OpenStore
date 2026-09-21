@@ -40,7 +40,6 @@ from sqlalchemy import (
     DateTime,
     Index,
     Integer,
-    MetaData,
     String,
     Table,
     UniqueConstraint,
@@ -51,9 +50,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from openstore.sidecar.core.codes import LedgerKind, ReasonCode
+from openstore.sidecar.core.tables import metadata
 from openstore.sidecar.trait.errors import TraitError
-
-metadata = MetaData()
 
 #: One row per money event. No account legs, no derived balances stored — a
 #: stored balance is a second source of truth that drifts silently.

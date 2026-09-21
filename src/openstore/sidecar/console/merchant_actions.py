@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from openstore.sidecar.console.refunds import get_refund_queue
+from openstore.sidecar.console.refunds import close_open_request
 from openstore.sidecar.core.codes import (
     CancellationReason,
     LedgerKind,
@@ -116,7 +116,7 @@ async def refund(request: Request) -> JSONResponse:
     # If an agent asked about this order, the ask is now answered. Closed here
     # rather than by the Merchant remembering to: a queue that only grows is a
     # queue nobody reads twice.
-    closed = get_refund_queue().resolve(
+    closed = await close_open_request(
         order_id,
         RefundRequestState.APPROVED,
         note=f"refunded {entry.amount_minor} paise",
@@ -151,7 +151,7 @@ async def refund_decline(request: Request) -> JSONResponse:
         return _refusal(ReasonCode.SIGNATURE_INVALID, str(exc))
 
     order_id = str(payload.get("order_id", ""))
-    closed = get_refund_queue().resolve(
+    closed = await close_open_request(
         order_id, RefundRequestState.DECLINED, note=str(payload.get("reason", ""))
     )
     if closed is None:

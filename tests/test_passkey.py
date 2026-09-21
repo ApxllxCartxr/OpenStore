@@ -32,8 +32,8 @@ EXPIRY = "2026-09-22T12:00:00Z"
 
 
 @pytest.fixture
-def rp() -> PasskeyRP:
-    return PasskeyRP(rp_id=RP_ID, origin=ORIGIN, rp_name="SpoiledDuckie")
+def rp(sessionmaker) -> PasskeyRP:  # type: ignore[no-untyped-def]
+    return PasskeyRP(rp_id=RP_ID, origin=ORIGIN, rp_name="SpoiledDuckie", sessionmaker=sessionmaker)
 
 
 @pytest.fixture
@@ -41,8 +41,8 @@ def device() -> SoftwareAuthenticator:
     return SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN)
 
 
-def _begin(rp: PasskeyRP, token: str = "tok", cart: str = CART, **over: object):
-    stage, options = rp.begin(
+async def _begin(rp: PasskeyRP, token: str = "tok", cart: str = CART, **over: object):
+    stage, options = await rp.begin(
         token=token,
         cart_hash=cart,
         total_minor=int(over.get("total_minor", TOTAL)),
@@ -92,13 +92,13 @@ def test_the_same_binding_is_the_same_challenge() -> None:
 # ── One prompt, when the authenticator attests ───────────────────────────────
 
 
-def test_an_attested_enrollment_authorizes_in_one_prompt(
+async def test_an_attested_enrollment_authorizes_in_one_prompt(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
-    stage, _, challenge = _begin(rp)
+    stage, _, challenge = await _begin(rp)
     assert stage == "enrollment"
 
-    verified = rp.verify_enrollment(
+    verified = await rp.verify_enrollment(
         token="tok",
         credential=device.create(challenge, attestation="packed"),
         cart_hash=CART,
@@ -115,15 +115,15 @@ def test_an_attested_enrollment_authorizes_in_one_prompt(
 # ── Two prompts, named, when it does not ─────────────────────────────────────
 
 
-def test_an_unattested_enrollment_proves_nothing_on_its_own(
+async def test_an_unattested_enrollment_proves_nothing_on_its_own(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
     """Under `fmt: none` the response signs nothing verifiable as agreement to a
     basket. Returning a verified Authority here is exactly the lie the fallback
     exists to avoid."""
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
 
-    verified = rp.verify_enrollment(
+    verified = await rp.verify_enrollment(
         token="tok",
         credential=device.create(challenge, attestation="none"),
         cart_hash=CART,
@@ -132,25 +132,27 @@ def test_an_unattested_enrollment_proves_nothing_on_its_own(
 
     assert verified is None
     # The credential is usable; the agreement is not yet made.
-    assert len(rp.credentials) == 1
+    assert len(await rp.credentials_held()) == 1
 
 
-def test_the_fallback_assertion_runs_over_the_same_challenge(
+async def test_the_fallback_assertion_runs_over_the_same_challenge(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
     """A second prompt over a *fresh* challenge would be two ceremonies over two
     bindings, which proves nothing about the basket the first one saw."""
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
     created = device.create(challenge, attestation="none")
     assert (
-        rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
+        await rp.verify_enrollment(
+            token="tok", credential=created, cart_hash=CART, total_minor=TOTAL
+        )
         is None
     )
 
-    options = rp.options_for("tok", CART)
+    options = await rp.options_for("tok", CART)
     assert base64url_to_bytes(options["challenge"]) == challenge
 
-    verified = rp.verify_assertion(
+    verified = await rp.verify_assertion(
         token="tok",
         credential=device.get(challenge, str(created["id"])),
         cart_hash=CART,
@@ -166,14 +168,14 @@ def test_the_fallback_assertion_runs_over_the_same_challenge(
 # ── What must not verify ─────────────────────────────────────────────────────
 
 
-def test_a_signature_over_a_different_basket_does_not_verify(
+async def test_a_signature_over_a_different_basket_does_not_verify(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
     """The whole point, in one test. The device signs a challenge built from
     another cart; there is no lookup to fool, and it simply fails."""
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
     created = device.create(challenge, attestation="none")
-    rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
+    await rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
 
     other = challenge_for(
         cart_hash=OTHER_CART,
@@ -183,7 +185,7 @@ def test_a_signature_over_a_different_basket_does_not_verify(
         expiry_utc=EXPIRY,
     )
     with pytest.raises(PasskeyRefused) as refusal:
-        rp.verify_assertion(
+        await rp.verify_assertion(
             token="tok",
             credential=device.get(other, str(created["id"])),
             cart_hash=CART,
@@ -192,12 +194,12 @@ def test_a_signature_over_a_different_basket_does_not_verify(
     assert refusal.value.code is ReasonCode.AUTHORITY_STALE
 
 
-def test_an_amount_changed_after_the_page_rendered_does_not_verify(
+async def test_an_amount_changed_after_the_page_rendered_does_not_verify(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
     created = device.create(challenge, attestation="none")
-    rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
+    await rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
 
     moved = challenge_for(
         cart_hash=CART,
@@ -207,7 +209,7 @@ def test_an_amount_changed_after_the_page_rendered_does_not_verify(
         expiry_utc=EXPIRY,
     )
     with pytest.raises(PasskeyRefused):
-        rp.verify_assertion(
+        await rp.verify_assertion(
             token="tok",
             credential=device.get(moved, str(created["id"])),
             cart_hash=CART,
@@ -215,14 +217,14 @@ def test_an_amount_changed_after_the_page_rendered_does_not_verify(
         )
 
 
-def test_presence_without_user_verification_is_refused(rp: PasskeyRP) -> None:
+async def test_presence_without_user_verification_is_refused(rp: PasskeyRP) -> None:
     """`preferred` degrades silently on authenticators that feel like it, and
     'somebody touched a key' is not the permission a spend rests on."""
     device = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN, user_verified=False)
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
 
     with pytest.raises(PasskeyRefused) as refusal:
-        rp.verify_enrollment(
+        await rp.verify_enrollment(
             token="tok",
             credential=device.create(challenge, attestation="packed"),
             cart_hash=CART,
@@ -231,14 +233,14 @@ def test_presence_without_user_verification_is_refused(rp: PasskeyRP) -> None:
     assert refusal.value.code is ReasonCode.AUTHORITY_MISSING
 
 
-def test_a_ceremony_from_another_origin_is_refused(rp: PasskeyRP) -> None:
+async def test_a_ceremony_from_another_origin_is_refused(rp: PasskeyRP) -> None:
     """The RP ID decides which passkeys exist. A response minted against another
     origin is another shop's ceremony."""
     elsewhere = SoftwareAuthenticator(rp_id=RP_ID, origin="http://evil.example")
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
 
     with pytest.raises(PasskeyRefused):
-        rp.verify_enrollment(
+        await rp.verify_enrollment(
             token="tok",
             credential=elsewhere.create(challenge, attestation="packed"),
             cart_hash=CART,
@@ -246,29 +248,31 @@ def test_a_ceremony_from_another_origin_is_refused(rp: PasskeyRP) -> None:
         )
 
 
-def test_a_challenge_is_spent_once(rp: PasskeyRP, device: SoftwareAuthenticator) -> None:
+async def test_a_challenge_is_spent_once(rp: PasskeyRP, device: SoftwareAuthenticator) -> None:
     """A challenge that could be answered twice is a replay of a human's
     agreement."""
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
     created = device.create(challenge, attestation="none")
-    rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
+    await rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
     assertion = device.get(challenge, str(created["id"]))
-    rp.verify_assertion(token="tok", credential=assertion, cart_hash=CART, total_minor=TOTAL)
+    await rp.verify_assertion(token="tok", credential=assertion, cart_hash=CART, total_minor=TOTAL)
 
     with pytest.raises(PasskeyRefused) as refusal:
-        rp.verify_assertion(token="tok", credential=assertion, cart_hash=CART, total_minor=TOTAL)
+        await rp.verify_assertion(
+            token="tok", credential=assertion, cart_hash=CART, total_minor=TOTAL
+        )
     assert refusal.value.code is ReasonCode.AUTHORITY_STALE
 
 
-def test_a_credential_this_shop_never_enrolled_is_refused(
+async def test_a_credential_this_shop_never_enrolled_is_refused(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
-    _, _, challenge = _begin(rp)
+    _, _, challenge = await _begin(rp)
     stranger = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN)
     created = stranger.create(challenge, attestation="none")  # never enrolled here
 
     with pytest.raises(PasskeyRefused) as refusal:
-        rp.verify_assertion(
+        await rp.verify_assertion(
             token="tok",
             credential=stranger.get(challenge, str(created["id"])),
             cart_hash=CART,
@@ -280,16 +284,16 @@ def test_a_credential_this_shop_never_enrolled_is_refused(
 # ── A second visit skips enrollment ──────────────────────────────────────────
 
 
-def test_a_returning_device_is_asked_to_assert_not_to_enroll(
+async def test_a_returning_device_is_asked_to_assert_not_to_enroll(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
     """Roaming five shops costs five taps, not five signups — and the sixth visit
     to one of them costs one."""
-    _, _, first = _begin(rp)
+    _, _, first = await _begin(rp)
     created = device.create(first, attestation="none")
-    rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
+    await rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
 
-    stage, options, _ = _begin(rp, token="tok2", credential_ids=[str(created["id"])])
+    stage, options, _ = await _begin(rp, token="tok2", credential_ids=[str(created["id"])])
 
     assert stage == "assertion"
     assert options["allowCredentials"][0]["id"] == created["id"]
@@ -304,6 +308,8 @@ async def ctx(trait):  # type: ignore[no-untyped-def]
     from collections.abc import AsyncIterator  # noqa: F401
 
     from openstore.sidecar import checkout as flow
+    from openstore.sidecar.authority.tokens import TokenStore
+    from openstore.sidecar.checkout_store import CheckoutStore
     from openstore.sidecar.core.db import create_all, make_engine, make_sessionmaker
     from openstore.sidecar.evidence.keys import Keyring
     from openstore.sidecar.evidence.store import ReceiptStore
@@ -311,17 +317,20 @@ async def ctx(trait):  # type: ignore[no-untyped-def]
 
     engine = make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
+    maker = make_sessionmaker(engine)
     ring = Keyring(merchant_domain=RP_ID)
     ring.enroll("k1")
     context = flow.CheckoutContext(
         trait=trait,
+        tokens=TokenStore(sessionmaker=maker),
         provider=FakeProvider(),
         keyring=ring,
-        sessionmaker=make_sessionmaker(engine),
-        receipts=ReceiptStore(),
+        sessionmaker=maker,
+        receipts=ReceiptStore(sessionmaker=maker),
         merchant_domain=RP_ID,
         deploy_pseudonym_key=b"passkey-test-key",
-        passkey_rp=PasskeyRP(rp_id=RP_ID, origin=ORIGIN),
+        store=CheckoutStore(sessionmaker=maker),
+        passkey_rp=PasskeyRP(rp_id=RP_ID, origin=ORIGIN, sessionmaker=maker),
     )
     flow.configure(context)
     yield context
@@ -350,7 +359,7 @@ async def _started(ctx, method):  # type: ignore[no-untyped-def]
 async def _ceremony(ctx, checkout, device: SoftwareAuthenticator) -> None:  # type: ignore[no-untyped-def]
     """Run the ceremony the way the page does, ending with it held against the
     tap token."""
-    _, options = ctx.passkey_rp.begin(
+    _, options = await ctx.passkey_rp.begin(
         token=checkout.tap_token,
         cart_hash=checkout.cart_hash,
         total_minor=checkout.total_minor,
@@ -358,14 +367,33 @@ async def _ceremony(ctx, checkout, device: SoftwareAuthenticator) -> None:  # ty
         expiry_utc=checkout.expiry_utc,
     )
     challenge = base64url_to_bytes(options["challenge"])
-    verified = ctx.passkey_rp.verify_enrollment(
+    verified = await ctx.passkey_rp.verify_enrollment(
         token=checkout.tap_token,
         credential=device.create(challenge, attestation="packed"),
         cart_hash=checkout.cart_hash,
         total_minor=checkout.total_minor,
     )
     assert verified is not None
-    ctx.passkeys[checkout.tap_token] = verified
+    await ctx.passkey_rp.remember(checkout.tap_token, verified)
+
+
+async def _remembered(ctx, token: str):  # type: ignore[no-untyped-def]
+    """What the RP is holding for this tap, without consuming it.
+
+    `take` is single-use by design, so a test that used it to look would change
+    the thing it is asserting about.
+    """
+    from openstore.sidecar.authority.passkey import passkey_ceremonies
+    from openstore.sidecar.core.db import session_scope
+    from sqlalchemy import select
+
+    async with session_scope(ctx.passkey_rp.sessionmaker) as session:
+        row = (
+            await session.execute(
+                select(passkey_ceremonies.c.verified).where(passkey_ceremonies.c.tap_token == token)
+            )
+        ).first()
+    return None if row is None else row.verified
 
 
 async def test_a_prepaid_tap_carrying_a_passkey_binds_the_cart(
@@ -411,7 +439,9 @@ async def test_a_cod_passkey_order_derives_its_pseudonym_from_the_credential(
     transcript = result.decision.transcript
     assert transcript.authority_kind is AuthorityKind.CONFIRMED_INTENT
     assert transcript.authority_mechanism == IntentMechanism.PASSKEY.value
-    assert checkout.handle_source is HandleSource.CREDENTIAL_ID
+    # `result.checkout` and not the object `start` returned: a checkout is a
+    # row now, and the tap reads its own copy.
+    assert result.checkout.handle_source is HandleSource.CREDENTIAL_ID
     assert transcript.consumer_id.startswith("csm_")
 
 
@@ -427,7 +457,7 @@ async def test_a_ceremony_is_consumed_by_the_tap_it_was_taken_for(
     await _ceremony(ctx, checkout, device)
     await flow.tap(ctx, checkout.tap_token)
 
-    assert ctx.passkeys == {}
+    assert await ctx.passkey_rp.take(checkout.tap_token) is None
 
 
 async def test_the_receipt_names_the_passkey_binding_verbatim(
@@ -445,7 +475,7 @@ async def test_the_receipt_names_the_passkey_binding_verbatim(
     ctx.provider.approve(result.checkout.link_id)
     settled = await flow.complete(ctx, result.checkout.link_id, payer_handle="demo@upi")
 
-    bundle = ctx.receipts.get(settled.receipt_id)
+    bundle = await ctx.receipts.get(settled.receipt_id)
     tapped = next(s for s in bundle.sections if s.name == "tapped")
     assert tapped.payload["authority_kind"] == AuthorityKind.PASSKEY.value
     assert tapped.payload["binding"] == {"what": "cart", "by": "payer-device"}
@@ -505,7 +535,7 @@ async def test_the_two_prompt_fallback_runs_over_http(
     # agreement to a basket.
     assert first["next"] == "assertion-fallback"
     assert base64url_to_bytes(first["options"]["challenge"]) == challenge
-    assert ctx.passkeys == {}
+    assert await _remembered(ctx, checkout.tap_token) is None
 
     done = approve_client.post(
         "/agentic/approve/passkey/finish",
@@ -519,7 +549,7 @@ async def test_the_two_prompt_fallback_runs_over_http(
     assert done["next"] is None
     assert done["ceremony"] == Ceremony.ASSERTION.value
     assert done["prompts"] == 2
-    assert checkout.tap_token in ctx.passkeys
+    assert await _remembered(ctx, checkout.tap_token) is not None
 
 
 async def test_a_ceremony_on_a_dead_token_is_refused(ctx, approve_client) -> None:  # type: ignore[no-untyped-def]

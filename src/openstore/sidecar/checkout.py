@@ -37,6 +37,7 @@ from typing import Any
 
 from openstore.sidecar.authority.kinds import HandleSource, derive_consumer_id
 from openstore.sidecar.authority.tokens import TokenStore
+from openstore.sidecar.checkout_store import CheckoutStore
 from openstore.sidecar.core.canonical import cart_hash as compute_cart_hash
 from openstore.sidecar.core.canonical import pii_commit, quote_hash
 from openstore.sidecar.core.codes import (
@@ -127,21 +128,14 @@ class CheckoutContext:
     keyring: Keyring | None = None
     sessionmaker: Any = None
     receipts: Any = None
-    pending: dict[str, Pending] = field(default_factory=dict)
-    decisions: dict[str, Decision] = field(default_factory=dict)
-    """The permitted Decision per order, held until the money settles against
-    it. `settle` reconciles the Provider's record with the total the Gate
-    decided, so throwing the Decision away would leave nothing to reconcile
-    against."""
-    by_token: dict[str, str] = field(default_factory=dict)
-    by_link: dict[str, str] = field(default_factory=dict)
+    store: CheckoutStore = field(default_factory=CheckoutStore)
+    """Checkouts in flight and the Decision each is waiting to settle against,
+    in the sidecar's own database. Three dicts until 09-21 — `pending`,
+    `by_token` and `by_link` — which is why a restart between the tap and the
+    Provider's callback lost the order the money belonged to."""
     passkey_rp: Any = None
     """A `PasskeyRP`. `None` means this deploy runs no passkey ceremony, and the
     approve page offers none rather than offering one that cannot complete."""
-    passkeys: dict[str, Any] = field(default_factory=dict)
-    """Completed ceremonies, keyed by the tap token they were taken over and
-    consumed by that token's tap. Never keyed by order: two taps of one order
-    are two agreements, and one may not stand in for the other."""
     merchant_domain: str = "spoiledduckie.localhost"
     public_origin: str = ""
     deploy_pseudonym_key: bytes = b""
@@ -379,10 +373,11 @@ async def start(
         discount_code=discount_code,
         created_at=created_at,
     )
-    ctx.pending[checkout.order_id] = checkout
-    token = ctx.tokens.issue_tap(checkout.order_id, digest, quote.total_minor)
-    ctx.by_token[token.token] = checkout.order_id
+    token = await ctx.tokens.issue_tap(checkout.order_id, digest, quote.total_minor)
     checkout.tap_token = token.token
+    # Written once, with its token already on it: a row saved before the token
+    # existed would be a checkout no approve link could ever find.
+    await ctx.store.save(checkout)
     return checkout
 
 
@@ -416,21 +411,20 @@ async def tap(
     cart_hash it was minted over — so a basket edited after render invalidates
     it even when the total did not move.
     """
-    order_id = ctx.by_token.get(token, "")
-    checkout = ctx.pending.get(order_id)
+    checkout = await ctx.store.by_token(token)
     if checkout is None:
         raise CheckoutRefused(ReasonCode.NOT_FOUND, "That approval link is not valid.")
     if method is not None:
         checkout.method = method
 
     try:
-        ctx.tokens.spend_tap(token, cart_hash=checkout.cart_hash)
+        await ctx.tokens.spend_tap(token, cart_hash=checkout.cart_hash)
     except TraitError as exc:
         raise CheckoutRefused(exc.code, exc.detail) from None
 
-    # Consumed, not read: a ceremony answers one tap. Popped after the token is
+    # Consumed, not read: a ceremony answers one tap. Taken after the token is
     # spent so a refused tap cannot leave an agreement lying about for the next.
-    verified = ctx.passkeys.pop(token, None)
+    verified = await ctx.passkey_rp.take(token) if ctx.passkey_rp is not None else None
     if verified is not None and verified.cart_hash != checkout.cart_hash:
         # Belt and braces over the challenge itself, which already covers the
         # cart. This catches the ceremony being carried to a different checkout,
@@ -489,8 +483,8 @@ async def tap(
     if checkout.method is PaymentMethod.CASH_ON_DELIVERY:
         # ADR-0018: no Ledger entry at order time and no Provider at all. The
         # money event is collection, which is a Merchant action later.
-        ctx.decisions[checkout.order_id] = decision
         checkout.receipt_id = await _seal(ctx, checkout, decision, entries=[])
+        await ctx.store.save(checkout, decision)
         return TapResult(checkout=checkout, decision=decision, receipt_id=checkout.receipt_id)
 
     from openstore.sidecar.core.db import session_scope
@@ -510,8 +504,10 @@ async def tap(
     # The hold must never outlive the link it was taken for, so the sweeper is
     # given the Provider's own deadline rather than assuming the default window.
     checkout.link_expires_at = checkout.confirmed_at + timedelta(seconds=link.expires_in_seconds)
-    ctx.by_link[link.link_id] = checkout.order_id
-    ctx.decisions[checkout.order_id] = decision
+    # The link id and the Decision land in the same write. They are what the
+    # Provider's callback arrives looking for, and a callback can arrive before
+    # the Consumer's browser has finished redirecting.
+    await ctx.store.save(checkout, decision)
     return TapResult(checkout=checkout, decision=decision, pay_url=link.url)
 
 
@@ -520,11 +516,10 @@ async def tap(
 
 async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = "") -> Pending:
     """The money arrived. Reconcile it, commit the stock, seal the receipt."""
-    order_id = ctx.by_link.get(link_id, "")
-    checkout = ctx.pending.get(order_id)
+    checkout = await ctx.store.by_link(link_id)
     if checkout is None:
         raise CheckoutRefused(ReasonCode.NOT_FOUND, "No checkout is waiting on that payment.")
-    decision = ctx.decisions.get(order_id)
+    decision = await ctx.store.decision_for(checkout.order_id)
     if decision is None:
         raise CheckoutRefused(ReasonCode.NOT_FOUND, "That checkout has no decision to settle.")
     if payer_handle and checkout.handle_source is HandleSource.PAYER_HANDLE:
@@ -555,6 +550,7 @@ async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = ""
 
     if settlement.status is not OrderStatus.PAID:
         checkout.status = settlement.status
+        await ctx.store.save(checkout)
         await set_status(
             ctx,
             checkout.order_id,
@@ -570,6 +566,7 @@ async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = ""
     await set_status(ctx, checkout.order_id, OrderStatus.PAID)
     checkout.status = OrderStatus.PAID
     checkout.receipt_id = await _seal(ctx, checkout, decision, entries=entries)
+    await ctx.store.save(checkout)
     return checkout
 
 
@@ -617,7 +614,7 @@ async def _seal(
     bundle.signing_kid = ctx.keyring.current.kid
     bundle.signature = sign(ctx.keyring.current, bundle.signing_payload())
     if ctx.receipts is not None:
-        ctx.receipts.put(bundle)
+        await ctx.receipts.put(bundle)
     return receipt_id
 
 
@@ -631,7 +628,7 @@ async def cancel(ctx: CheckoutContext, order_id: str, *, reason: str = "") -> Pe
     A `paid` order is not cancelled here. That is a refund, which moves money
     and belongs to the Merchant, not to an agent.
     """
-    checkout = ctx.pending.get(order_id)
+    checkout = await ctx.store.get(order_id)
     if checkout is None:
         raise CheckoutRefused(ReasonCode.NOT_FOUND, "No such checkout.")
     if checkout.status is OrderStatus.PAID:
@@ -662,17 +659,20 @@ async def cancel(ctx: CheckoutContext, order_id: str, *, reason: str = "") -> Pe
     if checkout.link_id:
         await ctx.provider.cancel(checkout.link_id)
     # The tap token dies with the checkout: an approve link for a cancelled
-    # order must not still open.
-    ctx.by_token.pop(checkout.tap_token, None)
+    # order must not still open. Cleared off the row rather than deleted from
+    # the token table, so the token itself stays readable as history while
+    # resolving to no checkout — which is exactly what the page should say.
+    checkout.tap_token = ""
+    await ctx.store.save(checkout)
     return checkout
 
 
 async def collect_cash(ctx: CheckoutContext, order_id: str) -> Pending:
     """COD collection: one CAPTURE with no preceding RESERVE (ADR-0018)."""
-    checkout = ctx.pending.get(order_id)
+    checkout = await ctx.store.get(order_id)
     if checkout is None:
         raise CheckoutRefused(ReasonCode.NOT_FOUND, "No such checkout.")
-    decision = ctx.decisions.get(order_id)
+    decision = await ctx.store.decision_for(order_id)
     if decision is None:
         raise CheckoutRefused(ReasonCode.NOT_FOUND, "That checkout has no decision to collect on.")
 
@@ -683,4 +683,5 @@ async def collect_cash(ctx: CheckoutContext, order_id: str) -> Pending:
         await collect(decision, Ledger(session))
     await set_status(ctx, order_id, OrderStatus.PAID)
     checkout.status = OrderStatus.PAID
+    await ctx.store.save(checkout)
     return checkout

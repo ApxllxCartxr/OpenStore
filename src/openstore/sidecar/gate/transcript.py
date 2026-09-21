@@ -200,3 +200,47 @@ class Transcript:
                 "unresolved deferred checks: "
                 + ", ".join(c.check.value for c in self.deferred_checks)
             )
+
+
+def transcript_from_dict(body: dict[str, Any]) -> Transcript:
+    """Rebuild a Transcript from `to_dict`.
+
+    Exists because a decision has to survive the gap between the tap and the
+    money arriving, which may span a restart. **The round trip must be exact**:
+    these bytes are what the receipt carries and what the golden replays pin, so
+    a field this forgets would not be a missing field — it would be a different
+    signed document. `test_transcript_round_trip_is_byte_stable` is the check
+    that keeps the two functions in step.
+    """
+    authority = body.get("authority") or {}
+    binding = authority.get("binding") or None
+    transcript = Transcript(
+        order_id=body["order_id"],
+        cart_hash=body["cart_hash"],
+        quote_hash=body["quote_hash"],
+        total_minor=body["total_minor"],
+        currency=body["currency"],
+        merchant_domain=body["merchant_domain"],
+        expiry_utc=body["expiry_utc"],
+        agent_id=body["agent_id"],
+        consumer_id=body["consumer_id"],
+        authority_kind=AuthorityKind(authority["kind"]) if authority.get("kind") else None,
+        authority_mechanism=authority.get("mechanism"),
+        binding=(
+            Binding(BindingWhat(binding["what"]), BindingBy(binding["by"])) if binding else None
+        ),
+        ceremony=authority.get("ceremony"),
+        checks=[
+            CheckRecord(
+                check=GateCheck(c["check"]),
+                result=CheckResult(c["result"]),
+                reason_code=ReasonCode(c["reason_code"]) if c.get("reason_code") else None,
+                detail=c.get("detail", ""),
+            )
+            for c in body.get("checks", [])
+        ],
+    )
+    # Set after the checks, because `record()` is what normally sets it and
+    # these are being restored rather than recorded.
+    transcript.reason_code = ReasonCode(body["reason_code"]) if body.get("reason_code") else None
+    return transcript

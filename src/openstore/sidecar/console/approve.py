@@ -216,7 +216,7 @@ def render_approve(
     for tax in quote.get("tax_lines", []):
         included = ' <span class="muted">included</span>' if tax.get("informational") else ""
         rows.append(
-            f'<tr><td>{_e(tax["label"])}{included}</td>'
+            f"<tr><td>{_e(tax['label'])}{included}</td>"
             f'<td class="num">{_e(format_rupees(tax["amount_minor"]))}</td></tr>'
         )
 
@@ -345,12 +345,30 @@ amount and nothing else — the agent never holds a payment credential.</p>
 </html>"""
 
 
+async def _quote_for(order_id: str, total_minor: int) -> dict[str, Any]:
+    """The Quote this page must render.
+
+    Read from the live checkout first, so the page shows the Quote the Merchant
+    produced for *this* order — a re-quote must not leave the page showing a
+    stale total. `ApproveContext.quotes` is the injected fallback a unit test
+    supplies, and `total_minor` alone is what is left when there is neither.
+    """
+    from openstore.sidecar import checkout as flow
+
+    ctx = flow.get_context()
+    if ctx.store.sessionmaker is not None:
+        checkout = await ctx.store.get(order_id)
+        if checkout is not None:
+            return dict(checkout.quote.model_dump(mode="json"))
+    return _context.quotes.get(order_id, {"total_minor": total_minor})
+
+
 # `response_model=None`: this returns HTML on the happy path and a JSON refusal
 # envelope otherwise, and FastAPI cannot build one response model from both.
 @router.get("/approve", response_class=HTMLResponse, response_model=None)
-def approve(request: Request) -> HTMLResponse | JSONResponse:
+async def approve(request: Request) -> HTMLResponse | JSONResponse:
     token = request.query_params.get("t", "")
-    record = _context.tokens.taps.get(token)
+    record = await _context.tokens.tap(token)
     if record is None:
         error = TraitError(ReasonCode.NOT_FOUND, "That approval link is not valid.")
         return JSONResponse(status_code=404, content=error.to_payload())
@@ -358,7 +376,7 @@ def approve(request: Request) -> HTMLResponse | JSONResponse:
         error = TraitError(ReasonCode.AUTHORITY_STALE, "That approval link has already been used.")
         return JSONResponse(status_code=403, content=error.to_payload())
 
-    quote = _context.quotes.get(record.order_id, {"total_minor": record.total_minor})
+    quote = await _quote_for(record.order_id, record.total_minor)
     from datetime import UTC, datetime
 
     remaining = max(0, int((record.expires_at - datetime.now(UTC)).total_seconds()))
@@ -480,7 +498,7 @@ async def approve_tap(request: Request) -> HTMLResponse:
 # Consumer is doing when they agree — the spend happens when the form posts.
 
 
-def _checkout_for(token: str) -> Any:
+async def _checkout_for(token: str) -> Any:
     """The checkout this tap token belongs to, or a refusal.
 
     Read through the live money path rather than from a copy: the challenge is
@@ -490,7 +508,7 @@ def _checkout_for(token: str) -> Any:
     from openstore.sidecar import checkout as flow
 
     ctx = flow.get_context()
-    checkout = ctx.pending.get(ctx.by_token.get(token, ""))
+    checkout = await ctx.store.by_token(token)
     if checkout is None:
         raise TraitError(ReasonCode.NOT_FOUND, "That approval link is not valid.")
     return checkout
@@ -516,14 +534,14 @@ async def passkey_begin(request: Request) -> JSONResponse:
     body = await request.json()
     token = str(body.get("t", ""))
     try:
-        checkout = _checkout_for(token)
+        checkout = await _checkout_for(token)
         # Unspent and unexpired, checked here as well as at the tap: running a
         # ceremony against a dead token would spend a human's attention on an
         # agreement that can never be used.
-        record = ctx.tokens.taps.get(token)
+        record = await ctx.tokens.tap(token)
         if record is None or record.spent:
             raise TraitError(ReasonCode.AUTHORITY_STALE, "That approval link is no longer open.")
-        stage, options = ctx.passkey_rp.begin(
+        stage, options = await ctx.passkey_rp.begin(
             token=token,
             cart_hash=checkout.cart_hash,
             total_minor=checkout.total_minor,
@@ -565,9 +583,9 @@ async def passkey_finish(request: Request) -> JSONResponse:
         )
 
     try:
-        checkout = _checkout_for(token)
+        checkout = await _checkout_for(token)
         if stage == "enrollment":
-            verified = ctx.passkey_rp.verify_enrollment(
+            verified = await ctx.passkey_rp.verify_enrollment(
                 token=token,
                 credential=credential,
                 cart_hash=checkout.cart_hash,
@@ -580,7 +598,7 @@ async def passkey_finish(request: Request) -> JSONResponse:
                         # prompt count in the Transcript is the truth rather
                         # than whichever the client claims.
                         "next": "assertion-fallback",
-                        "options": ctx.passkey_rp.options_for(token, checkout.cart_hash),
+                        "options": await ctx.passkey_rp.options_for(token, checkout.cart_hash),
                         "why": (
                             "Your device did not vouch for itself, so nothing it signed yet "
                             "proves agreement to this basket."
@@ -588,7 +606,7 @@ async def passkey_finish(request: Request) -> JSONResponse:
                     }
                 )
         else:
-            verified = ctx.passkey_rp.verify_assertion(
+            verified = await ctx.passkey_rp.verify_assertion(
                 token=token,
                 credential=credential,
                 cart_hash=checkout.cart_hash,
@@ -601,7 +619,7 @@ async def passkey_finish(request: Request) -> JSONResponse:
         return _passkey_refusal(exc)
 
     # Held against the token, consumed by that token's tap.
-    ctx.passkeys[token] = verified
+    await ctx.passkey_rp.remember(token, verified)
     return JSONResponse(
         {
             "next": None,
@@ -612,7 +630,7 @@ async def passkey_finish(request: Request) -> JSONResponse:
 
 
 @router.get("/fake-pay/{link_id}", response_class=HTMLResponse, response_model=None)
-def fake_pay(link_id: str) -> HTMLResponse:
+async def fake_pay(link_id: str) -> HTMLResponse:
     """The demo Provider's payment page.
 
     `FakeProvider.make_link` has always returned this URL and the route did not
@@ -622,8 +640,7 @@ def fake_pay(link_id: str) -> HTMLResponse:
     from openstore.sidecar import checkout as flow
 
     ctx = flow.get_context()
-    order_id = ctx.by_link.get(link_id, "")
-    checkout = ctx.pending.get(order_id)
+    checkout = await ctx.store.by_link(link_id)
     if checkout is None:
         return _page("Unknown payment", "<h1>That payment link is not valid</h1>", status=404)
 

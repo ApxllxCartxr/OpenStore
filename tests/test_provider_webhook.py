@@ -21,7 +21,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openstore.sidecar import checkout as flow
+from openstore.sidecar.authority.tokens import TokenStore
 from openstore.sidecar.checkout import CheckoutContext
+from openstore.sidecar.checkout_store import CheckoutStore
 from openstore.sidecar.core.codes import OrderStatus, PaymentMethod, ReasonCode
 from openstore.sidecar.core.db import create_all, make_engine, make_sessionmaker
 from openstore.sidecar.evidence.keys import Keyring
@@ -41,6 +43,7 @@ SECRET = "webhook-test-secret"  # noqa: S105 - a test secret, never a deployment
 async def ctx(trait: TraitClient) -> AsyncIterator[CheckoutContext]:
     engine = make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
+    maker = make_sessionmaker(engine)
     ring = Keyring(merchant_domain="spoiledduckie.localhost")
     ring.enroll("k1")
     provider = FakeProvider(webhook_secret=SECRET)
@@ -48,8 +51,10 @@ async def ctx(trait: TraitClient) -> AsyncIterator[CheckoutContext]:
         trait=trait,
         provider=provider,
         keyring=ring,
-        sessionmaker=make_sessionmaker(engine),
-        receipts=ReceiptStore(),
+        sessionmaker=maker,
+        tokens=TokenStore(sessionmaker=maker),
+        store=CheckoutStore(sessionmaker=maker),
+        receipts=ReceiptStore(sessionmaker=maker),
         merchant_domain="spoiledduckie.localhost",
         deploy_pseudonym_key=b"webhook-test-key",
     )
@@ -81,7 +86,17 @@ async def _confirmed(ctx: CheckoutContext, cart: str = "cart_webhook") -> flow.P
     )
     result = await flow.tap(ctx, checkout.tap_token)
     assert not result.refused
-    return checkout
+    # The tapped copy, which carries the link id and the confirmed status. The
+    # object `start` returned is a snapshot from before the tap.
+    return result.checkout
+
+
+async def _status(ctx: CheckoutContext, checkout: flow.Pending) -> OrderStatus:
+    """What the stored checkout says now — never the local copy, which cannot
+    know what a webhook did to it."""
+    row = await ctx.store.get(checkout.order_id)
+    assert row is not None
+    return row.status
 
 
 def _signed(payload: dict[str, object], *, secret: str = SECRET) -> tuple[bytes, str]:
@@ -98,7 +113,7 @@ async def test_a_body_nobody_signed_moves_nothing(ctx: CheckoutContext) -> None:
 
     with pytest.raises(WebhookRejected, match="signature"):
         await deliver(body, "not-a-signature")
-    assert checkout.status is OrderStatus.CONFIRMED
+    assert await _status(ctx, checkout) is OrderStatus.CONFIRMED
 
 
 async def test_a_body_signed_with_the_wrong_secret_moves_nothing(ctx: CheckoutContext) -> None:
@@ -107,7 +122,7 @@ async def test_a_body_signed_with_the_wrong_secret_moves_nothing(ctx: CheckoutCo
 
     with pytest.raises(WebhookRejected, match="signature"):
         await deliver(body, signature)
-    assert checkout.status is OrderStatus.CONFIRMED
+    assert await _status(ctx, checkout) is OrderStatus.CONFIRMED
 
 
 async def test_one_byte_of_the_body_invalidates_the_signature(ctx: CheckoutContext) -> None:
@@ -163,7 +178,7 @@ async def test_a_signed_body_claiming_paid_settles_nothing_on_its_own(
 
     assert outcome.status == "not-settled"
     assert outcome.reason_code is ReasonCode.AMOUNT_MISMATCH
-    assert checkout.status is OrderStatus.FAILED
+    assert await _status(ctx, checkout) is OrderStatus.FAILED
 
 
 async def test_the_real_thing_settles_and_seals_a_receipt(ctx: CheckoutContext) -> None:
@@ -176,8 +191,8 @@ async def test_the_real_thing_settles_and_seals_a_receipt(ctx: CheckoutContext) 
     assert outcome.status == OrderStatus.PAID.value
     assert outcome.acted is True
     assert outcome.receipt_id
-    assert checkout.status is OrderStatus.PAID
-    assert ctx.receipts.get(outcome.receipt_id) is not None
+    assert await _status(ctx, checkout) is OrderStatus.PAID
+    assert await ctx.receipts.get(outcome.receipt_id) is not None
 
 
 # ── Retries and ordering ─────────────────────────────────────────────────────
@@ -204,7 +219,7 @@ async def test_a_late_paid_never_resurrects_a_failed_order(ctx: CheckoutContext)
     checkout = await _confirmed(ctx)
     lie, lie_signature = _signed({"event_id": "evt_first", "link_id": checkout.link_id})
     await deliver(lie, lie_signature)
-    assert checkout.status is OrderStatus.FAILED
+    assert await _status(ctx, checkout) is OrderStatus.FAILED
 
     ctx.provider.approve(checkout.link_id)
     body, signature = ctx.provider.webhook_for(checkout.link_id)
@@ -212,7 +227,7 @@ async def test_a_late_paid_never_resurrects_a_failed_order(ctx: CheckoutContext)
 
     assert outcome.status == "already-failed"
     assert outcome.acted is False
-    assert checkout.status is OrderStatus.FAILED
+    assert await _status(ctx, checkout) is OrderStatus.FAILED
 
 
 async def test_an_event_for_a_link_this_sidecar_never_issued_is_a_no_op(
@@ -260,4 +275,6 @@ async def test_the_route_answers_200_on_a_verified_delivery(
 
     assert response.status_code == 200
     assert response.json()["status"] == OrderStatus.PAID.value
-    assert response.json()["receipt_id"] == checkout.receipt_id
+    settled = await ctx.store.get(checkout.order_id)
+    assert settled is not None
+    assert response.json()["receipt_id"] == settled.receipt_id

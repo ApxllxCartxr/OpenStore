@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 from openstore.sidecar.admission.oauth import Admission, AgentToken
 from openstore.sidecar.admission.profile import ProfileFetcher, ProfileRefused
 from openstore.sidecar.admission.ratelimit import RateLimiter, Tier
-from openstore.sidecar.basket import BasketStore
+from openstore.sidecar.basket import Basket, BasketStore
 from openstore.sidecar.core.codes import (
     TOOL_SCOPES,
     AuthorityKind,
@@ -83,6 +83,21 @@ class AgentSurface:
     item, which is the demo's configuration — not a default that quietly
     publishes something unexposed."""
 
+
+#: The tools that read or write the Consumer's cart. Everything else — browsing,
+#: placing, asking after an order — touches no basket, and is dispatched without
+#: one so a missing database cannot break the catalogue.
+BASKET_TOOLS: frozenset[ToolName] = frozenset(
+    {
+        ToolName.ADD_LINE,
+        ToolName.REMOVE_LINE,
+        ToolName.SET_DESTINATION,
+        ToolName.SET_CONTACT,
+        ToolName.CHOOSE_FULFILLMENT,
+        ToolName.APPLY_PUBLIC_CODE,
+        ToolName.START_CHECKOUT,
+    }
+)
 
 _surface = AgentSurface()
 
@@ -288,6 +303,45 @@ async def mcp_call(request: Request) -> JSONResponse:
 
 
 async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """One tool, actually run, with this agent's basket loaded around it.
+
+    The basket is read before the tool and written after it, at this one place,
+    because the tools mutate the `Basket` object directly — a store that tried
+    to notice would be guessing. Written even when the tool refuses: a refusal
+    that still changed the basket (a line added, then a fulfillment option the
+    Merchant rejected) must not silently roll the change back.
+    """
+    # Only the tools that touch a cart load one. `search` and `read-item` are
+    # browsing, and making them read and write a basket row would put the whole
+    # catalogue behind the database — a shop with a misconfigured
+    # SIDECAR_DATABASE_URL should still be able to answer what it sells.
+    basket = await _surface.baskets.for_agent(agent_id) if tool in BASKET_TOOLS else None
+    try:
+        result = await _dispatch(tool, agent_id, payload, basket)
+    except Exception:
+        # Saved on the way out too. A refusal that still changed the basket — a
+        # line added, then a fulfillment option the Merchant rejected — must not
+        # silently roll the change back.
+        if basket is not None:
+            await _surface.baskets.save(basket)
+        raise
+
+    if tool is ToolName.START_CHECKOUT:
+        # The basket has become an order, so the agent starts a fresh one. Door
+        # 7 keys on `cart_id:attempt`, so a second checkout built on the same
+        # cart would idempotently return the FIRST order — and if that one was
+        # already paid, the Consumer would be handed a receipt they had already
+        # had. Cleared here rather than inside the tool so this is the one place
+        # that decides whether the basket survives its own call.
+        await _surface.baskets.clear(agent_id)
+    elif basket is not None:
+        await _surface.baskets.save(basket)
+    return result
+
+
+async def _dispatch(
+    tool: ToolName, agent_id: str, payload: dict[str, Any], basket: Basket | None
+) -> dict[str, Any]:
     """One tool, actually run.
 
     Every branch reaches Merchant truth or the money core; none of them answers
@@ -310,7 +364,15 @@ async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> d
             )
         return _surface.trait
 
-    basket = _surface.baskets.for_agent(agent_id)
+    def cart() -> Basket:
+        """The basket, for the tools that have one.
+
+        `None` here is a mistake in `BASKET_TOOLS`, not a state to handle: it
+        would mean this tool was dispatched without the cart it edits, and an
+        empty stand-in would quietly drop the Consumer's lines.
+        """
+        assert basket is not None, f"{tool.value} was dispatched without a basket"
+        return basket
 
     if tool is ToolName.SEARCH:
         return await tools.search(merchant(), str(payload.get("query", "")))
@@ -320,59 +382,55 @@ async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> d
         parent = payload.get("parent")
         return await tools.add_line(
             merchant(),
-            basket,
+            cart(),
             str(payload.get("sku", "")),
             int(payload.get("qty", 1)),
             str(parent) if parent else None,
         )
     if tool is ToolName.REMOVE_LINE:
-        if not basket.remove(str(payload.get("sku", ""))):
+        if not cart().remove(str(payload.get("sku", ""))):
             raise ToolRefused(ReasonCode.NOT_FOUND, "That SKU is not in the basket.")
-        return await tools.summary(merchant(), basket)
+        return await tools.summary(merchant(), cart())
     if tool is ToolName.SET_DESTINATION:
-        tools.set_destination(basket, dict(payload.get("destination") or payload))
-        return await tools.summary(merchant(), basket)
+        tools.set_destination(cart(), dict(payload.get("destination") or payload))
+        return await tools.summary(merchant(), cart())
     if tool is ToolName.SET_CONTACT:
-        tools.set_contact(basket, dict(payload.get("contact") or payload))
-        return await tools.summary(merchant(), basket)
+        tools.set_contact(cart(), dict(payload.get("contact") or payload))
+        return await tools.summary(merchant(), cart())
     if tool is ToolName.CHOOSE_FULFILLMENT:
         option = str(payload.get("id", ""))
         if not option:
-            return await tools.fulfillment_options(merchant(), basket)
-        return await tools.choose_fulfillment(merchant(), basket, option)
+            return await tools.fulfillment_options(merchant(), cart())
+        return await tools.choose_fulfillment(merchant(), cart(), option)
     if tool is ToolName.APPLY_PUBLIC_CODE:
-        return await tools.apply_public_code(merchant(), basket, str(payload.get("code", "")))
+        return await tools.apply_public_code(merchant(), cart(), str(payload.get("code", "")))
 
     if tool is ToolName.START_CHECKOUT:
-        if not basket.quotable():
-            summary = await tools.summary(merchant(), basket)
+        if not cart().quotable():
+            summary = await tools.summary(merchant(), cart())
             raise ToolRefused(
                 ReasonCode.NOT_FOUND,
                 f"This basket is not ready to check out; it still needs: "
                 f"{', '.join(summary.get('needs', []))}.",
             )
-        if not basket.contact:
+        if not cart().contact:
             raise ToolRefused(
                 ReasonCode.NOT_FOUND,
                 "The shop needs a Contact Point to send the order confirmation to.",
             )
-        assert basket.destination is not None
+        destination = cart().destination
+        assert destination is not None
         checkout = await flow.start(
             flow.get_context(),
-            cart_id=basket.cart_id,
-            lines=list(basket.lines),
-            destination=basket.destination,
-            contact=dict(basket.contact),
-            fulfillment_option_id=basket.fulfillment_option_id,
+            cart_id=cart().cart_id,
+            lines=list(cart().lines),
+            destination=destination,
+            contact=dict(cart().contact),
+            fulfillment_option_id=cart().fulfillment_option_id,
             method=tools.method_for(str(payload.get("method", "upi"))),
             agent_id=agent_id,
-            discount_code=basket.discount_code,
+            discount_code=cart().discount_code,
         )
-        # The basket has become an order, so the agent starts a fresh one. Door 7
-        # keys on `cart_id:attempt`, so a second checkout built on the same cart
-        # would idempotently return the FIRST order — and if that one was already
-        # paid, the Consumer would be handed a receipt they had already had.
-        _surface.baskets.clear(agent_id)
         return {
             "order_id": checkout.order_id,
             "total_minor": checkout.total_minor,
@@ -386,12 +444,21 @@ async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> d
         # **Never an order.** The Consumer approves the exact amount on this
         # Merchant's own domain, and that is the whole posture (ADR-0008).
         ctx = flow.get_context()
+        if not ctx.ready():
+            # The money path is not wired, so there is no checkout to approve
+            # and there never could be. Refused with the reason rather than
+            # searching a store that has no database behind it.
+            raise ToolRefused(
+                ReasonCode.NOT_FOUND,
+                "There is no started checkout to approve: this sidecar's money path is "
+                "not wired, so start-checkout cannot have run. Check /readyz.",
+            )
         # Only a checkout still waiting on its tap. A paid one would hand back
         # an approve URL whose token is already spent, which reads to the
         # Consumer as a broken link rather than as "you already bought this".
         started = [
             c
-            for c in ctx.pending.values()
+            for c in await ctx.store.live()
             if c.agent_id == agent_id and c.status is OrderStatus.PENDING
         ]
         if not started:
@@ -414,7 +481,10 @@ async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> d
 
     if tool is ToolName.ORDER_STATUS:
         order = await merchant().orders_read(str(payload.get("order_id", "")))
-        known = flow.get_context().pending.get(order.order_id)
+        ctx = flow.get_context()
+        # The receipt id lives on the checkout row, and a sidecar with no
+        # database has no row to read — the Merchant's status still answers.
+        known = await ctx.store.get(order.order_id) if ctx.store.sessionmaker else None
         return {
             "order_id": order.order_id,
             "status": order.status.value,
@@ -440,7 +510,7 @@ async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> d
 
         order = await merchant().orders_read(str(payload.get("order_id", "")))
         try:
-            request = get_refund_queue().request(
+            request = await get_refund_queue().request(
                 order_id=order.order_id,
                 agent_id=agent_id,
                 reason=str(payload.get("reason", "")),
@@ -594,7 +664,7 @@ async def acp_complete(session_id: str, request: Request) -> JSONResponse:
         return JSONResponse(status_code=exc.status, content=exc.to_payload())
 
     ctx = flow.get_context()
-    checkout = ctx.pending.get(session_id)
+    checkout = await ctx.store.get(session_id)
     if checkout is None:
         return _refuse(ReasonCode.NOT_FOUND, f"No checkout session {session_id!r}.")
     body = await request.json()
@@ -613,7 +683,7 @@ async def acp_complete(session_id: str, request: Request) -> JSONResponse:
 async def ap2_checkout(request: Request) -> JSONResponse:
     """AP2: the mandate layer over the same checkout.
 
-    The Merchant signs a Checkout Mandate over the exact basket. The agent's
+    The Merchant signs a Checkout Mandate over the exact cart(). The agent's
     user signs theirs over `checkout_hash` — and the human tap on this domain
     still happens, because a mandate is evidence of intent and not a payment
     credential.

@@ -70,12 +70,21 @@ def get_console_store() -> ConsoleStore:
     return ConsoleStore()
 
 
-def _sealed_receipts() -> list[dict[str, Any]]:
-    """Receipts this sidecar has sealed, newest first."""
+async def _sealed_receipts() -> list[dict[str, Any]]:
+    """Receipts this sidecar has sealed, newest first.
+
+    Empty when there is no database — checked rather than caught. A sidecar with
+    no database has sealed nothing, and the console must still render: the
+    health tab is where an operator finds out *why* the boards are empty, and a
+    console that refused to draw would hide the one screen that says so.
+    """
     from openstore.sidecar.evidence.store import get_receipt_store
 
+    store = get_receipt_store()
+    if store.sessionmaker is None:
+        return []
     rows: list[dict[str, Any]] = []
-    for bundle in get_receipt_store().all():
+    for bundle in await store.all():
         tapped = next((s for s in bundle.sections if s.name == "tapped"), None)
         bought = next((s for s in bundle.sections if s.name == "bought"), None)
         rows.append(
@@ -91,6 +100,13 @@ def _sealed_receipts() -> list[dict[str, Any]]:
     return list(reversed(rows))
 
 
+async def _refund_rows() -> list[dict[str, object]]:
+    """The live queue, or nothing when there is no database to hold one — the
+    same reason `_sealed_receipts` checks rather than catches."""
+    queue = get_refund_queue()
+    return await queue.rows() if queue.sessionmaker is not None else []
+
+
 def _published_keys() -> list[dict[str, Any]]:
     """The keys this sidecar actually publishes, in the console's row shape."""
     return [
@@ -103,7 +119,7 @@ def _published_keys() -> list[dict[str, Any]]:
     ]
 
 
-def build_state(store: ConsoleStore) -> ConsoleState:
+async def build_state(store: ConsoleStore) -> ConsoleState:
     settings = get_settings()
     policy = store.policy
     return ConsoleState(
@@ -142,10 +158,10 @@ def build_state(store: ConsoleStore) -> ConsoleState:
         # and nothing ever appended to, so the boards read "none yet" no matter
         # what the sidecar had actually admitted or sealed.
         agents=store.agents or get_surface().admission.board(),
-        receipts=store.receipts or _sealed_receipts(),
+        receipts=store.receipts or await _sealed_receipts(),
         # Live, not a list the console keeps: the queue the tool writes to is
         # the queue the Merchant reads, or the board is decoration.
-        refund_requests=get_refund_queue().rows(),
+        refund_requests=await _refund_rows(),
         overdue_holds=store.overdue_holds,
         dev_profile_hosts=settings.dev_profile_hosts,
         export_acknowledged=store.export_acknowledged,
@@ -154,8 +170,8 @@ def build_state(store: ConsoleStore) -> ConsoleState:
 
 @router.get("/", response_class=HTMLResponse)
 @router.get("", response_class=HTMLResponse)
-def console_root() -> HTMLResponse:
-    return HTMLResponse(page(build_state(get_console_store()), "health"))
+async def console_root() -> HTMLResponse:
+    return HTMLResponse(page(await build_state(get_console_store()), "health"))
 
 
 @router.get("/static/tokens.css")
@@ -184,13 +200,13 @@ def codes() -> dict[str, list[str]]:
 
 
 @router.get("/{tab}", response_class=HTMLResponse)
-def console_tab(tab: str) -> Response:
+async def console_tab(tab: str) -> Response:
     if tab not in dict(TABS):
         return JSONResponse(
             status_code=404,
             content={"error": {"code": "not-found", "detail": f"no console tab {tab!r}"}},
         )
-    return HTMLResponse(page(build_state(get_console_store()), tab))
+    return HTMLResponse(page(await build_state(get_console_store()), tab))
 
 
 def record_overdue_hold(order_id: str, status: str, deadline: datetime, amount_minor: int) -> None:
