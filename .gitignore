@@ -23,6 +23,7 @@ target/
 .ruff_cache/
 .mypy_cache/
 .mutmut-cache
+mutants/
 htmlcov/
 .coverage
 
