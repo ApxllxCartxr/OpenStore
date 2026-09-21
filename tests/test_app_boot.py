@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 from openstore.sidecar.app import app
 from openstore.sidecar.core.codes import ReasonCode
 from openstore.sidecar.core.settings import BootRefused, Settings, get_settings
+from openstore.sidecar.protocols.agent_routes import AgentSurface
+from openstore.sidecar.protocols.agent_routes import configure as configure_surface
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -25,6 +27,14 @@ def _isolate_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterat
 
 
 @pytest.fixture
+def signed() -> Iterator[None]:
+    """A deploy that holds a signing key, which is the only fully ready one."""
+    configure_surface(AgentSurface(jwks={"keys": [{"kid": "k1"}]}))
+    yield
+    configure_surface(AgentSurface())
+
+
+@pytest.fixture
 def client() -> Iterator[TestClient]:
     with TestClient(app) as c:
         yield c
@@ -36,7 +46,9 @@ def test_healthz(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_readyz_reports_ready(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readyz_reports_ready(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, signed: None
+) -> None:
     monkeypatch.setenv("OPENSTORE_MERCHANT_DOMAIN", "spoiledduckie.localhost")
     get_settings.cache_clear()
     response = client.get("/readyz")
@@ -44,19 +56,28 @@ def test_readyz_reports_ready(client: TestClient, monkeypatch: pytest.MonkeyPatc
     body = response.json()
     assert body["status"] == "ready"
     assert body["merchant_domain"] == "spoiledduckie.localhost"
+    assert body["checks"]["signing_key"] == "ok"
     assert "warnings" not in body
 
 
 def test_readyz_surfaces_the_dev_ssrf_allowlist(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, signed: None
 ) -> None:
     """SPEC §14 requires the exception to be visible in health output. An
     exception nobody can see is one that outlives its reason."""
     monkeypatch.setenv("OPENSTORE_DEV_PROFILE_HOSTS", "buyer-chat:3001")
     get_settings.cache_clear()
     body = client.get("/readyz").json()
-    assert body["warnings"][0]["code"] == "dev-profile-allowlist-active"
-    assert body["warnings"][0]["hosts"] == ["buyer-chat:3001"]
+    allowlist = next(w for w in body["warnings"] if w["code"] == "dev-profile-allowlist-active")
+    assert allowlist["hosts"] == ["buyer-chat:3001"]
+
+
+def test_readyz_says_so_when_this_deploy_holds_no_signing_key(client: TestClient) -> None:
+    """The failure this check exists for was found by an agent refusing the shop
+    for carrying no keys — four layers away from the sidecar that has none."""
+    body = client.get("/readyz").json()
+    assert body["checks"]["signing_key"] == "absent"
+    assert any(w["code"] == "no-signing-key" for w in body["warnings"])
 
 
 def test_no_interactive_docs_on_a_money_surface(client: TestClient) -> None:
@@ -124,9 +145,16 @@ def test_another_services_env_var_does_not_kill_the_sidecar(
 #: Variables in `.env.example` that belong to another surface. The sidecar names
 #: them in the template because the template is the one place a variable is
 #: introduced (§10), and reads none of them.
+#: Variables the buyer chat reads, not the sidecar. They belong in the shared
+#: template because the compose demo shares one `.env` across all three
+#: surfaces (§10), and the sidecar's Settings deliberately does not declare
+#: them — it would refuse to boot over another process's configuration.
 _OTHER_SURFACES = {
     "CHAT_MODEL_DRIVER",
     "CHAT_DATABASE_PATH",
+    "CHAT_KEY_PATH",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
     "OLLAMA_BASE_URL",
     "OLLAMA_MODEL",
     "ANTHROPIC_API_KEY",

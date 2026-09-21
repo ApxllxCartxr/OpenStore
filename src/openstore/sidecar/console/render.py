@@ -238,14 +238,19 @@ def _exposure(state: ConsoleState) -> str:
 
 def _agents(state: ConsoleState) -> str:
     rows = "".join(
-        f"<tr><td>{_e(a['agent_id'])}</td><td>{_e(a['tier'])}</td><td>{_e(a.get('last_seen', '—'))}</td>"
+        f"<tr><td>{_e(a.get('name') or '—')}<br>"
+        # Truncated because an agent_id is a 43-character thumbprint and the
+        # Merchant recognises an agent by what it does, not by its hash.
+        f"<code class=\"muted\">{_e(str(a['agent_id'])[:16])}…</code></td>"
+        f"<td>{_e(a['tier'])}</td><td class=\"num\">{_e(a.get('calls', 0))}</td>"
+        f"<td>{_e(a.get('last_seen', '—'))}</td>"
         f"<td>{'<span class=\"warn\">blocked</span>' if a.get('blocked') else '<span class=\"ok\">allowed</span>'}</td></tr>"
         for a in state.agents
     )
     return f"""<section>
 <h2>Agents</h2>
-<table><thead><tr><th>agent_id</th><th>tier</th><th>last seen</th><th>state</th></tr></thead>
-<tbody>{rows or '<tr><td colspan="4" class="muted">No agents have registered yet.</td></tr>'}</tbody></table>
+<table><thead><tr><th>agent</th><th>tier</th><th>calls</th><th>last seen</th><th>state</th></tr></thead>
+<tbody>{rows or '<tr><td colspan="5" class="muted">No agents have registered yet.</td></tr>'}</tbody></table>
 <p class="note muted">Reputation buys throughput only. An allowlisted agent gets a higher rate
 limit and not one capability more — <code>confirm</code> without a fresh Authority is refused
 either way.</p>

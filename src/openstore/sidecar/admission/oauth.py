@@ -41,6 +41,31 @@ class AgentToken:
 
 
 @dataclass
+class AgentRecord:
+    """What the Merchant can see about an agent that showed up.
+
+    Admission is open by design (ADR-0012), which makes the record of **who
+    took it** the Merchant's only view of their own front door. The console
+    listed agents from an empty list nothing wrote to, so the board said "no
+    agents have registered yet" however many had.
+    """
+
+    agent_id: str
+    tier: Tier
+    name: str = ""
+    profile_url: str = ""
+    first_seen: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_seen: datetime = field(default_factory=lambda: datetime.now(UTC))
+    calls: int = 0
+
+    @property
+    def blocked(self) -> bool:
+        return self._blocked
+
+    _blocked: bool = False
+
+
+@dataclass
 class Admission:
     """Issues tokens by either route, and refuses blocklisted agents."""
 
@@ -48,6 +73,8 @@ class Admission:
     """client_id -> client_secret, Merchant-issued in `/agentic`."""
     blocklist: set[str] = field(default_factory=set)
     tokens: dict[str, AgentToken] = field(default_factory=dict)
+    seen: dict[str, AgentRecord] = field(default_factory=dict)
+    """Every agent that has ever been admitted here, for the console's board."""
 
     def issue_for_client(self, client_id: str, client_secret: str) -> AgentToken:
         expected = self.clients.get(client_id)
@@ -59,18 +86,22 @@ class Admission:
         self._refuse_if_blocked(client_id)
         return self._issue(client_id, Tier.ALLOWLISTED)
 
-    def issue_for_stranger(self, agent_id: str) -> AgentToken:
+    def issue_for_stranger(
+        self, agent_id: str, *, name: str = "", profile_url: str = ""
+    ) -> AgentToken:
         """Issued on the spot, with no prior Merchant action. That is the
         product: admission is open by design, and the Gate is what makes it
         safe."""
         self._refuse_if_blocked(agent_id)
-        return self._issue(agent_id, Tier.SELF_REGISTERED)
+        return self._issue(agent_id, Tier.SELF_REGISTERED, name=name, profile_url=profile_url)
 
     def _refuse_if_blocked(self, agent_id: str) -> None:
         if agent_id in self.blocklist:
             raise TraitError(ReasonCode.AGENT_BLOCKED, "this agent is blocked by the Merchant")
 
-    def _issue(self, agent_id: str, tier: Tier) -> AgentToken:
+    def _issue(
+        self, agent_id: str, tier: Tier, *, name: str = "", profile_url: str = ""
+    ) -> AgentToken:
         token = AgentToken(
             token=secrets.token_urlsafe(24),
             agent_id=agent_id,
@@ -81,7 +112,45 @@ class Admission:
             expires_at=datetime.now(UTC) + TOKEN_TTL,
         )
         self.tokens[token.token] = token
+        self._note(agent_id, tier, name=name, profile_url=profile_url)
         return token
+
+    def _note(self, agent_id: str, tier: Tier, *, name: str, profile_url: str) -> None:
+        record = self.seen.get(agent_id)
+        if record is None:
+            self.seen[agent_id] = AgentRecord(
+                agent_id=agent_id, tier=tier, name=name, profile_url=profile_url
+            )
+            return
+        record.last_seen = datetime.now(UTC)
+        record.tier = tier
+        # A re-registration may carry a better name; it never replaces one with
+        # nothing.
+        record.name = name or record.name
+        record.profile_url = profile_url or record.profile_url
+
+    def note_call(self, agent_id: str) -> None:
+        """One tool call by this agent. The board's "last seen" is about use,
+        not about registration — an agent that registered once and never came
+        back should look different from one that is working."""
+        record = self.seen.get(agent_id)
+        if record is not None:
+            record.calls += 1
+            record.last_seen = datetime.now(UTC)
+
+    def board(self) -> list[dict[str, object]]:
+        """The console's rows, newest activity first."""
+        return [
+            {
+                "agent_id": r.agent_id,
+                "name": r.name,
+                "tier": r.tier.value,
+                "calls": r.calls,
+                "last_seen": r.last_seen.isoformat(timespec="seconds"),
+                "blocked": r.agent_id in self.blocklist,
+            }
+            for r in sorted(self.seen.values(), key=lambda r: r.last_seen, reverse=True)
+        ]
 
     def resolve(self, token: str, *, now: datetime | None = None) -> AgentToken:
         record = self.tokens.get(token)

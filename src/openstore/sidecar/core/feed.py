@@ -66,7 +66,15 @@ def feed_item(
         "condition": "new",
     }
     if item.media:
-        entry["image_link"] = item.media[0]
+        # Absolute, like `link` above: a feed is read by a crawler that has no
+        # idea what origin it came from, and a root-relative path there resolves
+        # against the reader's own host.
+        first = item.media[0]
+        entry["image_link"] = (
+            first
+            if first.startswith(("http://", "https://"))
+            else f"{base_url.rstrip('/')}/{first.lstrip('/')}"
+        )
     for axis, attribute in (("colour", "color"), ("color", "color"), ("size", "size")):
         if axis in item.options:
             entry[attribute] = item.options[axis]

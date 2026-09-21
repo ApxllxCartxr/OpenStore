@@ -31,6 +31,7 @@ from openstore.sidecar.core.codes import (
 )
 from openstore.sidecar.core.settings import get_settings
 from openstore.sidecar.gate.policy import Policy
+from openstore.sidecar.protocols.agent_routes import get_surface
 
 router = APIRouter(prefix="/agentic")
 
@@ -58,12 +59,48 @@ def get_console_store() -> ConsoleStore:
     return ConsoleStore()
 
 
+def _sealed_receipts() -> list[dict[str, Any]]:
+    """Receipts this sidecar has sealed, newest first."""
+    from openstore.sidecar.evidence.store import get_receipt_store
+
+    rows: list[dict[str, Any]] = []
+    for bundle in get_receipt_store().all():
+        tapped = next((s for s in bundle.sections if s.name == "tapped"), None)
+        bought = next((s for s in bundle.sections if s.name == "bought"), None)
+        rows.append(
+            {
+                "receipt_id": bundle.receipt_id,
+                "total_minor": (bought.payload.get("quote", {}) if bought else {}).get(
+                    "total_minor", 0
+                ),
+                "authority": (tapped.payload if tapped else {}).get("authority_kind", "—"),
+                "version": bundle.version,
+            }
+        )
+    return list(reversed(rows))
+
+
+def _published_keys() -> list[dict[str, Any]]:
+    """The keys this sidecar actually publishes, in the console's row shape."""
+    return [
+        {
+            "kid": key.get("kid", ""),
+            "created_at": key.get("created_at", ""),
+            "revoked_at": key.get("revoked_at"),
+        }
+        for key in get_surface().jwks.get("keys", [])
+    ]
+
+
 def build_state(store: ConsoleStore) -> ConsoleState:
     settings = get_settings()
     policy = store.policy
     return ConsoleState(
         merchant_domain=settings.openstore_merchant_domain or "unset",
-        keys=store.keys,
+        # Read from the live keyring, not a list the console keeps: an operator
+        # looking at an empty Keys table has no way to tell "no keys enrolled"
+        # from "the table is not wired up", and for a while it was the latter.
+        keys=store.keys or _published_keys(),
         policy={
             "per_order_cap_minor": policy.per_order_cap_minor,
             "per_order_line_count": policy.per_order_line_count,
@@ -90,8 +127,11 @@ def build_state(store: ConsoleStore) -> ConsoleState:
             "enabled payment methods": "yes",
             "enabled authority kinds": "yes",
         },
-        agents=store.agents,
-        receipts=store.receipts,
+        # Live, like the keys above. Both of these were lists the console kept
+        # and nothing ever appended to, so the boards read "none yet" no matter
+        # what the sidecar had actually admitted or sealed.
+        agents=store.agents or get_surface().admission.board(),
+        receipts=store.receipts or _sealed_receipts(),
         overdue_holds=store.overdue_holds,
         dev_profile_hosts=settings.dev_profile_hosts,
         export_acknowledged=store.export_acknowledged,

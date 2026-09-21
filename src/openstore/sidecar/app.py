@@ -12,16 +12,20 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from openstore.sidecar.authority.tokens import TokenStore
 from openstore.sidecar.console.approve import router as approve_router
 from openstore.sidecar.console.merchant_actions import router as merchant_actions_router
 from openstore.sidecar.console.routes import router as console_router
 from openstore.sidecar.core.settings import Settings, get_settings
+from openstore.sidecar.evidence.keys import Keyring, load_or_enroll
 from openstore.sidecar.evidence.store import ReceiptStore, get_receipt_store
+from openstore.sidecar.protocols.agent_routes import get_surface
 from openstore.sidecar.protocols.agent_routes import router as agent_router
 from openstore.sidecar.verify.checks import verify
 
@@ -37,6 +41,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """
     import httpx
 
+    from openstore.sidecar.admission.oauth import Admission
+    from openstore.sidecar.admission.profile import ProfileFetcher
+    from openstore.sidecar.checkout import CheckoutContext
+    from openstore.sidecar.checkout import configure as configure_checkout
+    from openstore.sidecar.console.approve import ApproveContext
+    from openstore.sidecar.console.approve import configure as configure_approve
+    from openstore.sidecar.core.db import create_all, make_engine, make_sessionmaker
+    from openstore.sidecar.evidence.store import get_receipt_store
+    from openstore.sidecar.gate.policy import Policy
     from openstore.sidecar.protocols.agent_routes import AgentSurface
     from openstore.sidecar.protocols.agent_routes import configure as configure_surface
     from openstore.sidecar.trait.client import TraitClient
@@ -51,13 +64,83 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.trait_base_url
         else None
     )
+    merchant_domain = settings.openstore_merchant_domain or "localhost"
+    keyring = _load_keyring(settings, merchant_domain)
     configure_surface(
         AgentSurface(
-            merchant_domain=settings.openstore_merchant_domain or "localhost",
+            merchant_domain=merchant_domain,
             merchant_name=settings.webauthn_rp_name or "This shop",
+            public_origin=settings.openstore_public_origin,
             demo=settings.openstore_demo_mode,
             trait=trait,
+            jwks=keyring.jwks() if keyring else {"keys": []},
+            keyring=keyring,
+            # The allowlist was reported in health output and the console banner
+            # while the fetcher that enforces it held an empty tuple, so the
+            # named exception refused the one host it exists for and no agent
+            # could register at all. Reporting a policy is not applying it.
+            fetcher=ProfileFetcher(dev_hosts=settings.dev_profile_hosts),
+            # Same story as the allowlist: the credentials were configurable and
+            # reached nothing, so the OAuth route refused the very client the
+            # deploy had been given.
+            admission=Admission(
+                clients=(
+                    {settings.oauth_client_id: settings.oauth_client_secret}
+                    if settings.oauth_client_id and settings.oauth_client_secret
+                    else {}
+                )
+            ),
         )
+    )
+    # The money path. Until this existed the Gate, the Ledger, the Provider and
+    # the receipt were reachable only from a test.
+    engine = None
+    sessionmaker = None
+    if settings.sidecar_database_url:
+        engine = make_engine(settings.sidecar_database_url)
+        await create_all(engine)
+        sessionmaker = make_sessionmaker(engine)
+    else:
+        logging.getLogger("openstore").warning(
+            "NO DATABASE: SIDECAR_DATABASE_URL is unset, so there is no Ledger and no "
+            "order can be taken."
+        )
+
+    provider = _provider_for(settings)
+    policy = Policy()
+    tokens = TokenStore()
+    checkout_context = CheckoutContext(
+        trait=trait,
+        policy=policy,
+        tokens=tokens,
+        provider=provider,
+        keyring=keyring,
+        sessionmaker=sessionmaker,
+        receipts=get_receipt_store(),
+        merchant_domain=merchant_domain,
+        public_origin=settings.openstore_public_origin,
+        deploy_pseudonym_key=settings.deploy_pseudonym_key.encode(),
+        demo=settings.openstore_demo_mode,
+    )
+    configure_checkout(checkout_context)
+    # The approve page reads the same token store the tap spends from — two
+    # stores would render one token and refuse another.
+    configure_approve(
+        ApproveContext(
+            tokens=tokens,
+            quotes=_QuoteView(checkout_context),
+            merchant_domain=merchant_domain,
+            merchant_name=settings.webauthn_rp_name or "This shop",
+            enabled_methods=policy.enabled_methods,
+            demo=settings.openstore_demo_mode,
+        )
+    )
+
+    logging.getLogger("openstore").warning(
+        "money path wired: db=%s provider=%s signing_key=%s",
+        "yes" if sessionmaker else "NOT CONFIGURED - no order can be taken",
+        provider.name,
+        "yes" if keyring else "NOT CONFIGURED - nothing can be sealed",
     )
     logging.getLogger("openstore").warning(
         "agent surface wired: merchant=%s trait=%s",
@@ -65,6 +148,78 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         settings.trait_base_url or "NOT CONFIGURED - the feed will be empty",
     )
     yield
+    if engine is not None:
+        await engine.dispose()
+
+
+class _QuoteView(dict):  # type: ignore[type-arg]
+    """The approve page's quote lookup, backed by live checkouts.
+
+    `ApproveContext.quotes` is a plain dict of pre-computed quotes, which is
+    right for a unit test and wrong for a running shop: the page must render the
+    Quote the Merchant produced for *this* checkout. This reads it through
+    rather than copying it, so a re-quote cannot leave the page showing a stale
+    total.
+    """
+
+    def __init__(self, context: Any) -> None:
+        super().__init__()
+        self._context = context
+
+    def get(self, key: Any, default: Any = None) -> Any:  # noqa: D102
+        checkout = self._context.pending.get(key)
+        return checkout.quote.model_dump(mode="json") if checkout else default
+
+
+def _provider_for(settings: Settings) -> Any:
+    """The Provider this deploy talks to (ADR-0013).
+
+    `PAYMENT_PROVIDER` was a declared setting that reached nothing, so the
+    adapter was never chosen at all. `razorpay` refuses live keys in demo mode
+    at its own boot, which is where that check belongs.
+    """
+    if settings.payment_provider == "razorpay":
+        from openstore.sidecar.provider.razorpay import RazorpayProvider
+
+        return RazorpayProvider(
+            key_id=settings.razorpay_key_id,
+            key_secret=settings.razorpay_key_secret,
+            demo_mode=settings.openstore_demo_mode,
+        )
+    from openstore.sidecar.provider.fake import FakeProvider
+
+    return FakeProvider()
+
+
+def _load_keyring(settings: Settings, merchant_domain: str) -> Keyring | None:
+    """The Merchant's signing keys, read from disk or minted once (ADR-0014).
+
+    With no keyfile path configured there is no key, the JWKS is empty, and
+    nothing can be sealed. That is reported here and at `/healthz` rather than
+    discovered by an agent whose refusal says only that this shop carries no
+    keys — which is how it was discovered.
+    """
+    log = logging.getLogger("openstore")
+    if not settings.sidecar_signing_key_path:
+        log.warning(
+            "NO SIGNING KEY: SIDECAR_SIGNING_KEY_PATH is unset, so the JWKS is empty, "
+            "no receipt can be sealed, and agents pinning this shop's keys will refuse it."
+        )
+        return None
+
+    keyring, enrolled = load_or_enroll(
+        Path(settings.sidecar_signing_key_path),
+        merchant_domain=merchant_domain,
+        passphrase=settings.sidecar_signing_key_passphrase,
+    )
+    log.warning(
+        "signing keys %s: merchant=%s kid=%s path=%s",
+        "ENROLLED (first boot for this keyfile)" if enrolled else "loaded",
+        merchant_domain,
+        keyring.current.kid,
+        settings.sidecar_signing_key_path,
+    )
+    return keyring
 
 
 app = FastAPI(
@@ -115,13 +270,28 @@ def readyz() -> JSONResponse:
         "merchant_domain": settings.openstore_merchant_domain or None,
         "checks": {
             "settings": "ok",
+            # An empty JWKS is invisible from the outside until an agent refuses
+            # the shop for carrying no keys. It is a check here for that reason.
+            "signing_key": "ok" if get_surface().jwks.get("keys") else "absent",
             # A2 adds the trait, A3 the database and provider. Each lands as its
             # own named check rather than widening this one, so a partial outage
             # is legible at 2am (SPEC §14).
         },
     }
+    warnings: list[dict[str, Any]] = []
+    if body["checks"]["signing_key"] == "absent":
+        warnings.append(
+            {
+                "code": "no-signing-key",
+                "detail": (
+                    "This sidecar holds no signing key, so its JWKS is empty, no receipt can "
+                    "be sealed, and an agent pinning this shop's keys will refuse it. Set "
+                    "SIDECAR_SIGNING_KEY_PATH."
+                ),
+            }
+        )
     if settings.dev_profile_hosts:
-        body["warnings"] = [
+        warnings.append(
             {
                 "code": "dev-profile-allowlist-active",
                 "hosts": list(settings.dev_profile_hosts),
@@ -130,7 +300,9 @@ def readyz() -> JSONResponse:
                     "every fetch that uses it is logged and flagged in /agentic."
                 ),
             }
-        ]
+        )
+    if warnings:
+        body["warnings"] = warnings
     return JSONResponse(status_code=200, content=body)
 
 
