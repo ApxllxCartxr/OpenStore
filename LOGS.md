@@ -4,6 +4,19 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-22 · Phase 2 re-verified live: it was already done, not skipped
+
+An automated continuation prompt flagged Phase 2 as unimplemented — no generalized chat, no 10 stores, no consumer budget answer — after a context compaction. That earlier work is real and was already committed; the flag was checking a stale view. Re-verified rather than re-built, since re-implementing would have silently duplicated or regressed working code:
+
+- `docker compose ps`: all 22 containers healthy, all 10 sidecar/store pairs up.
+- All 10 storefronts and their `agent-commerce.json` cards return 200 live (`spoiledduckie` through `furrow`).
+- `make demo` (the live conformance suite against the running stack, not mocks): 19 passed, 1 skipped.
+- `demo/buyer-chat`: 191 tests passing, `svelte-check` clean, thinking blocks / model switcher / transcript export / generic-MCP paste-a-link (`initializeGeneric`/`callGeneric`) all present in `+page.svelte` and `lib/mcp/client.ts`.
+- The consumer-budget question from the original ask ("how is my budget computed, I never signed a key") is answered directly in the consent modal's copy (`+page.svelte`): the chat's Allow click grants a scope, never an amount; the passkey/UPI-PIN step that actually authorizes spend happens on the shop's own origin because a WebAuthn credential is scoped to the RP ID that registered it; the spend ceiling (`contacts/+page.server.ts`) is an explicitly advisory flag, not a held mandate.
+- The four cross-shop overlap SKUs (AA batteries: CircuitYard/IronList, sewn notebook: Dog-Eared/DeskField, tennis balls: Furrow/Playspool) are seeded with genuinely different price and stock per shop, the actual precondition for the multi-merchant reasoning the ask wanted.
+
+One real slip caught in the process: running raw `tsc --noEmit` against the buyer-chat reported 8 errors on SvelteKit action handlers' implicit `request: any`. False alarm — raw `tsc` doesn't resolve SvelteKit's generated `./$types`; the project's own `pnpm run check` (`svelte-check`) is the correct tool and reports 0 errors. Worth remembering next time: check `package.json`'s own `check` script before trusting a bare compiler invocation on a SvelteKit project.
+
 ## 2026-09-22 · Mutation testing re-established for the Gate, and a real dead-field bug it found
 
 Phase 3 cheap-verification pass. The `[tool.mutmut]` config had gone stale — it pointed at `src/openstore/core/*`, which no longer exists after the rebuild moved everything under `src/openstore/sidecar/`. Re-pointed at `gate/decide.py` (the single authorizer every money decision passes through) and hit a real mutmut 3.x gotcha along the way: `source_paths` controls what gets *copied* into the isolated `mutants/` working tree, not what gets *mutated* — scoping it to one file leaves that file's own package with no `__init__.py` and every sibling module missing, so collecting `tests/` inside `mutants/` fails on the first import reaching outside that file. Fixed by pointing `source_paths` at the whole `sidecar/` package and using `only_mutate` (a glob) to actually scope the mutation. `tests_dir`/`runner` are also gone in 3.x — replaced with `pytest_add_cli_args_test_selection`, kept narrow to `test_gate.py` alone for the same reason (the full suite reaches outside the copied tree).
