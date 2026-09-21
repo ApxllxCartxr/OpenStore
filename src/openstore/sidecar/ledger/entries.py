@@ -51,7 +51,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from openstore.sidecar.core.codes import LedgerKind, ReasonCode
 from openstore.sidecar.core.tables import metadata
-from openstore.sidecar.trait.errors import TraitError
 
 #: One row per money event. No account legs, no derived balances stored — a
 #: stored balance is a second source of truth that drifts silently.
@@ -404,8 +403,3 @@ class Ledger:
                 f"{order_id} refunded {position.refunded_minor} against "
                 f"{position.captured_minor} captured"
             )
-
-
-def no_hold_error(order_id: str) -> TraitError:
-    """The closed-code form of a release with nothing to release."""
-    return TraitError(ReasonCode.NO_HOLD, f"no open hold for {order_id}")
