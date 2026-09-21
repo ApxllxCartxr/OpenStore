@@ -76,6 +76,24 @@ Verified live against the real running model (`openai/gpt-oss-20b`): asked "what
 
 Phase 2's original seven-item list is now six done; the seventh (true "paste any MCP server" genericity) starts next.
 
+## 2026-09-22 · Phase 2 complete — connects to any MCP server, not just this repo's shops
+
+The last and largest item. Paste a bare MCP server URL on the Shops page and the chat connects the way Claude Desktop's own MCP connector does — no card, no pinned key, just `initialize` + `tools/list` over the same SSRF-hardened fetch every pasted URL already went through (`connectMcp` in contacts.ts, falling back from `fetchCard` only when the failure wasn't a pure SSRF-level refusal). A `kind`/`mcp_endpoint`/cached-`tools` column set tells a `'generic'` shop apart from this repo's own `'openstore'` ones.
+
+The real work was everywhere a hardcoded `TOOLS.includes(...)` gate or the fixed `TOOL_SCHEMAS` map stood between a generic tool and the model actually being able to call it: `reachableTools()`/`schemasFor()` replace both, `shopsFor()` resolves a tool outside the closed set to whichever shop's own `tools/list` named it, `isMoneyPath()` generalises the start-checkout/confirm boundary past the closed set (money-path by default when a tool's server says nothing at all — nothing here can verify silence), and `validate()` stopped hard-refusing any name it didn't recognise.
+
+Verified live, not just in tests: stood up a throwaway toy MCP server (two genuinely non-commerce tools, `roll_dice`/`current_time`, no OpenStore semantics anywhere in it — proof this is a real generic client, not shop-shaped tooling with a costume on), connected it through the actual Shops-page form, and asked the real running model to roll a die. Found and fixed three real bugs doing that, none of them things a mocked test would have caught on its own:
+
+1. **The function-name round-trip was wrong.** OpenRouterDriver blindly reversed every underscore in a model's tool-call name back to a hyphen — correct for the closed set's own naming (`add_line` → `add-line`) and silently wrong for anything else (`roll_dice` → `roll-dice`, a name nothing declares, so the call was dropped with no error). Fixed with a real per-call map built alongside the request instead of a global guess.
+2. **`validate()` still hard-refused any name outside the closed set**, even after `shopsFor` had already resolved it to the right shop — one gate generalised, one missed.
+3. **The live OpenRouter path never actually checked `standing` for a write at all.** `runAgent`'s write-call branch set `awaiting` unconditionally, every time, for every tool — meaning "Always allow" had never taken effect in the live demo for *any* tool, including this repo's own build-basket ones, despite `requiresFreshConsent` being correctly implemented and passing its own unit tests since the very first "always-allow" pass earlier this session. Only the scripted-driver path had ever actually consulted it. A real, pre-existing gap, closed now — and a second, unplanned confirmation that the earlier always-allow widening is now actually live.
+
+End to end: "roll a 20 sided die for me" → model calls `roll_dice(sides=20)` → resolves to the toy shop → consent prompt → approved → "Your 20-sided die landed on 17." A follow-up with "always" granted skipped the prompt entirely — for the generic tool and, once re-verified, for this repo's own tools too.
+
+188 buyer-chat tests green (31 new), 0 type errors, 582 Python tests green, `make demo` clean. The verification server and its one-line SSRF-allowlist addition were both torn down after — nothing throwaway shipped.
+
+**Phase 2 scorecard, final**: MCP wire correctness ✓, always-allow widened ✓ (and now actually live, not just correct on paper), ten stores ✓, multi-shop dispatch ✓, budget question ✓, model switcher ✓, thinking blocks ✓, generic MCP server support ✓. All seven original items closed. Phase 3 — "find no more improvements" — starts now.
+
 ---
 
 # Morning report
