@@ -102,6 +102,16 @@ Fixed in two passes: the MCP client side first (10s generic / 15s this repo's ow
 
 191 buyer-chat tests green (3 new across both passes), `make demo` clean throughout.
 
+Same audit continued into merchant-site: `callSidecar()` (refund, shop-reject, COD collection, RTO) had the identical gap and got the identical fix (15s timeout, matching this repo's own shops' timeout on the buyer-chat side). Verified live across a rebuild of all ten storefronts.
+
+## 2026-09-22 · Admin login worked for exactly one shop out of ten
+
+The most consequential Phase 3 finding so far, and the kind that only shows up when something is actually clicked rather than assumed to generalise. Tested the admin console live against a new store for the first time — 403, "Cross-site POST form submissions are forbidden," on every login attempt.
+
+Root cause: `svelte.config.js`'s CSRF `trustedOrigins` was `['http://127.0.0.1:3000', 'http://localhost:3000']` — added correctly, with a comment explaining exactly why (no `x-forwarded-proto` over a direct loopback connection makes adapter-node assume `https`, mismatching the browser's real `http` `Origin`), but scoped to the one port that existed when it was written. Tested Dog-Eared (port 3010, predates the ten-store work entirely) to check whether this was new: also 403. Admin login has apparently never actually been exercised with a real form POST against anything but SpoiledDuckie.
+
+Fixed by naming all ten of this repo's own admin ports instead of one — still a fixed list on purpose (these are known demo ports, not something to infer from an incoming request), just the right size now. Rebuilt all ten store images; verified real logins (real credentials, real session cookie) succeed for CircuitYard and for the previously-broken Dog-Eared, with CircuitYard's dashboard rendering its own branding and live data afterward.
+
 ---
 
 # Morning report
