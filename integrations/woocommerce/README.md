@@ -28,7 +28,11 @@ beside it.
 4. Prove it, before trusting it:
 
    ```
-   openstore-conform https://shop.example/wp-json/openstore/v1
+   # read-only first: doors 1, 2 and 9, nothing is written
+   TRAIT_HMAC_SECRET=<the secret> openstore-conform --read-only https://shop.example/wp-json/openstore/v1
+
+   # then the whole suite, which creates orders and takes holds it gives back
+   TRAIT_HMAC_SECRET=<the secret> openstore-conform https://shop.example/wp-json/openstore/v1
    ```
 
 **Keep the trait routes off the public internet.** Door 2 answers with exact
