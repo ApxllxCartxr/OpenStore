@@ -300,8 +300,8 @@ function buildDriver(choice: string): ModelDriver {
  * it may never state a number no tool returned.
  */
 export type ToolTurn =
-	| { kind: 'calls'; calls: ToolCall[] }
-	| { kind: 'text'; text: string };
+	| { kind: 'calls'; calls: ToolCall[]; reasoning: string | null }
+	| { kind: 'text'; text: string; reasoning: string | null };
 
 /** One entry in what the model is shown: a message, or a tool call with its
  *  result. Kept in order so the model sees the conversation as it happened. */
@@ -347,7 +347,13 @@ export class OpenRouterDriver implements ModelDriver {
 					}
 				];
 			}),
-			tool_choice: 'auto'
+			tool_choice: 'auto',
+			// OpenRouter's unified reasoning param: a model that supports it
+			// (this demo's default, openai/gpt-oss-20b, does) returns its
+			// reasoning as its own field; a model that does not just ignores
+			// the request rather than failing it — no capability check needed
+			// on this side.
+			reasoning: { effort: 'medium' }
 		};
 
 		const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -373,6 +379,10 @@ export class OpenRouterDriver implements ModelDriver {
 			throw new Error(`OpenRouter returned something that is not JSON: ${text.slice(0, 120)}`);
 		}
 		const choice = payload?.choices?.[0]?.message;
+		// A model that does not support reasoning simply has no such field;
+		// one that does but produced nothing this turn returns an empty
+		// string, which is exactly as uninteresting as no field at all.
+		const reasoning = typeof choice?.reasoning === 'string' && choice.reasoning.trim() ? choice.reasoning.trim() : null;
 		const rawCalls = choice?.tool_calls ?? [];
 		if (rawCalls.length) {
 			const calls: ToolCall[] = [];
@@ -388,9 +398,13 @@ export class OpenRouterDriver implements ModelDriver {
 				}
 				calls.push({ name, args });
 			}
-			if (calls.length) return { kind: 'calls', calls };
+			if (calls.length) return { kind: 'calls', calls, reasoning };
 		}
-		return { kind: 'text', text: String(choice?.content ?? '').trim() || 'I am not sure what to do next.' };
+		return {
+			kind: 'text',
+			text: String(choice?.content ?? '').trim() || 'I am not sure what to do next.',
+			reasoning
+		};
 	}
 }
 

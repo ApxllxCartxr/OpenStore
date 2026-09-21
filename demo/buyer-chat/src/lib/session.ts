@@ -36,6 +36,11 @@ db.exec(`
 	  role      TEXT NOT NULL CHECK (role IN ('consumer','agent')),
 	  text      TEXT NOT NULL,
 	  widget    TEXT,
+	  -- The model's own reasoning for this turn, when the driver captured any
+	  -- (OpenRouter's unified reasoning field). Never the Consumer's words,
+	  -- never a computed value — verbatim from the model, rendered collapsed
+	  -- the way Claude.ai renders a thinking block.
+	  thinking  TEXT,
 	  at        TEXT NOT NULL
 	);
 	-- Tool calls are kept for display: the card expands to the exact request
@@ -100,6 +105,9 @@ const messageColumns = (db.prepare(`PRAGMA table_info(messages)`).all() as { nam
 if (!messageColumns.includes('widget')) {
 	db.exec(`ALTER TABLE messages ADD COLUMN widget TEXT`);
 }
+if (!messageColumns.includes('thinking')) {
+	db.exec(`ALTER TABLE messages ADD COLUMN thinking TEXT`);
+}
 
 // A call recorded before this column existed reads back as '' — no shop it
 // could retroactively be assigned to is more correct than a guess, and every
@@ -162,11 +170,19 @@ export function addMessage(
 	threadId: string,
 	role: 'consumer' | 'agent',
 	text: string,
-	widget: unknown = null
+	widget: unknown = null,
+	thinking: string | null = null
 ): void {
 	db.prepare(
-		`INSERT INTO messages (thread_id, role, text, widget, at) VALUES (?, ?, ?, ?, ?)`
-	).run(threadId, role, text, widget ? JSON.stringify(widget) : null, new Date().toISOString());
+		`INSERT INTO messages (thread_id, role, text, widget, thinking, at) VALUES (?, ?, ?, ?, ?, ?)`
+	).run(
+		threadId,
+		role,
+		text,
+		widget ? JSON.stringify(widget) : null,
+		thinking || null,
+		new Date().toISOString()
+	);
 }
 
 /** One message's widget definition, read back from the database rather than
@@ -201,12 +217,15 @@ export function recordToolCall(
 export function thread(threadId: string) {
 	return {
 		messages: db
-			.prepare(`SELECT id, role, text, widget, at FROM messages WHERE thread_id = ? ORDER BY id`)
+			.prepare(
+				`SELECT id, role, text, widget, thinking, at FROM messages WHERE thread_id = ? ORDER BY id`
+			)
 			.all(threadId) as {
 			id: number;
 			role: string;
 			text: string;
 			widget: string | null;
+			thinking: string | null;
 			at: string;
 		}[],
 		toolCalls: db

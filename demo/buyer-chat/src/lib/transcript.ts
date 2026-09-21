@@ -9,7 +9,14 @@
  */
 
 export type TranscriptThread = {
-	messages: { id: number; role: string; text: string; widget: string | null; at: string }[];
+	messages: {
+		id: number;
+		role: string;
+		text: string;
+		widget: string | null;
+		thinking: string | null;
+		at: string;
+	}[];
 	toolCalls: { shop: string; name: string; request: string; response: string | null; at: string }[];
 };
 
@@ -21,7 +28,7 @@ export type TranscriptMeta = {
 };
 
 type Entry =
-	| { kind: 'message'; role: string; text: string; widget: unknown; at: string }
+	| { kind: 'message'; role: string; text: string; widget: unknown; thinking: string | null; at: string }
 	| { kind: 'tool'; shop: string; name: string; request: unknown; response: unknown; at: string };
 
 /** Messages and tool calls in the order they happened — the same interleave
@@ -33,6 +40,7 @@ function entries(thread: TranscriptThread): Entry[] {
 			role: m.role,
 			text: m.text,
 			widget: m.widget ? JSON.parse(m.widget) : null,
+			thinking: m.thinking,
 			at: m.at
 		})),
 		...thread.toolCalls.map((c): Entry => ({
@@ -69,6 +77,7 @@ export function transcriptMarkdown(thread: TranscriptThread, meta: TranscriptMet
 	for (const entry of entries(thread)) {
 		if (entry.kind === 'message') {
 			out.push(`### ${entry.role === 'agent' ? 'Miro' : 'You'} · ${entry.at}`, '');
+			if (entry.thinking) out.push('<details><summary>Thinking</summary>', '', entry.thinking, '', '</details>', '');
 			if (entry.text) out.push(entry.text, '');
 			// The interface the agent offered, not what was answered into it:
 			// an answer is the next message or the next tool call, and both are

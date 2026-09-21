@@ -36,6 +36,10 @@
 		role: string;
 		text: string;
 		widget: Widget | null;
+		/** The model's own reasoning for this turn, verbatim, when the driver
+		 *  captured any. Never invented, never summarised — the same rule as
+		 *  every other value on this page. */
+		thinking: string | null;
 		at: string;
 	};
 	type TimelineTool = {
@@ -60,6 +64,7 @@
 					// Stored validated; parsed here only to render. A row without one
 					// is an ordinary message, which is most of them.
 					widget: m.widget ? (JSON.parse(m.widget) as Widget) : null,
+					thinking: m.thinking,
 					at: m.at
 				})
 			),
@@ -76,6 +81,7 @@
 				role: 'consumer',
 				text: optimisticText,
 				widget: null,
+				thinking: null,
 				at: ''
 			});
 		}
@@ -190,6 +196,16 @@
 			<div class="row" data-who={item.role} style="--i:{i}">
 				{#if item.role === 'agent'}
 					<span class="who">Miro</span>
+				{/if}
+				{#if item.thinking}
+					<!-- The model's own reasoning, verbatim and collapsed by default —
+					     the same disclosure pattern as a tool call's request JSON: shown
+					     on request, never paraphrased into something that could be
+					     wrong with no way to tell. -->
+					<details class="thinking-block">
+						<summary>Thinking</summary>
+						<p class="mono">{item.thinking}</p>
+					</details>
 				{/if}
 				{#if item.text}
 					{#if item.role === 'agent'}

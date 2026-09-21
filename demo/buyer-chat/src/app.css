@@ -608,6 +608,37 @@ input::placeholder {
 	}
 }
 
+/* The model's own reasoning, collapsed by default — an aside before the
+   response it led to, never mistaken for the response itself. */
+.thinking-block {
+	margin-bottom: var(--s-1);
+	font-size: var(--t-caption);
+	color: var(--muted);
+}
+.thinking-block summary {
+	cursor: pointer;
+	list-style: none;
+	font-style: italic;
+}
+.thinking-block summary::-webkit-details-marker {
+	display: none;
+}
+.thinking-block summary::before {
+	content: '▸ ';
+	color: var(--comment);
+	font-style: normal;
+}
+.thinking-block[open] summary::before {
+	content: '▾ ';
+}
+.thinking-block p {
+	margin: var(--s-1) 0 0;
+	padding-left: var(--s-2);
+	border-left: 2px solid var(--line);
+	white-space: pre-wrap;
+	color: var(--comment);
+}
+
 /* The composer lifts very slightly while a turn is in flight, so the surface
    acknowledges the send before the answer exists. */
 .composer-field:has(button[disabled]) {

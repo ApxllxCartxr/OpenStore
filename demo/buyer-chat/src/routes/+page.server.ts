@@ -431,10 +431,20 @@ async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promi
 			// A message may end in one widget proposal. It is validated here and
 			// stored beside the text; one that does not parse is dropped and the
 			// sentence stands on its own, which is what a widget is a shortcut
-			// for in the first place.
+			// for in the first place. Reasoning, when the model produced any,
+			// rides beside the response it led to — the same interleaving
+			// Claude.ai shows a thinking block in.
 			const said = composeMessage(turn.text);
-			addMessage(THREAD, 'agent', said.text, said.widget);
+			addMessage(THREAD, 'agent', said.text, said.widget, turn.reasoning);
 			return;
+		}
+		if (turn.reasoning) {
+			// A turn that ends in tool calls produces no message of its own —
+			// the calls run silently and render as cards. The reasoning that
+			// chose them still deserves a place in the transcript, so it gets
+			// one: an empty-text row that is only ever a thinking disclosure,
+			// timestamped ahead of the tool cards that follow it.
+			addMessage(THREAD, 'agent', '', null, turn.reasoning);
 		}
 		const planned = turn.calls.filter((call) => TOOLS.includes(call.name as ToolName));
 		let i = 0;

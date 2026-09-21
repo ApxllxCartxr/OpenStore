@@ -13,12 +13,13 @@ const META = { shops: [{ domain: 'shop.test', name: 'SpoiledDuckie' }], driver: 
 
 const THREAD: TranscriptThread = {
 	messages: [
-		{ id: 1, role: 'consumer', text: 'a tote', widget: null, at: '2026-09-21T09:00:00.000Z' },
+		{ id: 1, role: 'consumer', text: 'a tote', widget: null, thinking: null, at: '2026-09-21T09:00:00.000Z' },
 		{
 			id: 2,
 			role: 'agent',
 			text: 'Which one?',
 			widget: '{"kind":"chips","options":["canvas","jute"]}',
+			thinking: 'The shopper wants a tote; the group has three variants.',
 			at: '2026-09-21T09:00:02.000Z'
 		}
 	],
@@ -50,6 +51,20 @@ describe('transcript export', () => {
 		expect(md).toContain('"q": "tote"');
 		expect(md).toContain('"from_minor": 49900');
 		expect(md).toContain('SpoiledDuckie (shop.test)');
+	});
+
+	it('includes the model reasoning as its own disclosure, ahead of the response it led to', () => {
+		const md = transcriptMarkdown(THREAD, META);
+		const thinking = md.indexOf('The shopper wants a tote');
+		const said = md.indexOf('Which one?');
+		expect(thinking).toBeGreaterThan(-1);
+		expect(thinking).toBeLessThan(said);
+	});
+
+	it('carries reasoning through the JSON export too', () => {
+		const parsed = JSON.parse(transcriptJson(THREAD, META));
+		const withThinking = parsed.entries.find((e: any) => e.thinking);
+		expect(withThinking.thinking).toBe('The shopper wants a tote; the group has three variants.');
 	});
 
 	it('keeps the widget definition the agent offered', () => {
