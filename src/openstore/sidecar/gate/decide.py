@@ -33,7 +33,7 @@ from openstore.sidecar.core.codes import (
     ReasonCode,
 )
 from openstore.sidecar.gate.policy import Policy
-from openstore.sidecar.gate.transcript import Binding, Transcript, binding_for
+from openstore.sidecar.gate.transcript import Transcript, binding_for
 from openstore.sidecar.trait.client import TraitClient
 from openstore.sidecar.trait.errors import TraitError
 from openstore.sidecar.trait.models import Destination, Line, Quote
@@ -256,7 +256,6 @@ class Gate:
         except ValueError as exc:
             return (CheckResult.FAIL, ReasonCode.AUTHORITY_KIND_NOT_ENABLED, str(exc))
 
-        ctx.binding = binding
         if not lands_before_gate:
             # `upi-pin`: the payer authenticates in their own app and the
             # Authority arrives with the money. Recording this as `pass` would
@@ -495,7 +494,6 @@ class _Context:
     fresh: Quote
     fresh_bytes: bytes
     cart_hash: str
-    binding: Binding | None = None
 
 
 _Outcome = tuple[CheckResult, "ReasonCode | None", str]
