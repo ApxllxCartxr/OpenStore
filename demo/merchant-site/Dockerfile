@@ -16,6 +16,12 @@ RUN pnpm install --frozen-lockfile
 # there, and a test asserts `design/` holds no importable module.
 COPY design/ /workspace/design/
 COPY demo/merchant-site/ ./
+# The typefaces the tokens name. `design/tokens.css` is inlined into the bundle
+# at build time, but the `@font-face` rules it carries point at `/fonts/*.woff2`
+# — URLs the app has to *serve*. With nothing in `static/fonts` every face 404s
+# and the whole design system silently falls back to system fonts, which no test
+# can see because no test fetches a font.
+COPY design/fonts/ ./static/fonts/
 RUN pnpm exec svelte-kit sync && pnpm build
 
 FROM node:26-alpine

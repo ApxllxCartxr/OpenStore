@@ -32,3 +32,4 @@ node_modules/
 demo/*/build/
 demo/*/data/
 demo/buyer-chat/*.db
+.env.llm

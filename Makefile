@@ -64,5 +64,12 @@ fmt: ## Format the Python
 	uv run ruff check --fix src scripts tests
 	uv run ruff format src scripts tests
 
-demo: ## The conformance suite against the running store
+demo: ## Conformance AND a whole purchase, against the running stack
+	@# A purchase is a few dozen agent calls, so two runs inside a minute meet
+	@# the shop's own per-IP limit. That is the limiter working — the suite
+	@# skips rather than failing, and a minute later it runs clean.
 	OPENSTORE_LIVE_TRAIT_URL=http://127.0.0.1:3000 uv run pytest tests/test_trait_live.py -q
+	@# The nine doors passing says the contract holds. This says the product
+	@# works: search to signed receipt over HTTP, through the real Gate, Ledger
+	@# and Provider. Every phase was green while this could not have passed.
+	OPENSTORE_LIVE_ORIGIN=http://127.0.0.1 uv run pytest tests/test_purchase_live.py -q

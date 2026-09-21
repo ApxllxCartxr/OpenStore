@@ -22,7 +22,13 @@ RUN uv sync --frozen --no-dev
 
 # Non-root: the sidecar holds the Merchant's signing key, and a container that
 # can rewrite its own code is a container that can rewrite what it signs.
-RUN useradd --create-home --uid 10001 sidecar && chown -R sidecar:sidecar /app
+# `/keys` is created here, owned by the runtime user, because a named volume
+# mounted at a path that exists in the image inherits that path's ownership.
+# Created only by the volume mount, it would be root-owned and this non-root
+# process could not write the Merchant's signing keys into it.
+RUN useradd --create-home --uid 10001 sidecar \
+    && mkdir -p /keys \
+    && chown -R sidecar:sidecar /app /keys
 USER sidecar
 
 EXPOSE 8000

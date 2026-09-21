@@ -18,6 +18,15 @@ services:
     depends_on:
       sidecar:
         condition: service_healthy
+    networks:
+      default:
+        aliases:
+          # `*.localhost` resolves to the container's OWN loopback inside a
+          # container, not to the edge (§10.1). A service that fetches the
+          # demo's public URL — the chat fetching a shop card — needs the name
+          # to mean Caddy here, or it dials itself and gets nothing.
+          - spoiledduckie.localhost
+          - chat.localhost
     restart: unless-stopped
 
   sidecar:
@@ -39,6 +48,18 @@ services:
       # alone gives the sidecar nothing to sign with, and every door refuses.
       TRAIT_HMAC_SECRET: conformance-secret
       PAYMENT_PROVIDER: fake
+      # Pseudonymous consumer ids (ADR-0011). Demo value; a real deploy
+      # generates one and rotating it unlinks old orders from new.
+      DEPLOY_PSEUDONYM_KEY: demo-deploy-pseudonym-key-32bytes
+      # The second admission route (ADR-0012). Self-registration needs no
+      # Merchant action; these are for an agent the Merchant has issued
+      # credentials to, and without them that route refuses everyone.
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret
+      # The Merchant's signing keys, on a volume because they ARE the Merchant's
+      # identity: a key regenerated on each boot breaks every agent that pinned
+      # the last one and orphans every receipt already sealed (ADR-0014).
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
       OPENSTORE_DEMO_MODE: "true"
       # The SSRF exception, for the compose demo's own chat and nothing else
       # (§10.1). Boot is refused if this is set alongside live provider keys.
@@ -46,6 +67,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - sidecarkeys:/keys
     expose:
       - "8000"
     restart: unless-stopped
@@ -61,6 +84,11 @@ services:
       SIDECAR_INTERNAL_URL: http://sidecar:8000
       OPENSTORE_PUBLIC_ORIGIN: http://spoiledduckie.localhost
       ADMIN_SEED_PASSWORD: demo-operator-pw
+      # adapter-node assumes https when no protocol header is named, so the
+      # origin it computes is https://<host> while the browser posts from
+      # http://<host> — and SvelteKit's CSRF check refuses every form on the
+      # demo's plain-http origins. Caddy sets this header; honour it.
+      PROTOCOL_HEADER: x-forwarded-proto
       NODE_ENV: production
     depends_on:
       postgres:
@@ -80,14 +108,28 @@ services:
       dockerfile: demo/buyer-chat/Dockerfile
     environment:
       PORT: "3001"
-      CHAT_MODEL_DRIVER: scripted
+      # A real model when a key is present, the pinned planner otherwise. The
+      # demo must still run end to end with no key and no network to a model —
+      # a demo that needs somebody's API key to pass its own tests is one that
+      # fails on the next laptop.
+      CHAT_MODEL_DRIVER: ${CHAT_MODEL_DRIVER:-scripted}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-oss-20b}
       CHAT_DATABASE_PATH: /data/chat.db
       CHAT_KEY_PATH: /data/agent-key.json
       # The chat reaches the sidecar through Caddy carrying the real Host
       # header: a card fetched as http://caddy/ would advertise the wrong
       # origin back to the browser (§10.1).
       SIDECAR_PUBLIC_ORIGIN: http://spoiledduckie.localhost
-      SIDECAR_VIA: http://caddy
+      # The chat dials the shop by its own domain (the edge answers to it on
+      # this network), and names it as the one host it may reach over plain
+      # http — the mirror of the sidecar's own exception.
+      OPENSTORE_DEV_PROFILE_HOSTS: spoiledduckie.localhost
+      # adapter-node assumes https when no protocol header is named, so the
+      # origin it computes is https://<host> while the browser posts from
+      # http://<host> — and SvelteKit's CSRF check refuses every form on the
+      # demo's plain-http origins. Caddy sets this header; honour it.
+      PROTOCOL_HEADER: x-forwarded-proto
       NODE_ENV: production
     volumes:
       - chatdata:/data
@@ -118,3 +160,4 @@ services:
 volumes:
   pgdata:
   chatdata:
+  sidecarkeys:
