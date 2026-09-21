@@ -12,12 +12,16 @@ association, because there is none to check.
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from openstore.sidecar.authority.passkey import (
+    CHALLENGE_VERSION,
     PasskeyRefused,
     PasskeyRP,
     challenge_for,
 )
+from openstore.sidecar.core.canonical import canonical_bytes
 from openstore.sidecar.core.codes import Ceremony, ReasonCode
 from webauthn.helpers import base64url_to_bytes
 
@@ -87,6 +91,35 @@ def test_the_same_binding_is_the_same_challenge() -> None:
         expiry_utc=EXPIRY,
     )
     assert challenge_for(**args) == challenge_for(**args)  # type: ignore[arg-type]
+
+
+def test_the_challenge_is_the_preimage_verbatim_not_just_sensitive_to_it() -> None:
+    """The five-fields-each-moved test above proves the challenge is
+    *sensitive* to every field; it cannot tell a preimage keyed "cart_hash"
+    from one keyed "CART_HASH" apart, since renaming a key changes no pair's
+    before/after difference. Recomputing the exact preimage here, independent
+    of `challenge_for`'s own dict literal, is what pins the field names too —
+    a real interop concern, since the preimage format is a wire contract with
+    whatever verifies this offline (SPEC §9)."""
+    preimage = {
+        "v": CHALLENGE_VERSION,
+        "cart_hash": CART,
+        "total_minor": TOTAL,
+        "currency": "INR",
+        "merchant_domain": RP_ID,
+        "expiry_utc": EXPIRY,
+    }
+    expected = hashlib.sha256(canonical_bytes(preimage)).digest()
+    assert (
+        challenge_for(  # type: ignore[arg-type]
+            cart_hash=CART,
+            total_minor=TOTAL,
+            currency="INR",
+            merchant_domain=RP_ID,
+            expiry_utc=EXPIRY,
+        )
+        == expected
+    )
 
 
 # ── One prompt, when the authenticator attests ───────────────────────────────
