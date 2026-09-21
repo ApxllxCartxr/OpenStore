@@ -45,12 +45,16 @@ test: ## Every suite: sidecar, merchant site, chat
 	cd demo/merchant-site && pnpm vitest run
 	cd demo/buyer-chat && pnpm vitest run
 
-guardrails: ## The four checks that fail the build on drift
+guardrails: ## The five checks that fail the build on drift
 	uv run scripts/lint_firewall.py
 	uv run scripts/registry_diff.py --check
 	uv run scripts/registry_diff.py --prose
 	uv run scripts/lint_money.py
 	uv run scripts/lint_time.py
+	@# The vectors a second Merchant-side implementation is held to. Drift here
+	@# is §16.11 or the HMAC preimage moving under an implementation that cannot
+	@# see it change.
+	uv run scripts/make_trait_vectors.py --check
 
 check: guardrails ## Guardrails, lint, types, and every suite
 	uv run ruff check src scripts tests
@@ -59,6 +63,15 @@ check: guardrails ## Guardrails, lint, types, and every suite
 	cd demo/merchant-site && pnpm exec svelte-check --tsconfig ./tsconfig.json
 	cd demo/buyer-chat && pnpm exec svelte-check --tsconfig ./tsconfig.json
 	@$(MAKE) --no-print-directory test
+
+woo: ## Check the WooCommerce plugin against the sidecar's own vectors
+	@# No PHP on the host is the normal case, so the runtime comes from a
+	@# container. Neither runner needs WordPress: the two things checked here
+	@# are integers and bytes.
+	docker run --rm -v "$(PWD):/src:ro" php:8.2-cli \
+		bash -c 'for f in $$(find /src/integrations/woocommerce -name "*.php"); do php -l "$$f" >/dev/null || exit 1; done'
+	docker run --rm -v "$(PWD):/src:ro" php:8.2-cli php /src/integrations/woocommerce/tests/run-vectors.php
+	docker run --rm -v "$(PWD):/src:ro" php:8.2-cli php /src/integrations/woocommerce/tests/run-signing.php
 
 fmt: ## Format the Python
 	uv run ruff check --fix src scripts tests

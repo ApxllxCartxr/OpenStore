@@ -1,0 +1,849 @@
+{
+  "cases": [
+    {
+      "destination_state": "MH",
+      "discount": null,
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [],
+        "fulfillment_chosen": {
+          "cost_minor": 0,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 0,
+            "eta_days": 3,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 100000,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 100000
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 100000,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 15254,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 18%",
+            "rate_bp": 1800
+          }
+        ],
+        "total_minor": 100000
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 100000,
+          "sku": "A",
+          "tags": []
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        }
+      ],
+      "name": "one line, no shipping, no discount",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 0,
+        "eta_days": 3,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "KA",
+      "discount": null,
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [],
+        "fulfillment_chosen": {
+          "cost_minor": 4900,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 4900,
+            "eta_days": 2,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 99901,
+            "place_of_supply": "KA",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 99901
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 99901,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 7993,
+            "informational": true,
+            "kind": "CGST",
+            "label": "CGST 9%",
+            "rate_bp": 900
+          },
+          {
+            "amount_minor": 7994,
+            "informational": true,
+            "kind": "SGST",
+            "label": "SGST 9%",
+            "rate_bp": 900
+          }
+        ],
+        "total_minor": 104801
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 99901,
+          "sku": "A",
+          "tags": []
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        }
+      ],
+      "name": "intra-state, odd tax: SGST takes the spare paise",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 4900,
+        "eta_days": 2,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "MH",
+      "discount": null,
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [],
+        "fulfillment_chosen": {
+          "cost_minor": 10000,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 10000,
+            "eta_days": 5,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 33333,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 33333
+          },
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 33333,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "B",
+            "unit_price_minor": 33333
+          },
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 33334,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "C",
+            "unit_price_minor": 33334
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 100000,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 16779,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 18%",
+            "rate_bp": 1800
+          }
+        ],
+        "total_minor": 110000
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 33333,
+          "sku": "A",
+          "tags": []
+        },
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 33333,
+          "sku": "B",
+          "tags": []
+        },
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 33334,
+          "sku": "C",
+          "tags": []
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        },
+        {
+          "qty": 1,
+          "sku": "B"
+        },
+        {
+          "qty": 1,
+          "sku": "C"
+        }
+      ],
+      "name": "three lines, shipping that does not divide by three",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 10000,
+        "eta_days": 5,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "MH",
+      "discount": {
+        "amount_minor": -12345,
+        "code": "SAVE",
+        "label": "Save"
+      },
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [
+          {
+            "amount_minor": -12345,
+            "code": "SAVE",
+            "label": "Save"
+          }
+        ],
+        "fulfillment_chosen": {
+          "cost_minor": 9900,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 9900,
+            "eta_days": 5,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 89900,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 89900
+          },
+          {
+            "addons": [],
+            "gst_rate_bp": 1200,
+            "hsn_sac": "7117",
+            "line_total_minor": 150000,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "B",
+            "unit_price_minor": 150000
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 239900,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 15908,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 12%",
+            "rate_bp": 1200
+          },
+          {
+            "amount_minor": 13574,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 18%",
+            "rate_bp": 1800
+          }
+        ],
+        "total_minor": 237455
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 89900,
+          "sku": "A",
+          "tags": []
+        },
+        {
+          "gst_rate_bp": 1200,
+          "hsn_sac": "7117",
+          "price_minor": 150000,
+          "sku": "B",
+          "tags": []
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        },
+        {
+          "qty": 1,
+          "sku": "B"
+        }
+      ],
+      "name": "discount and shipping apportioned on the same basis",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 9900,
+        "eta_days": 5,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "MH",
+      "discount": null,
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [],
+        "fulfillment_chosen": {
+          "cost_minor": 9900,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 9900,
+            "eta_days": 5,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 89900,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 89900
+          },
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "9983",
+            "line_total_minor": 50000,
+            "place_of_supply": "KA",
+            "qty": 1,
+            "sku": "S",
+            "unit_price_minor": 50000
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 139900,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 4083,
+            "informational": true,
+            "kind": "CGST",
+            "label": "CGST 9%",
+            "rate_bp": 900
+          },
+          {
+            "amount_minor": 14684,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 18%",
+            "rate_bp": 1800
+          },
+          {
+            "amount_minor": 4084,
+            "informational": true,
+            "kind": "SGST",
+            "label": "SGST 9%",
+            "rate_bp": 900
+          }
+        ],
+        "total_minor": 149800
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 89900,
+          "sku": "A",
+          "tags": []
+        },
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "9983",
+          "price_minor": 50000,
+          "sku": "S",
+          "tags": [
+            "service"
+          ]
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        },
+        {
+          "qty": 1,
+          "sku": "S"
+        }
+      ],
+      "name": "a service line keeps its Place of Supply at home",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 9900,
+        "eta_days": 5,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "MH",
+      "discount": null,
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [],
+        "fulfillment_chosen": {
+          "cost_minor": 9900,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 9900,
+            "eta_days": 5,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [
+              {
+                "amount_minor": 9900,
+                "sku": "W"
+              }
+            ],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 99800,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 89900
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 99800,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 16734,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 18%",
+            "rate_bp": 1800
+          }
+        ],
+        "total_minor": 109700
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 89900,
+          "sku": "A",
+          "tags": []
+        },
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 9900,
+          "sku": "W",
+          "tags": [
+            "addon"
+          ]
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        },
+        {
+          "parent": "A",
+          "qty": 1,
+          "sku": "W"
+        }
+      ],
+      "name": "an Add-on folds into its parent and never quotes itself",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 9900,
+        "eta_days": 5,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "KA",
+      "discount": {
+        "amount_minor": -1000,
+        "code": "TEN",
+        "label": "Ten"
+      },
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [
+          {
+            "amount_minor": -1000,
+            "code": "TEN",
+            "label": "Ten"
+          }
+        ],
+        "fulfillment_chosen": {
+          "cost_minor": 7777,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 7777,
+            "eta_days": 4,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 500,
+            "hsn_sac": "4202",
+            "line_total_minor": 37035,
+            "place_of_supply": "KA",
+            "qty": 3,
+            "sku": "A",
+            "unit_price_minor": 12345
+          },
+          {
+            "addons": [],
+            "gst_rate_bp": 2800,
+            "hsn_sac": "8517",
+            "line_total_minor": 135782,
+            "place_of_supply": "KA",
+            "qty": 2,
+            "sku": "B",
+            "unit_price_minor": 67891
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 172817,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 916,
+            "informational": true,
+            "kind": "CGST",
+            "label": "CGST 2.5%",
+            "rate_bp": 250
+          },
+          {
+            "amount_minor": 15433,
+            "informational": true,
+            "kind": "CGST",
+            "label": "CGST 14%",
+            "rate_bp": 1400
+          },
+          {
+            "amount_minor": 917,
+            "informational": true,
+            "kind": "SGST",
+            "label": "SGST 2.5%",
+            "rate_bp": 250
+          },
+          {
+            "amount_minor": 15434,
+            "informational": true,
+            "kind": "SGST",
+            "label": "SGST 14%",
+            "rate_bp": 1400
+          }
+        ],
+        "total_minor": 179594
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 500,
+          "hsn_sac": "4202",
+          "price_minor": 12345,
+          "sku": "A",
+          "tags": []
+        },
+        {
+          "gst_rate_bp": 2800,
+          "hsn_sac": "8517",
+          "price_minor": 67891,
+          "sku": "B",
+          "tags": []
+        }
+      ],
+      "lines": [
+        {
+          "qty": 3,
+          "sku": "A"
+        },
+        {
+          "qty": 2,
+          "sku": "B"
+        }
+      ],
+      "name": "quantities above one, two rates in one basket",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 7777,
+        "eta_days": 4,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "MH",
+      "discount": null,
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [],
+        "fulfillment_chosen": {
+          "cost_minor": 5000,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 5000,
+            "eta_days": 5,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 0,
+            "hsn_sac": "0401",
+            "line_total_minor": 50000,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 50000
+          },
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 50000,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "B",
+            "unit_price_minor": 50000
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 100000,
+        "tax_inclusive": true,
+        "tax_lines": [
+          {
+            "amount_minor": 0,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 0%",
+            "rate_bp": 0
+          },
+          {
+            "amount_minor": 8008,
+            "informational": true,
+            "kind": "IGST",
+            "label": "IGST 18%",
+            "rate_bp": 1800
+          }
+        ],
+        "total_minor": 105000
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 0,
+          "hsn_sac": "0401",
+          "price_minor": 50000,
+          "sku": "A",
+          "tags": []
+        },
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 50000,
+          "sku": "B",
+          "tags": []
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        },
+        {
+          "qty": 1,
+          "sku": "B"
+        }
+      ],
+      "name": "a zero-rated line beside a taxed one",
+      "tax_inclusive": true,
+      "zone": {
+        "cost_minor": 5000,
+        "eta_days": 5,
+        "id": "flat",
+        "label": "Flat"
+      }
+    },
+    {
+      "destination_state": "MH",
+      "discount": null,
+      "expected": {
+        "currency": "INR",
+        "discount_lines": [],
+        "fulfillment_chosen": {
+          "cost_minor": 0,
+          "id": "flat"
+        },
+        "fulfillment_options": [
+          {
+            "cost_minor": 0,
+            "eta_days": 3,
+            "id": "flat",
+            "label": "Flat"
+          }
+        ],
+        "lines": [
+          {
+            "addons": [],
+            "gst_rate_bp": 1800,
+            "hsn_sac": "4202",
+            "line_total_minor": 100000,
+            "place_of_supply": "MH",
+            "qty": 1,
+            "sku": "A",
+            "unit_price_minor": 100000
+          }
+        ],
+        "round_off_minor": 0,
+        "subtotal_minor": 100000,
+        "tax_inclusive": false,
+        "tax_lines": [
+          {
+            "amount_minor": 15254,
+            "informational": false,
+            "kind": "IGST",
+            "label": "IGST 18%",
+            "rate_bp": 1800
+          }
+        ],
+        "total_minor": 100000
+      },
+      "home_state": "KA",
+      "items": [
+        {
+          "gst_rate_bp": 1800,
+          "hsn_sac": "4202",
+          "price_minor": 100000,
+          "sku": "A",
+          "tags": []
+        }
+      ],
+      "lines": [
+        {
+          "qty": 1,
+          "sku": "A"
+        }
+      ],
+      "name": "tax added rather than included",
+      "tax_inclusive": false,
+      "zone": {
+        "cost_minor": 0,
+        "eta_days": 3,
+        "id": "flat",
+        "label": "Flat"
+      }
+    }
+  ],
+  "note": "\u00a716.11 agreement vectors. Inputs, and the exact paise every implementation must produce. Generated by scripts/make_pricing_vectors.py."
+}
