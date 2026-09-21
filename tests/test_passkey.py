@@ -145,6 +145,25 @@ async def test_an_attested_enrollment_authorizes_in_one_prompt(
     assert verified.attestation_fmt == "packed"
 
 
+async def test_credentials_held_round_trips_every_stored_field(
+    rp: PasskeyRP, device: SoftwareAuthenticator
+) -> None:
+    """The only other test that reads this list checks its length; nothing
+    checked that a row survives the trip back out with the field it went in
+    on, as opposed to some other row's, or nothing at all."""
+    _, _, challenge = await _begin(rp)
+    created = device.create(challenge, attestation="packed")
+    await rp.verify_enrollment(token="tok", credential=created, cart_hash=CART, total_minor=TOTAL)
+
+    [held] = await rp.credentials_held()
+    direct = await rp.credential(base64url_to_bytes(str(created["id"])))
+    assert direct is not None
+    assert held.credential_id == direct.credential_id
+    assert held.public_key == direct.public_key
+    assert held.sign_count == direct.sign_count
+    assert held.attestation_fmt == "packed"
+
+
 # ── Two prompts, named, when it does not ─────────────────────────────────────
 
 
@@ -311,6 +330,7 @@ async def test_the_stored_sign_count_advances_after_an_assertion(
         token="tok1", credential=created, cart_hash=CART, total_minor=TOTAL
     )
     after_enrollment = (await rp.credential(raw_id)).sign_count
+    assert after_enrollment > 0, "enrollment's own counter was dropped, not just left unmoved"
 
     _, _, challenge2 = await _begin(rp, token="tok2")
     await rp.verify_assertion(
