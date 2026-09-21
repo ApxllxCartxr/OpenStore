@@ -187,6 +187,23 @@ describe('shopsFor — an unaddressed write never reaches a shop it was not mean
 			ToolError
 		);
 	});
+
+	it('continues a checkout already under way rather than re-asking on every step', () => {
+		// set-destination carries no sku/group to resolve by — the only reason
+		// it can ever resolve unattended is that exactly one shop has a basket.
+		const midCheckout = catalogueFrom([
+			{ shop: SD, name: 'add-line', args: { sku: 'SD-TOTE-BLK-M' }, result: { lines: [{ sku: 'SD-TOTE-BLK-M', qty: 1 }] } }
+		]);
+		expect(shopsFor({ name: 'set-destination', args: {} }, midCheckout, shops)).toEqual([SD]);
+	});
+
+	it('still asks when two shops both have an open basket', () => {
+		const twoBaskets = catalogueFrom([
+			{ shop: SD, name: 'add-line', args: { sku: 'SD-TOTE-BLK-M' }, result: { lines: [{ sku: 'SD-TOTE-BLK-M', qty: 1 }] } },
+			{ shop: DE, name: 'add-line', args: { sku: 'DE-NOTEBOOK' }, result: { lines: [{ sku: 'DE-NOTEBOOK', qty: 1 }] } }
+		]);
+		expect(() => shopsFor({ name: 'set-destination', args: {} }, twoBaskets, shops)).toThrow(ToolError);
+	});
 });
 
 describe('the chat never picks for the Consumer', () => {

@@ -383,6 +383,18 @@ export function shopsFor(
 	}
 	if (candidates.size === 1) return [...candidates];
 
+	// No id at all names a shop — `set-destination`, `set-contact`,
+	// `start-checkout` and `place-order` never carry one. These are the steps
+	// that *continue* a checkout already under way, so the shop with lines in
+	// its basket is a stronger signal than "ask again": a shopper mid-checkout
+	// at one shop should not be re-asked which shop they meant on every step.
+	// Silent only because it is unambiguous — two shops both holding lines
+	// falls through to asking, same as an outright collision.
+	if (candidates.size === 0) {
+		const withBasket = shops.filter((shop) => (seen.baskets.get(shop.domain)?.size ?? 0) > 0);
+		if (withBasket.length === 1) return [withBasket[0]!.domain];
+	}
+
 	// Two or more shops sell the same-named id (the ordinary case for a
 	// deliberately overlapping SKU, e.g. two shops both selling AA batteries)
 	// — or the id is unrecognised anywhere and every shop is offered as a
