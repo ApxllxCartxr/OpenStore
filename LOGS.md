@@ -34,6 +34,16 @@ Verified on a fresh volume: `make down && make up && make demo` clean, 22 contai
 
 **A real gap found while trying to verify the overlap SKUs live**: `shopsFor()` (loop.ts) — the function that fans an unaddressed call out across every known shop, or resolves it to the one shop a SKU can only mean — is fully implemented and unit-tested, but is never called anywhere in `+page.server.ts`. The running app only ever operates on `currentShop()`, the single most-recently-added contact. "Serve all 10 simultaneously" is not yet true of the actual chat flow, whatever the data model already supports. Next.
 
+## 2026-09-22 · The chat actually talks to every shop now
+
+Closed the gap logged above. `currentShop()` → `knownShops()` everywhere: `runAgent`'s read batching and single-call dispatch resolve per call through `shopsFor`, `startFresh`/`reset` clear every shop's basket instead of one, the basket panel shows one basket per shop (ADR-0007 — one sidecar per shop means one basket per shop is the only honest thing to render). `awaiting` now carries the domain a call resolved to *at propose time*, so the tap the Consumer answers is the shop they were shown.
+
+`shopsFor` throwing `shop-required` (ambiguous — two-plus shops answer to the same id, or none named among several) is a question, not a crash: caught at every call site the same way `variant-required` already is, and `ToolError` gained a `fields` payload so the candidate shops travel with the refusal into a `choices` widget instead of asking the Consumer to type a domain.
+
+Verified live: 8 shops added as chat contacts, search for "AA batteries" fanned out to all 8 concurrently, returned real matches from exactly CircuitYard (₹249) and IronList (₹229) — the two that actually sell it — and honest not-found from the rest. Every tool card in the transcript and export now names which shop answered. 140 buyer-chat tests green, 0 type errors, 582 Python tests green, `make demo` clean.
+
+Not yet exercised live: the `shop-required` disambiguation widget itself. With this catalogue's SKU-prefixing convention (`CY-`, `IL-`, …), a write's SKU essentially never collides across two shops — only `group` ids do (e.g. both battery shops use `aa-batteries`), and reads fan out before that could matter. The widget is unit-tested and reachable by the empty-catalogue "you have N shops, which one" branch; genuine SKU collision on a write remains a defensive path for a catalogue that doesn't prefix as consistently as this demo's does.
+
 ---
 
 # Morning report
