@@ -12,7 +12,7 @@
  * is rendered verbatim.
  */
 import { fail } from '@sveltejs/kit';
-import { THREAD, addMessage, createThread, recordToolCall, thread, widgetFor } from '$lib/session.ts';
+import { THREAD, addMessage, createThread, getSetting, recordToolCall, thread, widgetFor } from '$lib/session.ts';
 import {
 	driverFromEnv,
 	isOffer,
@@ -101,12 +101,41 @@ export async function load() {
 		tools: [...TOOLS],
 		shops,
 		pending: awaiting
-			? { name: awaiting.call.name, args: awaiting.call.args, domain: awaiting.domain, shopName: shopName(awaiting.domain, shops) }
+			? {
+					name: awaiting.call.name,
+					args: awaiting.call.args,
+					domain: awaiting.domain,
+					shopName: shopName(awaiting.domain, shops),
+					overCeiling: pendingOverCeiling(awaiting)
+				}
 			: null,
 		pendingNote: awaiting ? consentNote(awaiting.call) : null,
 		pendingHasArgs: awaiting ? hasMeaningfulArgs(awaiting.call.args) : false,
 		standing: [...standing]
 	};
+}
+
+/**
+ * The advisory ceiling, checked against the same shop's most recent quote —
+ * `place-order` itself carries no total, so this is what the pending call was
+ * proposed alongside, not a number this chat computed. Null unless there is
+ * both a ceiling set and a quote to compare it against; the modal falls back
+ * to its ordinary copy either way.
+ */
+function pendingOverCeiling(pending: { call: ToolCall; domain: string }): number | null {
+	if (pending.call.name !== 'place-order') return null;
+	const ceiling = getSetting('spend_ceiling_minor');
+	if (!ceiling) return null;
+	const ceilingMinor = Number(ceiling);
+	const calls = recordedCalls();
+	for (let i = calls.length - 1; i >= 0; i -= 1) {
+		const call = calls[i]!;
+		if (call.shop !== pending.domain || call.name !== 'start-checkout') continue;
+		const total = (call.result as Record<string, any> | null)?.total_minor;
+		if (typeof total === 'number' && total > ceilingMinor) return total;
+		return null;
+	}
+	return null;
 }
 
 /**

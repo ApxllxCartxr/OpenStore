@@ -72,6 +72,15 @@ db.exec(`
 	  receipt_id  TEXT,
 	  updated_at  TEXT NOT NULL
 	);
+	-- A Consumer preference, not money state: this chat never holds a total, a
+	-- price or a payment credential. A spend ceiling is the Consumer's own
+	-- number, checked against a shop's total only to decide whether to say
+	-- something extra before the approve-page tap — never enforced, since
+	-- this chat has no authority to enforce anything (ADR-0008, ADR-0024).
+	CREATE TABLE IF NOT EXISTS settings (
+	  key   TEXT PRIMARY KEY,
+	  value TEXT NOT NULL
+	);
 `);
 
 // `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so
@@ -206,4 +215,21 @@ export function thread(threadId: string) {
 			)
 			.all(threadId) as { shop: string; name: string; request: string; response: string; at: string }[]
 	};
+}
+
+export function getSetting(key: string): string | null {
+	const row = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as
+		| { value: string }
+		| undefined;
+	return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+	db.prepare(
+		`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+	).run(key, value);
+}
+
+export function clearSetting(key: string): void {
+	db.prepare(`DELETE FROM settings WHERE key = ?`).run(key);
 }

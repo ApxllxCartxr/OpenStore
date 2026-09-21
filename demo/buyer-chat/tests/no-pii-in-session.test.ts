@@ -18,9 +18,13 @@ describe('the session database', () => {
 		expect(planted).toEqual([]);
 	});
 
-	it('holds threads, messages, tool calls, contacts and order views — and nothing else', () => {
+	it('holds threads, messages, tool calls, contacts, order views and settings — and nothing else', () => {
+		// `settings` is a Consumer preference store (currently: an advisory
+		// spend ceiling), not money state or PII — a preference is not a total,
+		// a price or a payment credential, and FORBIDDEN_COLUMNS above still
+		// refuses it a real one under any name.
 		const tables = [...new Set(schemaColumns().map((c) => c.split('.')[0]))].sort();
-		expect(tables).toEqual(['contacts', 'messages', 'order_views', 'threads', 'tool_calls']);
+		expect(tables).toEqual(['contacts', 'messages', 'order_views', 'settings', 'threads', 'tool_calls']);
 	});
 
 	it('keeps only status and reason on an order, never a total', () => {

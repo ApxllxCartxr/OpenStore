@@ -26,6 +26,34 @@
 		<p class="mono" style="color:{form.code ? 'var(--accent)' : 'var(--ok)'}">{form.message}</p>
 	{/if}
 
+	<h2 style="font-size:1.05rem;margin-top:var(--s-5)">Spending</h2>
+	<p class="meta" style="margin-top:var(--s-1)">
+		Miro cannot spend and holds no payment credential, whatever you set below — every purchase
+		still ends with you approving the exact amount on the shop's own page. This only tells Miro
+		to say something extra first if a checkout's total crosses it. It is not a bank-enforced
+		limit and nothing here can make it one.
+	</p>
+	<form method="POST" action="?/ceiling" class="add" style="margin-top:var(--s-2)">
+		<label class="field" style="flex:0 0 12rem">
+			<span class="meta">Flag checkouts over (₹)</span>
+			<input
+				name="rupees"
+				class="mono"
+				type="number"
+				step="0.01"
+				min="0"
+				placeholder="e.g. 2000"
+				value={data.spendCeilingMinor ? (data.spendCeilingMinor / 100).toFixed(2) : ''}
+			/>
+		</label>
+		<button type="submit">Save</button>
+	</form>
+	{#if data.spendCeilingMinor}
+		<form method="POST" action="?/ceiling" style="margin-top:var(--s-1)">
+			<button type="submit" class="secondary">Clear ceiling</button>
+		</form>
+	{/if}
+
 	<ul class="contacts">
 		{#each data.contacts as contact (contact.domain)}
 			<li class="contact">

@@ -392,6 +392,13 @@
 					Miro cannot see, hold, or complete for you. That is why nothing here ever asks you to
 					sign anything.
 				</p>
+				{#if data.pending.overCeiling}
+					<p class="meta" style="margin-top:var(--s-1);color:var(--accent)">
+						This checkout is {rupees(data.pending.overCeiling)}, above the ceiling you set on the
+						<a href="/contacts">Shops page</a>. That is a flag Miro is raising for you, not a
+						block — nothing here stops you from approving it on the shop's own page.
+					</p>
+				{/if}
 			{:else if data.pendingNote}
 				<!-- Plain words beside the exact JSON, never instead of it: a note
 				     that replaced the request could be wrong with no way to tell. -->
