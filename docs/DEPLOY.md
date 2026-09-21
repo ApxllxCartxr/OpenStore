@@ -51,6 +51,7 @@ is how that secret reaches production.
 | `DEPLOY_PSEUDONYM_KEY` | derives `consumer_id` | old orders stop correlating to new ones (which is also how you rotate deliberately) |
 | `TRAIT_HMAC_SECRET` | signs the nine doors | every door refuses |
 | `PROVIDER_WEBHOOK_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | verifies the money callback | every callback is refused, and payments only finish through a manual status check |
+| `RAZORPAY_KEY_ID` / `_SECRET` | the Merchant's own Razorpay account | no link can be created, so no prepaid order can be paid |
 | `OAUTH_CLIENT_ID` / `_SECRET` | the allowlisted-agent route | that route refuses everyone; self-registration still works |
 
 Two webhook names rather than one shared value, because Razorpay's is issued by
@@ -103,7 +104,26 @@ backups are correct here; what matters is that **the keyfile and the database
 are backed up together**. A database without its keys holds receipts nobody can
 verify; keys without the database hold an identity with nothing to prove.
 
-## 5. Health
+## 5. The payment rail
+
+`PAYMENT_PROVIDER=razorpay` talks to the Merchant's own Razorpay account over
+the Payment Links API. Two things about it are worth knowing before the first
+deploy:
+
+- **The adapter refuses to boot on a live key while `OPENSTORE_DEMO_MODE` is
+  on.** Every demo receipt is marked demo, and a demo that can move real money
+  is not a demo.
+- **The link lives slightly longer than §16.7's fifteen-minute window**, because
+  Razorpay refuses an `expire_by` that is not *more than* fifteen minutes out.
+  The sidecar takes the Provider's own lifetime as the ceiling on the stock
+  hold, so the longer link shortens nothing.
+
+Settlement runs Consumer → the Merchant's own account, untouched by the sidecar
+(SPEC §2, ADR-0021). No Consumer PII is sent to Razorpay: the sidecar holds
+commitments to the Destination and Contact Point that become unopenable on
+erasure, and a copy in a Provider's dashboard is a copy erasure cannot reach.
+
+## 6. Health
 
 - `/healthz` — the process is up. Says nothing about whether it can work.
 - `/readyz` — configuration loaded and the dangerous combinations refused. It
@@ -114,7 +134,7 @@ time: the schema revision, the database, the Provider adapter, the signing key,
 the trait URL, and whether the sweeper started. A line reading `NOT CONFIGURED`
 is the answer to most "why did nothing happen" questions.
 
-## 6. The store on the other side
+## 7. The store on the other side
 
 The sidecar needs a Merchant implementing the nine doors. Prove it before
 pointing real traffic at it:
@@ -129,13 +149,16 @@ creates orders and takes stock holds, and gives every hold back.
 
 For WooCommerce, `integrations/woocommerce/` is a plugin that serves the doors.
 
-## 7. What is still absent
+## 8. What is still absent
 
 Named rather than discovered:
 
-- **Razorpay's adapter raises `NotImplementedError`** for its four network
-  calls. `read_webhook` parses the real envelope, but no money has moved through
-  it. The `fake` Provider is the only working rail today.
+- **No money has moved through Razorpay.** The four network calls are
+  implemented against the documented API and tested against its documented
+  envelopes, but this adapter has never spoken to Razorpay. Run it against a
+  `rzp_test_` key and a sandbox webhook before pointing it at anything real; the
+  first live settlement is also the first test of ADR-0021's ECO/TCS boundary in
+  practice rather than on paper.
 - **Nothing sweeps the checkouts table.** Rows are small and bounded by order
   volume, but they are never deleted; erasure (ADR-0011) deletes the Merchant's
   order and the salt with it, which makes the commitments unopenable, but the
