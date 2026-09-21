@@ -101,36 +101,36 @@
 }
 
 /* ============================================================
-   PALETTE — warm neutral light (default) with Tokyo Night as
-   the dark theme. Both are defined in the same token names, so
-   components never reference a literal colour.
+   PALETTE — pitch-black background (#000000) on every surface.
+   Both themes use the dark (Tokyo Night) foreground set so body
+   copy stays readable on black; page ground (--bg) is pure black.
+   Components never reference a literal colour.
 
-   Light:  paper #f6f5f2 · cards #fffdfa · ink #16161a
-   Dark:   Tokyo Night (tokyo-night/tokyo-night-vscode-theme)
-           bg #1a1b26 · fg #c0caf5 · red #f7768e · cyan #7dcfff
+   Dark base: Tokyo Night (tokyo-night/tokyo-night-vscode-theme)
+           fg #c0caf5 · red #f7768e · cyan #7dcfff
 
    --muted is for secondary text; --comment is decoration-only
    (rules, disabled glyphs) — too low-contrast for body copy.
    ============================================================ */
 :root {
-	--bg: #f6f5f2;
-	--bg-raised: #fffdfa;
-	--bg-sunken: #eceae4;
-	--fg: #16161a;
-	--muted: #6c6c74;
-	--line: #e2e0da;
-	--accent: #c2415a;
-	--accent-2: #2f6b95;
-	--comment: #9a9aa1;
-	--ok: #2f8a4d;
-	--scrim: rgb(22 22 26 / 0.3);
+	--bg: #000000;
+	--bg-raised: #20212e;
+	--bg-sunken: #15161f;
+	--fg: #c0caf5;
+	--muted: #a9b1d6;
+	--line: #3b4261;
+	--accent: #f7768e;
+	--accent-2: #7dcfff;
+	--comment: #565f89;
+	--ok: #9ece6a;
+	--scrim: rgb(0 0 0 / 0.55);
 }
 
 /* The inline script in app.html stamps data-theme before first paint, so the
    media query only decides for visitors who have never picked a theme. */
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme='light']) {
-		--bg: #1a1b26;
+		--bg: #000000;
 		--bg-raised: #20212e;
 		--bg-sunken: #15161f;
 		--fg: #c0caf5;
@@ -145,7 +145,7 @@
 }
 
 :root[data-theme='dark'] {
-	--bg: #1a1b26;
+	--bg: #000000;
 	--bg-raised: #20212e;
 	--bg-sunken: #15161f;
 	--fg: #c0caf5;
