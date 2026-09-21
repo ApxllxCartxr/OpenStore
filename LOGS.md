@@ -4,6 +4,17 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-22 · Mutation testing extended to the Ledger; five real gaps, one dead function
+
+Continued the Phase 3 mutmut pass from the Gate into `ledger/entries.py` — the actual money-movement bookkeeping the Gate's PASS authorizes, and the next-highest-value target per the standing memory note. `only_mutate` now covers both files, test selection `test_gate.py` + `test_ledger.py`.
+
+Same dead-code shape as `decide.py`'s `ctx.binding`/`reserve_or_refuse`: `no_hold_error()` was defined, never called anywhere — the real "no open hold" refusals construct `TraitError` inline both in `trait/fake.py` and inside `ledger/entries.py`'s own guards. Deleted.
+
+Five real boundary gaps, all genuine untested guards rather than message-text noise: `reserve()`'s double-hold check never had a test where a first hold fully closed before a second reserve, so an `and`/`or` swap on the guard survived undetected; the `open_holds_minor == 1` boundary was untested across `reserve()`/`release()`/`capture()` — a hold whittled to one paisa by a partial release needs to still count as open; `refund()`/`reversal()` both refuse an amount of exactly zero (a real guard, distinct from the general negative-amount check in `_append()`) but neither had ever been called with zero; and `assert_invariants(closed=True)` had only ever been asserted to succeed, never to fail — nothing proved it read the order actually being checked rather than a coincidentally-empty one. Added nine tests total, including the first negative case for `assert_invariants`.
+
+Combined gate+ledger baseline: 510 mutants, 389 killed, 121 survived, 0 no-tests (started this session at 514/371/139/4). 614 tests passing (was 606), guardrails and mypy clean throughout. Next candidates once the remaining 121 are triaged: `evidence/bundle.py` (receipt sealing) and `authority/passkey.py` (the WebAuthn ceremony binding) — both real money-path modules with no mutation coverage yet.
+
+## 2026-09-22 · Phase 2 re-verified live: it was already done, not skipped
 ## 2026-09-22 · Phase 2 re-verified live: it was already done, not skipped
 
 An automated continuation prompt flagged Phase 2 as unimplemented — no generalized chat, no 10 stores, no consumer budget answer — after a context compaction. That earlier work is real and was already committed; the flag was checking a stale view. Re-verified rather than re-built, since re-implementing would have silently duplicated or regressed working code:
