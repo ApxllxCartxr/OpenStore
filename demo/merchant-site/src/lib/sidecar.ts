@@ -14,6 +14,11 @@ import { sign } from './hmac.ts';
 
 const BASE = process.env.SIDECAR_INTERNAL_URL ?? 'http://sidecar:8000';
 const SECRET = process.env.TRAIT_HMAC_SECRET ?? 'conformance-secret';
+/** A sidecar that hangs — a bad deploy, a stalled request upstream of it —
+ *  used to hang the operator's own refund/reject/collect action behind it
+ *  forever. Same network, same trust level, still not "cannot fail to
+ *  answer". */
+const SIDECAR_FETCH_TIMEOUT_MS = 15_000;
 
 export class SidecarError extends Error {
 	constructor(
@@ -33,17 +38,27 @@ export async function callSidecar(
 	const timestamp = Math.floor(Date.now() / 1000);
 	const nonce = randomBytes(16).toString('hex');
 
-	const response = await fetch(`${BASE}${path}`, {
-		method: 'POST',
-		headers: {
-			'content-type': 'application/json',
-			'x-openstore-timestamp': String(timestamp),
-			'x-openstore-nonce': nonce,
-			'x-openstore-signature': sign(SECRET, { body, timestamp, nonce, path }),
-			'idempotency-key': idempotencyKey
-		},
-		body
-	});
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), SIDECAR_FETCH_TIMEOUT_MS);
+	let response: Response;
+	try {
+		response = await fetch(`${BASE}${path}`, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'x-openstore-timestamp': String(timestamp),
+				'x-openstore-nonce': nonce,
+				'x-openstore-signature': sign(SECRET, { body, timestamp, nonce, path }),
+				'idempotency-key': idempotencyKey
+			},
+			body,
+			signal: controller.signal
+		});
+	} catch {
+		throw new SidecarError('protocol', `sidecar did not answer ${path} in time`);
+	} finally {
+		clearTimeout(timer);
+	}
 
 	const parsed = (await response.json().catch(() => null)) as
 		| { error?: { code: string; detail: string } }
