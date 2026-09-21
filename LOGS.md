@@ -94,6 +94,14 @@ End to end: "roll a 20 sided die for me" → model calls `roll_dice(sides=20)` �
 
 **Phase 2 scorecard, final**: MCP wire correctness ✓, always-allow widened ✓ (and now actually live, not just correct on paper), ten stores ✓, multi-shop dispatch ✓, budget question ✓, model switcher ✓, thinking blocks ✓, generic MCP server support ✓. All seven original items closed. Phase 3 — "find no more improvements" — starts now.
 
+## 2026-09-22 · Phase 3 — an audit finding, not a live-triggered one
+
+First finding that came from deliberately auditing rather than from something breaking live: nothing in the buyer-chat app ever set a fetch timeout. `contacts.ts`'s card fetch always had one (`FETCH_TIMEOUT_MS`/`MAX_CARD_BYTES`); every other outbound call — the generic MCP client's `rpc()` (hit on every tool call to a connected generic server, not just once at add time), the original OpenStore `call()`/`register()` added earlier this session, and all three model drivers including the one actually running (OpenRouter) — had none. A hung server on either side used to hang the whole chat request behind it, indefinitely, with nothing anywhere in the stack that would ever recover.
+
+Fixed in two passes: the MCP client side first (10s generic / 15s this repo's own shops, plus a 256KB response cap mirroring the card fetch's own), then a `grep` for every remaining `fetch(` call site in `src/lib/` turned up the three model drivers too (one shared `fetchWithTimeout`, 30s, used by all three). Both verified live: a stale test contact pointed at a now-unreachable server timed out at 10s instead of hanging; a real chat message still got a real model response through the wrapped fetch afterward.
+
+191 buyer-chat tests green (3 new across both passes), `make demo` clean throughout.
+
 ---
 
 # Morning report
