@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 import pytest
+from mcp_helpers import mcp_error, mcp_request, mcp_result
 
 ORIGIN = os.environ.get("OPENSTORE_LIVE_ORIGIN")
 SHOP = os.environ.get("OPENSTORE_LIVE_SHOP", "spoiledduckie.localhost")
@@ -103,21 +104,22 @@ def clean_slate(shop: httpx.Client, token: str) -> None:
     while True:
         response = shop.post(
             "/agent/mcp",
-            json={"tool": "place-order", "input": {}},
+            json=mcp_request("place-order"),
             headers={"authorization": f"Bearer {token}"},
         )
-        if response.status_code >= 400:
+        result = response.json()["result"]
+        if result.get("isError"):
             break
-        order_id = response.json()["result"]["order_id"]
+        order_id = result["structuredContent"]["order_id"]
         shop.post(
             "/agent/mcp",
-            json={"tool": "cancel-order", "input": {"order_id": order_id, "reason": "test setup"}},
+            json=mcp_request("cancel-order", order_id=order_id, reason="test setup"),
             headers={"authorization": f"Bearer {token}"},
         )
     for line in ("SD-CAP-S", "SD-KEYCHAIN", "SD-STICKERS", "SD-PINSET", "SD-TOTE-BLK-M"):
         shop.post(
             "/agent/mcp",
-            json={"tool": "remove-line", "input": {"sku": line}},
+            json=mcp_request("remove-line", sku=line),
             headers={"authorization": f"Bearer {token}"},
         )
 
@@ -141,7 +143,7 @@ def buyable(shop: httpx.Client, token: str) -> str:
 def tool(shop: httpx.Client, token: str, name: str, **args: Any) -> dict[str, Any]:
     response = shop.post(
         "/agent/mcp",
-        json={"tool": name, "input": args},
+        json=mcp_request(name, **args),
         headers={"authorization": f"Bearer {token}"},
     )
     if response.status_code == 429:
@@ -150,7 +152,7 @@ def tool(shop: httpx.Client, token: str, name: str, **args: Any) -> dict[str, An
         # limiter working; saying so beats reporting a broken product.
         pytest.skip(f"the shop is rate-limiting: {response.json()['error']['detail']}")
     assert response.status_code == 200, response.text
-    return dict(response.json()["result"])
+    return mcp_result(response.json())
 
 
 def test_the_tools_do_something(shop: httpx.Client, token: str) -> None:
@@ -171,20 +173,21 @@ def test_the_tools_do_something(shop: httpx.Client, token: str) -> None:
 def test_a_group_cannot_be_added_only_a_variant(shop: httpx.Client, token: str) -> None:
     response = shop.post(
         "/agent/mcp",
-        json={"tool": "add-line", "input": {"sku": "cap", "qty": 1}},
+        json=mcp_request("add-line", sku="cap", qty=1),
         headers={"authorization": f"Bearer {token}"},
     )
-    assert response.status_code >= 400
-    assert response.json()["error"]["code"] == "variant-required"
+    assert response.status_code == 200
+    assert mcp_error(response.json())["error"]["code"] == "variant-required"
 
 
 def test_place_order_refuses_before_a_checkout_exists(shop: httpx.Client, token: str) -> None:
     response = shop.post(
         "/agent/mcp",
-        json={"tool": "place-order", "input": {}},
+        json=mcp_request("place-order"),
         headers={"authorization": f"Bearer {token}"},
     )
-    assert response.status_code >= 400
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is True
 
 
 def test_a_whole_purchase_ends_in_a_verified_receipt(

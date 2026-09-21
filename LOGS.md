@@ -4,6 +4,16 @@ Running record of changes and decisions for the OpenStore MVP build. Newest entr
 
 ---
 
+## 2026-09-21 · Phase 2 begins — `/agent/mcp` becomes real JSON-RPC MCP (ADR-0026)
+
+Phase 2 scope, set by the operator: a generalized Claude.ai-style chat surface (thinking blocks, model switcher, transcript export, per-tool "always allow" for non-money-path tools, decoupled enough to point at any `agent-commerce.json`/MCP server, not just this repo's), 10 lightweight demo stores with intentional cross-store SKU overlap, and a real answer to "how does my budget get computed and where did I sign anything" — investigated in full before writing code (see below).
+
+First landed: `/agent/mcp` was labeled `"mcp"` in the agent-commerce card and the conformance badge but spoke a proprietary `{"tool", "input"}` envelope, not JSON-RPC 2.0 — a real gap given this project's own ADRs exist specifically to stop conformance claims outrunning what's built. Fixed properly, not shimmed: `initialize` / `tools/list` / `tools/call` per spec, JSON Schema `inputSchema` per tool, and `annotations.moneyPathHint` (`true` only for the `start-checkout`/`confirm` scopes) so a generic client can offer standing "always allow" on everything else without knowing a single tool name. Every direct caller in the test suite updated to the new envelope via one shared `tests/mcp_helpers.py`; 582 tests green, mypy clean across `src/`. No back-compat shim for the old shape — it was never real MCP, so nothing depends on it staying fake.
+
+Investigated and recorded, not yet built: no consumer-owned spending budget exists anywhere in the sidecar (only a flat merchant-side `per_order_cap_minor`); the passkey ceremony (`authority/passkey.py`) is real and correctly binds cart hash + amount + merchant + expiry, but only runs on the merchant's own origin at `/agentic/approve` — never in the chat — because a WebAuthn credential is scoped to the RP ID that registered it and the chat literally cannot perform that ceremony for a merchant it isn't. The chat's "Allow" button today is a scope gate (run this tool or don't), not a money authority; that split is correct, not a bug, but it was never explained to the Consumer. Next: an explicitly-labeled assistant-side advisory spend ceiling (not a rail-held mandate — ADR-0024 keeps that deferred) plus chat copy that states the split instead of leaving it implicit.
+
+---
+
 # Morning report
 
 Written as §0 requires: every phase with its gates, every ladder-step-4

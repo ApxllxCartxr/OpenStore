@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from mcp_helpers import mcp_error, mcp_request, mcp_result
 from openstore.sidecar.admission.oauth import Admission
 from openstore.sidecar.admission.ratelimit import RateLimiter, Tier
 from openstore.sidecar.app import app
@@ -211,11 +212,11 @@ def test_place_order_refuses_when_no_checkout_has_been_started(
     token = surface.admission.issue_for_stranger("agent_x")
     response = client.post(
         "/agent/mcp",
-        json={"tool": "place-order"},
+        json=mcp_request("place-order"),
         headers={"authorization": f"Bearer {token.token}"},
     )
-    assert response.status_code >= 400
-    assert "start-checkout" in response.json()["error"]["detail"]
+    assert response.status_code == 200
+    assert "start-checkout" in mcp_error(response.json())["error"]["detail"]
 
 
 async def test_place_order_returns_an_approve_url_and_never_an_order(
@@ -265,10 +266,10 @@ async def test_place_order_returns_an_approve_url_and_never_an_order(
     try:
         response = client.post(
             "/agent/mcp",
-            json={"tool": "place-order"},
+            json=mcp_request("place-order"),
             headers={"authorization": f"Bearer {token.token}"},
         )
-        body = response.json()["result"]
+        body = mcp_result(response.json())
         assert body["approve_url"].startswith("https://spoiledduckie.localhost/agentic/approve?t=")
         assert body["order_id"] == "ord_1"
         # No payment, no status, no confirmation: the agent is handing over a
@@ -280,14 +281,16 @@ async def test_place_order_returns_an_approve_url_and_never_an_order(
 
 
 def test_an_unknown_tool_is_refused(client: TestClient, surface: AgentSurface) -> None:
+    """Unknown tool name is a JSON-RPC protocol error (invalid params), not a
+    tool refusal — the request never named a real tool to refuse."""
     token = surface.admission.issue_for_stranger("agent_y")
     response = client.post(
         "/agent/mcp",
-        json={"tool": "wire-transfer"},
+        json=mcp_request("wire-transfer"),
         headers={"authorization": f"Bearer {token.token}"},
     )
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == ReasonCode.NOT_FOUND.value
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32602
 
 
 def test_rate_limits_apply_per_agent(client: TestClient, surface: AgentSurface) -> None:
@@ -295,7 +298,7 @@ def test_rate_limits_apply_per_agent(client: TestClient, surface: AgentSurface) 
     headers = {"authorization": f"Bearer {token.token}"}
     last = None
     for _ in range(40):
-        last = client.post("/agent/mcp", json={"tool": "search"}, headers=headers)
+        last = client.post("/agent/mcp", json=mcp_request("search"), headers=headers)
     assert last is not None
     assert last.status_code == 429
     assert last.json()["error"]["code"] == ReasonCode.RATE_LIMITED.value

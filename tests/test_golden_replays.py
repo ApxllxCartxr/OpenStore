@@ -222,7 +222,7 @@ async def _run(
 def _render(protocol: Protocol, decision: Any, url: str) -> dict[str, Any]:
     """The only part that differs per protocol."""
     if protocol is Protocol.MCP:
-        return mcp.envelope({"approve_url": url, "total_minor": decision.total_minor})
+        return mcp.call_result({"approve_url": url, "total_minor": decision.total_minor})
     if protocol in (Protocol.UCP, Protocol.AP2):
         # AP2 rides on UCP, so it renders UCP's checkout. A separate shape here
         # would be the fourth-peer lie the registry exists to prevent.

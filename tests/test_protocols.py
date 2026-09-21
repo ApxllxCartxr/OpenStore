@@ -185,7 +185,16 @@ def test_every_tool_declares_the_scope_it_needs() -> None:
     """Least privilege stated in the listing, so an agent can see what a tool
     costs before calling it."""
     for tool in mcp.tools_list():
-        assert tool["scope"] in {s.value for s in Scope}
+        assert tool["annotations"]["scope"] in {s.value for s in Scope}
+
+
+def test_money_path_hint_is_exactly_the_two_scopes_that_move_toward_spend() -> None:
+    """A generic client should be able to offer standing 'always allow' on
+    every tool except these two, without knowing any tool by name."""
+    for tool in mcp.tools_list():
+        scope = tool["annotations"]["scope"]
+        expected = scope in {Scope.START_CHECKOUT.value, Scope.CONFIRM.value}
+        assert tool["annotations"]["moneyPathHint"] is expected
 
 
 def test_place_order_says_it_returns_an_approve_url_not_an_order() -> None:

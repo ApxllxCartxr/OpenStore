@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Iterator
 import pytest
 from conftest import point_stores_at
 from fastapi.testclient import TestClient
+from mcp_helpers import mcp_error, mcp_request, mcp_result
 from openstore.sidecar.app import app
 from openstore.sidecar.console.merchant_actions import ActionContext, configure
 from openstore.sidecar.console.refunds import RefundQueue, get_refund_queue
@@ -299,15 +300,12 @@ async def test_request_refund_queues_an_ask_and_promises_nothing(
     token = surface.admission.issue_for_stranger("agent_asker")  # type: ignore[attr-defined]
     response = agent_client.post(
         "/agent/mcp",
-        json={
-            "tool": "request-refund",
-            "input": {"order_id": created.order_id, "reason": "arrived damaged"},
-        },
+        json=mcp_request("request-refund", order_id=created.order_id, reason="arrived damaged"),
         headers={"authorization": f"Bearer {token.token}"},
     )
 
     assert response.status_code == 200, response.text
-    body = response.json()["result"]
+    body = mcp_result(response.json())
     assert body["state"] == RefundRequestState.REQUESTED.value
     assert "No money has moved" in body["note"]
     queued = await get_refund_queue().open_for(created.order_id)
@@ -333,10 +331,10 @@ async def test_request_refund_on_an_unpaid_order_is_refused(
     token = surface.admission.issue_for_stranger("agent_asker")  # type: ignore[attr-defined]
     response = agent_client.post(
         "/agent/mcp",
-        json={"tool": "request-refund", "input": {"order_id": created.order_id}},
+        json=mcp_request("request-refund", order_id=created.order_id),
         headers={"authorization": f"Bearer {token.token}"},
     )
 
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == ReasonCode.CANCEL_NOT_ALLOWED.value
+    assert response.status_code == 200
+    assert mcp_error(response.json())["error"]["code"] == ReasonCode.CANCEL_NOT_ALLOWED.value
     assert await get_refund_queue().rows() == []
