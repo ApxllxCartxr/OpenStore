@@ -16,21 +16,28 @@ decision, every blocked item, and every cut.
 | **h0** contracts frozen | green | 17 closed sets, 3 `cart_hash` vectors, door + Quote schemas, `.env.example` |
 | **A1** skeleton + harness | green | boots behind the proxy split; 18 planted violations caught |
 | **A2** trait client + fake | green | conformance suite over real HTTP; `variant-required` at 5 doors |
-| **A3** gate + ledger + provider | green | 12 checks in order, both invariants, COD writes nothing at order time |
-| **A4** authority + admission | green | SSRF refused before any fetch; standing approval never covers a spend |
-| **A4c** agent signing kit | green | one fixture asserted by **both** suites |
-| **A5** evidence + verifier | green | exit 0/1/2; erased verifies, altered does not |
-| **A6** four protocols | green | core Transcript **byte-identical** across all four |
-| **A7** `/agentic` console | green | every shipped tab renders; policy edits reach the Gate live |
-| **A8** mount + install + feed | green | `make up` clean → working shop, zero hand-edited files |
+| **A3** gate + ledger + provider | green | 12 checks in order, both invariants, COD writes nothing at order time — and reached over HTTP since 09-21: `make demo` walks search → signed receipt through it |
+| **A4** authority + admission | **amber** | both admission routes work live since 09-21; still no `passkey.py`, so the passkey ceremony is enum-level only |
+| **A4c** agent signing kit | green | one fixture asserted by both suites; the chat publishes its Agent Profile and self-registers (09-21) |
+| **A5** evidence + verifier | green | exit 0/1/2; the sidecar holds a persisted key and seals a receipt at the end of every real purchase (09-21) |
+| **A6** four protocols | green | all four mounted and exercised over HTTP (09-21): one core, four envelopes, one total across all of them, ACP's completion refused with its reason |
+| **A7** `/agentic` console | green | every shipped tab renders from live state — keys, agents and receipts were lists nothing populated until 09-21 |
+| **A8** mount + install + feed | green | `make up` clean → working shop with photography, zero hand-edited files; the cross-site and font defects were fixed 09-21 |
 | **B1** schema, seed, storefront | green | 15 items; no public route creates an order |
 | **B2** the nine doors | green | conformance passes against the **real** store; 50-on-5 under Postgres |
-| **B3** shop-ops admin | green | auth verified live; refunds route through the sidecar |
+| **B3** shop-ops admin | **amber** | refunds route through the sidecar; "auth verified live" was not — every admin form was refused as cross-site until 09-21 |
 | **B4** notifications | green | one per (order, kind); erased contact skips with a reason |
-| **C1–C5** buyer chat | green | air-gap is a build break; the agent computes nothing |
+| **C1–C5** buyer chat | green | air-gap is a build break; the agent computes nothing and now *does* something — composer, MCP client, consent prompts, and a real model over OpenRouter (09-21) |
 
-**445 Python tests, 36 merchant-site, 68 chat.** `ruff`, `mypy --strict`,
+**470 Python tests, 36 merchant-site, 75 chat, 7 live purchase.** `ruff`, `mypy --strict`,
 `svelte-check` on both roots, and four guardrails clean.
+
+> **Green here once meant only that the phase's tests passed.** Two 09-21
+> entries below record what driving the running system found: eleven defects
+> under gates already marked green, then a money path with no HTTP entry point
+> at all. Both are fixed, and `make demo` now walks a whole purchase — search to
+> signed receipt — against the running stack, so a green row above is backed by
+> something that actually ran.
 
 ## OPEN — decisions taken by ladder step 4
 
@@ -48,6 +55,21 @@ decision, every blocked item, and every cut.
 ## BLOCKED
 
 None. No gate required changing a frozen §6 contract.
+
+## OPEN — what is still absent, and honestly so
+
+Closed 09-21: the money path has an HTTP entry point, all four protocols are
+mounted over one core, and the chat can talk to a shop with a real model.
+
+Still open, each absent rather than half-built:
+
+- **`request-refund` refuses as unwired.** A refund moves money and belongs to
+  the Merchant; an agent-initiated request needs a queue the console shows.
+- **No `passkey.py`.** `upi-pin` and `confirmed-intent` are live; the passkey
+  ceremony is enum-level only.
+- **No webhook route**, so the Provider's own callback path is unexercised.
+- **Pending checkouts live in memory and never expire.** The 24h window is
+  stated and not swept.
 
 ## Cuts
 
@@ -68,6 +90,220 @@ the full health panel), **cut 4a** (admin trimmed to the operating path), **cut
    twice here and both times the rule was directionally right and imprecise.
 4. **F12's credit-note half is still open** and needs counsel, as does the
    Registrar question in ADR-0025.
+
+---
+
+## 2026-09-21 · The money path gets an HTTP entry point, and the demo becomes a demo
+
+Everything under the money path already worked. The Gate ran its twelve checks
+against the real store, the Ledger kept both invariants in real Postgres,
+`settle` resolved a deferred Authority, `BundleBuilder` sealed a receipt the
+verifier called VALID. **None of it had a caller.** An agent could not buy
+anything, the approve page's one button posted to a route that did not exist,
+and the chat had no way to send a message.
+
+Exercised first, every component, over HTTP or by driving its real API against
+the running containers — not by reading it and not by running its unit tests.
+That is how each of the following was found.
+
+### The money path is now reachable
+
+`checkout.py` is the wiring and nothing more: it computes no price, invents no
+status, and makes no decision the Gate has not made. Three steps, one HTTP
+request each — `start` (door 7 creates the order, door 9 quotes it, the tap
+token is minted over that exact hash), `tap` (token spent once, Gate for real,
+door 3 holds stock, Ledger takes the hold, Provider issues a link), `complete`
+(settle, door 4 commits, receipt sealed).
+
+`order_salt` is never held between requests (§6.3a). Door 7 keys on
+`cart_id:attempt`, so each step that needs the salt replays that call and drops
+it — verified live that a replay returns the same order and the same salt.
+
+`/agent/mcp` now runs its tools instead of answering `accepted: true`. `search`
+reads door 1, `add-line` validates against the real catalogue, every total comes
+from door 9. No exact stock reaches an agent: door 2's integers go through
+`trait.buckets` first.
+
+**Proof it works**: the §16.11 worked example, reproduced end to end through the
+running system — tote + gift-wrap + charm-bar seat to Mumbai, total `259700`,
+`IGST 15827 / CGST 11894 / SGST 11894`, `RESERVE` then `CAPTURE`, receipt
+VALID. Those are the numbers pinned in the spec, arrived at by the product
+rather than by a fixture.
+
+### Four defects the exercising found, three of them mine
+
+- **The Authority bound a different hash than the Gate computed.** `start` built
+  the `cart_hash` with a zero placeholder price per line; the Gate uses the
+  attested price. `upi-pin` defers before the comparison, so it looked fine —
+  and would have failed the moment anyone used a passkey.
+- **Door 8 silently replayed.** `orders_set_status` keys on `order_id:attempt`,
+  and I used the default attempt for both `confirmed` and `paid`. The order
+  stopped at `confirmed` while the code believed it said `paid`. Keyed by target
+  status now, so a *retry* still replays and a *different transition* does not.
+- **A second checkout reused the first order.** The basket persisted per agent,
+  so `start-checkout` twice meant one `cart_id` twice — and door 7 idempotently
+  returned the already-paid order.
+- **`ProfileFetcher` refused the demo's own chat**, `Admission` had no clients,
+  the console's Keys/Agents/Receipts boards read lists nothing wrote to. All the
+  same shape: configuration that reached nothing.
+
+### The other three protocols existed only in tests
+
+The card has advertised `["mcp", "ucp", "ap2", "acp"]` since it was written and
+only MCP had an endpoint. `ucp.py`, `acp.py` and `ap2.py` produced envelopes for
+the golden replays and for nothing else — and those replays build the bundle
+directly, which is why A6 was green.
+
+All four are mounted now, as translators over **one** core: `/agent/ucp/checkout`,
+`/agent/acp/checkout_sessions` (+ `/complete`, which is the documented refusal —
+a delegated credential is exactly the authority this Merchant does not grant),
+and `/agent/ap2/checkout` (a Merchant-signed Checkout Mandate; the human tap
+still happens, because a mandate is evidence of intent and not a credential).
+An ACP-originated checkout completes through the same tap and seals the same
+receipt.
+
+### The chat is a chat
+
+It had no form, no action, and `src/lib/mcp/` was an empty directory.
+
+It now has a composer, an MCP client that self-registers with the shop, a
+consent prompt that blocks the spend steps from standing approval, product
+photographs, the shop's own quote rendered line for line, and the approve
+handoff. **And a real model**: `CHAT_MODEL_DRIVER=openrouter` with an
+`OPENROUTER_API_KEY` gives native tool-calling over any provider OpenRouter
+fronts. The model proposes; deterministic code still validates and the sidecar
+still refuses, so a wrong model costs a refusal rather than a wrong charge.
+
+Watched live, `openai/gpt-oss-20b` searched, read the variants, asked for the
+address rather than inventing one, called `start-checkout` too early, read the
+refusal, called `choose-fulfillment` properly, and completed a purchase ending
+in a VALID receipt.
+
+`scripted` is still the default and still what CI runs. A demo that needs
+somebody's API key to pass its own tests is one that fails on the next laptop.
+
+### Photographs
+
+`media` had been a column on both catalogue tables since the schema was written,
+door 1 carried it, and `core/feed.py` emitted it as `image_link` — every layer
+ready, and the seed put nothing in it. 35 photographs scraped from
+spoiledduckie.co.in's WooCommerce Store API, resized to web size (62 MB → 1.3 MB),
+seeded as Merchant truth. The shop grid, the product gallery, the agent feed and
+the chat's result cards all carry them now.
+
+### The gate that would have caught all of this
+
+`tests/test_purchase_live.py`, wired into `make demo`. It imports none of the
+money path — it *uses* it, through the URLs an agent and a Consumer use: search
+to signed receipt, the twelve checks in the Transcript, `tapped.cart_hash ==
+transcript.cart_hash`, the order reaching `paid` at the Merchant, a spent tap
+token refused on replay, and one total surviving all four protocol envelopes.
+
+It also buys things, so it looks up an in-stock SKU rather than naming one — a
+fixed SKU stops working once the suite has bought enough of it, which happened.
+And it takes the allowlisted admission route, because "reputation buys
+throughput only" is only true if something uses the throughput.
+
+**470 Python, 36 merchant-site, 75 chat, 7 live purchase.** `make up` clean,
+`make demo` green.
+
+### Still not done
+
+- `request-refund` refuses as unwired. A refund moves money and belongs to the
+  Merchant; an agent-initiated request needs a queue the console shows, and
+  inventing a silent one would be worse than the refusal.
+- There is no `passkey.py`. `confirmed-intent` and `upi-pin` are live; the
+  passkey ceremony is enum-level only.
+- No webhook route, so the Provider's own callback path is unexercised —
+  `complete` is driven by the demo rail's page instead.
+- Pending checkouts live in memory and never expire. The 24h `pending` window is
+  stated and not enforced by a sweep.
+
+---
+
+## 2026-09-21 · Exercising the running system — eleven defects every suite called green
+
+Every phase below was marked green. The demo could not add its own shop, log
+into its own admin, register an agent, or render in its own typefaces, and the
+sidecar had no signing key at all. Nothing regressed: none of it had ever
+worked. The gates were met by unit tests that construct the object under test by
+hand, and **every defect here lives in the seam between a component and the
+thing meant to call it** — which is exactly where a component test cannot look.
+
+The trigger was a user pasting a shop URL into the chat and getting
+`Cross-site POST form submissions are forbidden`.
+
+### Fixed — the seam, seven times
+
+- **CSRF on every form, both node surfaces.** `adapter-node` assumes `https`
+  when no `PROTOCOL_HEADER` is named, so it computed `https://<host>` while the
+  browser posted from `http://<host>`. Every form on the shop and the chat was
+  refused. `PROTOCOL_HEADER: x-forwarded-proto` on both.
+- **The admin could not log in.** Same bug, other half: the edge 404s `/admin`,
+  so it is reachable only on the loopback port, where there is no forwarded
+  header to honour. Its own origins are named in `csrf.trustedOrigins`.
+- **The card and the chat disagreed about where keys live.** The chat required
+  an inline `jwks`; the card publishes `endpoints.jwks` (SPEC §V1). The chat's
+  suite built its own card fixtures, so it passed while agreeing with nothing —
+  every real card was refused. The fetcher now reads the two documents, both
+  through the same SSRF check, and refuses a card whose keys live on another
+  host or that claims a domain it was not served from.
+- **The card advertised `https://<domain>` regardless of configuration**,
+  handing an agent seven endpoints that do not answer on a plain-http deploy.
+  The origin is passed in now, defaulting to `https://` when unset. Same defect
+  fixed at the MCP `approve_url` and the feed `base_url`.
+- **The sidecar had no signing key.** `Keyring` was implemented, tested, and
+  never constructed outside a test, so the live JWKS was `{"keys": []}` and
+  nothing could be sealed. Keys now load or enroll at boot from
+  `SIDECAR_SIGNING_KEY_PATH` on a volume, encrypted when a passphrase is set,
+  refusing rather than guessing on a wrong passphrase, another merchant's
+  keyfile, a damaged file, or an unknown version — each of which would otherwise
+  mint a second identity over a live one. `/readyz` now reports `signing_key`,
+  because an empty JWKS was invisible until an agent refused the shop for
+  carrying no keys.
+- **The SSRF dev allowlist reached nothing.** It was reported in `/readyz` and
+  in the console banner while `ProfileFetcher` held an empty tuple, so the
+  sidecar refused the one host the exception exists for and **no agent could
+  register at all**. Reporting a policy is not applying it.
+- **`OAUTH_CLIENT_ID`/`SECRET` never reached `Admission`**, so the second
+  admission route refused every client.
+
+Also: the console's Keys tab read a list nothing populated; the chat published
+no Agent Profile though `agentProfile()` was written and documented as the thing
+it publishes; and all nine typefaces 404'd on both surfaces because
+`design/fonts/` never reached either `static/`. No test fetches a font.
+
+### Still broken — the money path has no HTTP entry point
+
+- **`run_core` has zero production callers.** The one core all four protocols
+  must pass through is reached only by tests. Same for `Gate(`, `Ledger(`,
+  `.seal(`, `ReceiptStore.put`, `append_moved_entry`, `derive_consumer_id`.
+- **`/agent/mcp` is a stub.** Live, as a registered agent, every tool returns
+  `{"tool": ..., "accepted": true}` and does nothing — `search` returns nothing
+  from a catalogue door 1 serves 12 groups from. Only `place-order` is real.
+- **There is no tap endpoint.** `/agentic/approve` is GET-only; POST is 405. No
+  spend can complete, so no order can exist, so `/receipt/{id}` is always 404.
+- **The chat has no send path** — no form, no action; `src/lib/mcp/` is an empty
+  directory.
+- **The sidecar never opens its database.** `core/db.py` is imported by nothing.
+  `SIDECAR_DATABASE_URL`, `PAYMENT_PROVIDER`, `RAZORPAY_*`, `WEBAUTHN_RP_ID` and
+  `SIDECAR_KEY_EXPORT_PATH` (ADR-0014's enrollment export) are read by nothing,
+  and there is no `passkey.py`.
+
+### What the gates should have been
+
+Three test files were added for the seam rather than the parts:
+`tests/test_boot_wiring.py` runs the real lifespan and asserts what the surface
+actually received; `tests/test_keyfile.py` asserts a key survives a restart;
+`tests/GOLDEN/card/` is generated from the sidecar's own builders and read by
+**both** suites, so the card contract cannot drift on one side alone.
+
+A gate that can be met without the process running is not a gate. `make demo`
+should grow a live pass that registers an agent, calls a tool, and asserts the
+result is not `accepted: true`.
+
+**469 Python, 36 merchant-site, 75 chat.** `ruff`, `mypy --strict`,
+`svelte-check` on both roots, four guardrails, and `make up` clean.
 
 ---
 
