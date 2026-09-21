@@ -12,6 +12,18 @@ First landed: `/agent/mcp` was labeled `"mcp"` in the agent-commerce card and th
 
 Investigated and recorded, not yet built: no consumer-owned spending budget exists anywhere in the sidecar (only a flat merchant-side `per_order_cap_minor`); the passkey ceremony (`authority/passkey.py`) is real and correctly binds cart hash + amount + merchant + expiry, but only runs on the merchant's own origin at `/agentic/approve` — never in the chat — because a WebAuthn credential is scoped to the RP ID that registered it and the chat literally cannot perform that ceremony for a merchant it isn't. The chat's "Allow" button today is a scope gate (run this tool or don't), not a money authority; that split is correct, not a bug, but it was never explained to the Consumer. Next: an explicitly-labeled assistant-side advisory spend ceiling (not a rail-held mandate — ADR-0024 keeps that deferred) plus chat copy that states the split instead of leaving it implicit.
 
+## 2026-09-21 · Wire fix, consent widened, a real bug found along the way
+
+Landed and verified live against the running stack (`make up` + `make demo`, both green; a manual search → variant widget → add-line round trip through the actual `openrouter:openai/gpt-oss-20b` driver):
+
+- Fixed the buyer-chat's `mcp/client.ts`, which posted the pre-ADR-0026 `{tool, input}` shape — every call would have failed against the now-real JSON-RPC endpoint. `call()`'s own contract (throws `ShopError`, returns the tool's structured result) is unchanged.
+- `tool_calls` never persisted which shop a call went to, even though `SeenCall`/`Seen` (loop.ts) already carry a `shop` field for multi-shop catalogue reasoning — a real gap for the 10-store goal, not just a type error. Added the column, threaded `shop` through every `recordToolCall` site.
+- Phase 2 ask #1 (always-allow for non-money-path tools): widened `ALWAYS_ALLOWABLE` to the scope-ladder boundary (everything outside `start-checkout`/`confirm`), matching the sidecar's `moneyPathHint`. That reuse alone would have been wrong — two call sites relied on the old narrow set meaning "safe to run unguided and fan out to every shop." Split into `ALWAYS_ALLOWABLE` (consent) and a new `READS` (unguided/fan-out) so a write can never reach a shop nobody named.
+- Found while wiring the above in: the scripted-driver consent gate reimplemented `requiresFreshConsent()` inline with the wrong boolean operator, so any always-allowable tool skipped its consent prompt unconditionally, including the very first call. The tested function existed and was simply never imported. Fixed to call it.
+- Consent copy for `start-checkout`/`place-order` now states the split the operator asked about: the chat's own Allow click grants a scope, never an amount; the passkey/UPI-PIN step that actually authorizes spend happens on the merchant's own origin, and the chat cannot perform it because a WebAuthn credential is scoped to the RP ID that registered it.
+
+140 buyer-chat tests green (3 new), 582 Python tests green, 0 type errors both sides. Next: the remaining 8 stores (2 of 10 exist), thinking blocks + model switcher UI, and an explicitly-advisory consumer spend ceiling.
+
 ---
 
 # Morning report
