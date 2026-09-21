@@ -4,16 +4,16 @@ import { bucketFor, groupBucket, type Bucket } from '$lib/availability.ts';
 
 export async function load({ params }) {
 	const groups = await sql<
-		{ id: string; slug: string; name: string; description: string; option_axes: Record<string, string[]> }[]
-	>`SELECT id, slug, name, description, option_axes FROM product_groups
+		{ id: string; slug: string; name: string; description: string; media: string[]; option_axes: Record<string, string[]> }[]
+	>`SELECT id, slug, name, description, media, option_axes FROM product_groups
 	   WHERE slug = ${params.slug} AND status = 'active'`;
 	const group = groups[0];
 	if (!group) error(404, 'No such product');
 
 	const rows = await sql<
 		{ sku: string; options: Record<string, string>; name: string; price_minor: bigint;
-		  tags: string[]; available: number; low: number; hsn_sac: string; gst_rate_bp: number }[]
-	>`SELECT i.sku, i.options, i.name, i.price_minor, i.tags, s.available,
+		  tags: string[]; media: string[]; available: number; low: number; hsn_sac: string; gst_rate_bp: number }[]
+	>`SELECT i.sku, i.options, i.name, i.price_minor, i.tags, i.media, s.available,
 	         i.low_stock_threshold AS low, i.hsn_sac, i.gst_rate_bp
 	    FROM catalogue_items i JOIN stock s ON s.sku = i.sku
 	   WHERE i.group_id = ${group.id} AND i.status = 'active'
@@ -25,6 +25,7 @@ export async function load({ params }) {
 		name: r.name,
 		price_minor: Number(r.price_minor),
 		tags: r.tags,
+		media: r.media ?? [],
 		// The bucket, never the count. This object is serialized to the browser.
 		bucket: bucketFor(r.available, r.low)
 	}));

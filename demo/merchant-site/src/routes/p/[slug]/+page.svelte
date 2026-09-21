@@ -30,6 +30,17 @@
 		);
 	}
 
+	/** The photographs are of the variant, so the gallery follows the picker and
+	 *  falls back to the group's cover before a variant is resolved. */
+	const gallery = $derived(
+		(resolved?.media?.length ? resolved.media : (data.group.media ?? [])) as string[]
+	);
+	let shown = $state(0);
+	$effect(() => {
+		gallery.length;
+		shown = 0;
+	});
+
 	const jsonLd = $derived(
 		JSON.stringify({
 			'@context': 'https://schema.org',
@@ -42,6 +53,7 @@
 				'@type': 'Product',
 				sku: item.sku,
 				name: item.name,
+				image: item.media ?? [],
 				offers: {
 					'@type': 'Offer',
 					priceCurrency: 'INR',
@@ -62,6 +74,25 @@
 	<title>{data.group.name} — SpoiledDuckie</title>
 	{@html `<script type="application/ld+json">${jsonLd}<\/script>`}
 </svelte:head>
+
+{#if gallery.length}
+	<figure style="margin:0 0 1.5rem">
+		<img src={gallery[shown]} alt={resolved?.name ?? data.group.name} width="900" height="900"
+			style="width:100%;max-width:32rem;aspect-ratio:1;object-fit:cover;background:var(--line)" />
+		{#if gallery.length > 1}
+			<div class="option-row" style="margin-top:0.5rem">
+				{#each gallery as src, i (src)}
+					<button type="button" class="option" aria-pressed={shown === i}
+						aria-label="View photo {i + 1}" onclick={() => (shown = i)}
+						style="width:3.5rem;height:3.5rem;padding:0;overflow:hidden">
+						<img src={src} alt="" width="120" height="120"
+							style="width:100%;height:100%;object-fit:cover" />
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</figure>
+{/if}
 
 <h1 style="font-weight:600">{data.group.name}</h1>
 <p style="max-width:60ch">{data.group.description}</p>

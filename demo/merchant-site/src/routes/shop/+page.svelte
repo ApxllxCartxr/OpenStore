@@ -26,6 +26,10 @@
 	<div class="grid">
 		{#each data.results as group (group.slug)}
 			<a class="card" href="/p/{group.slug}" style="text-decoration:none">
+				{#if group.cover}
+					<img src={group.cover} alt={group.name} loading="lazy" width="600" height="600"
+						style="width:100%;aspect-ratio:1;object-fit:cover;background:var(--line);margin-bottom:0.75rem" />
+				{/if}
 				<strong>{group.name}</strong>
 				<div class="price" style="margin-top:0.5rem">from {formatRupees(group.from)}</div>
 				<div class="bucket" data-b={group.bucket}>{BUCKET_LABEL[group.bucket as Bucket]}</div>

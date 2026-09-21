@@ -45,6 +45,85 @@ const GROUPS: [string, string, Record<string, string[]>][] = [
 	['recalled', 'Recalled item', {}]
 ];
 
+/**
+ * Product photography, served from `static/media/` (B1).
+ *
+ * `media` has been a column on both catalogue tables since the schema was
+ * written, door 1 carries it, and `core/feed.py` emits it as `image_link` —
+ * every layer was ready and the seed put nothing in it, so the shop, the feed
+ * and every agent saw a catalogue with no pictures.
+ *
+ * A group shows its first item's photograph. One row per SKU, because
+ * variants are what a buyer is actually choosing between.
+ */
+const MEDIA: Record<string, string[]> = {
+ 'SD-TOTE-BLK-M': [
+  '/media/sd-tote-blk-m-1.webp',
+  '/media/sd-tote-blk-m-2.webp',
+  '/media/sd-tote-blk-m-3.webp'
+ ],
+ 'SD-TOTE-RED-M': [
+  '/media/sd-tote-red-m-1.webp',
+  '/media/sd-tote-red-m-2.webp',
+  '/media/sd-tote-red-m-3.webp'
+ ],
+ 'SD-TOTE-RED-L': [
+  '/media/sd-tote-red-l-1.webp',
+  '/media/sd-tote-red-l-2.webp',
+  '/media/sd-tote-red-l-3.webp'
+ ],
+ 'SD-CAP-S': [
+  '/media/sd-cap-s-1.webp',
+  '/media/sd-cap-s-2.webp',
+  '/media/sd-cap-s-3.webp'
+ ],
+ 'SD-CAP-M': [
+  '/media/sd-cap-m-1.webp',
+  '/media/sd-cap-m-2.webp',
+  '/media/sd-cap-m-3.webp'
+ ],
+ 'SD-STICKERS': [
+  '/media/sd-stickers-1.webp',
+  '/media/sd-stickers-2.webp',
+  '/media/sd-stickers-3.webp'
+ ],
+ 'SD-KEYCHAIN': [
+  '/media/sd-keychain-1.webp'
+ ],
+ 'SD-HAIRCLIPS': [
+  '/media/sd-hairclips-1.webp'
+ ],
+ 'SD-PHONECHARM': [
+  '/media/sd-phonecharm-1.webp',
+  '/media/sd-phonecharm-2.webp',
+  '/media/sd-phonecharm-3.webp'
+ ],
+ 'SD-PINSET': [
+  '/media/sd-pinset-1.webp',
+  '/media/sd-pinset-2.webp',
+  '/media/sd-pinset-3.webp'
+ ],
+ 'SD-PLUSH-MINI': [
+  '/media/sd-plush-mini-1.webp'
+ ],
+ 'SD-CHARMBAR-SEAT': [
+  '/media/sd-charmbar-seat-1.webp',
+  '/media/sd-charmbar-seat-2.webp'
+ ],
+ 'SD-GIFTWRAP': [
+  '/media/sd-giftwrap-1.webp',
+  '/media/sd-giftwrap-2.webp',
+  '/media/sd-giftwrap-3.webp'
+ ],
+ 'SD-EXTRACHARM': [
+  '/media/sd-extracharm-1.webp'
+ ],
+ 'SD-RECALLED': [
+  '/media/sd-recalled-1.webp',
+  '/media/sd-recalled-2.webp'
+ ]
+};
+
 /** §16.3, verbatim. Fifteen rows; black/L is deliberately not among them. */
 const ITEMS: Row[] = [
 	{ sku: 'SD-TOTE-BLK-M', group: 'tote', name: 'Tote — black / M', price: 89900, hsn: '4202', gst: 1800, stock: 12, low: 3, options: { colour: 'black', size: 'M' }, tags: [] },
@@ -122,15 +201,20 @@ export async function seed(): Promise<void> {
 	          notifications, admin_users, idempotency RESTART IDENTITY CASCADE`;
 
 	for (const [id, name, axes] of GROUPS) {
-		await sql`INSERT INTO product_groups (id, slug, name, description, option_axes)
-		          VALUES (${id}, ${id}, ${name}, ${`${name} by SpoiledDuckie.`}, ${sql.json(axes)})`;
+		// A group's photograph is its first item's — the group is presentation
+		// only and never a cart line, so it has no photograph of its own.
+		const cover = ITEMS.filter((i) => i.group === id).flatMap((i) => MEDIA[i.sku] ?? [])[0];
+		await sql`INSERT INTO product_groups (id, slug, name, description, media, option_axes)
+		          VALUES (${id}, ${id}, ${name}, ${`${name} by SpoiledDuckie.`},
+		                  ${sql.json(cover ? [cover] : [])}, ${sql.json(axes)})`;
 	}
 
 	for (const row of ITEMS) {
 		await sql`INSERT INTO catalogue_items
-		          (sku, group_id, options, name, price_minor, tags, low_stock_threshold, hsn_sac, gst_rate_bp)
+		          (sku, group_id, options, name, price_minor, tags, media, low_stock_threshold, hsn_sac, gst_rate_bp)
 		          VALUES (${row.sku}, ${row.group}, ${sql.json(row.options)}, ${row.name},
-		                  ${row.price}, ${sql.json(row.tags)}, ${row.low}, ${row.hsn}, ${row.gst})`;
+		                  ${row.price}, ${sql.json(row.tags)}, ${sql.json(MEDIA[row.sku] ?? [])},
+		                  ${row.low}, ${row.hsn}, ${row.gst})`;
 		await sql`INSERT INTO stock (sku, available) VALUES (${row.sku}, ${row.stock})`;
 	}
 

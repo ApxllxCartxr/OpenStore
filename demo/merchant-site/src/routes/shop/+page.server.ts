@@ -6,8 +6,8 @@ export async function load({ url }) {
 	const availability = url.searchParams.get('availability') ?? '';
 
 	const rows = await sql<
-		{ slug: string; name: string; tags: string[]; sku: string; price_minor: bigint; available: number; low: number }[]
-	>`SELECT g.slug, g.name, g.tags, i.sku, i.price_minor, s.available, i.low_stock_threshold AS low
+		{ slug: string; name: string; tags: string[]; media: string[]; sku: string; price_minor: bigint; available: number; low: number }[]
+	>`SELECT g.slug, g.name, g.tags, g.media, i.sku, i.price_minor, s.available, i.low_stock_threshold AS low
 	    FROM product_groups g
 	    JOIN catalogue_items i ON i.group_id = g.id
 	    JOIN stock s ON s.sku = i.sku
@@ -15,11 +15,15 @@ export async function load({ url }) {
 	     AND (${query} = '' OR g.name ILIKE ${'%' + query + '%'})
 	   ORDER BY g.name, i.sku`;
 
-	const groups = new Map<string, { slug: string; name: string; from: number; buckets: Bucket[] }>();
+	const groups = new Map<
+		string,
+		{ slug: string; name: string; cover: string | null; from: number; buckets: Bucket[] }
+	>();
 	for (const row of rows) {
 		const entry = groups.get(row.slug) ?? {
 			slug: row.slug,
 			name: row.name,
+			cover: row.media?.[0] ?? null,
 			from: Number(row.price_minor),
 			buckets: []
 		};
@@ -31,6 +35,7 @@ export async function load({ url }) {
 	let results = [...groups.values()].map((g) => ({
 		slug: g.slug,
 		name: g.name,
+		cover: g.cover,
 		from: g.from,
 		bucket: groupBucket(g.buckets)
 	}));
