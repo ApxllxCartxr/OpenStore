@@ -54,6 +54,18 @@ Verified live, start to finish: added SpoiledDuckie, set a ₹100 ceiling, drove
 
 Phase 2 scorecard: MCP wire correctness ✓, always-allow widened ✓, ten stores ✓, multi-shop dispatch ✓, budget question ✓ (with a real feature, not just an explanation). Still open: thinking blocks, a real model switcher UI (env-var only today), and true "paste any MCP server, not just this repo's" genericity — the tool set is still the closed 14-name OpenStore list, not fetched from whatever server was pasted.
 
+## 2026-09-22 · A real model switcher
+
+Closed the model-switcher item. Driver selection was `CHAT_MODEL_DRIVER`, read once at process start and cached in a single module-level `held` instance for the process's whole lifetime — shown to the Consumer as read-only text. Replaced with `driverFor(choice)`, cached per choice in a `Map` (not one instance — `ScriptedDriver` keeps a pinned sequence's position *in the instance*, so switching away and back must not rebuild it and lose that position), plus `availableDrivers()` reporting which drivers this process actually has a key or model for.
+
+The failure mode "pick an unconfigured driver, next message breaks" doesn't exist to hit: `driverFor` only ever honours a choice among the configured ones and falls back to the deploy's own default otherwise, and the switcher's own `<option>`s are disabled for the unconfigured ones too — belt and suspenders, deliberately, since a UI control and the function behind it agreeing by accident is how they drift apart later.
+
+Backed by the same `settings` table the spend ceiling introduced (`model_driver_override`) — the second thing confirming that table was worth adding generically rather than as a one-off column.
+
+Verified live: switched the running deploy to `scripted` (`running: scripted`), cleared back to the deploy default (`running: openrouter:openai/gpt-oss-20b`), both took effect on the next request with no rebuild. 152 buyer-chat tests green (6 new), 0 type errors, 582 Python tests green.
+
+Remaining from the original ask: thinking blocks, and true "paste any MCP server, not just this repo's shops" genericity. The latter is architecturally the largest piece left — `OpenRouterDriver` already takes its tool-schema map as a constructor argument rather than hardcoding it internally, which means the driver itself doesn't need to change; what's still closed is `+page.server.ts`'s hard `TOOLS.includes(call.name)` filter (drops any tool name outside the 14-name OpenStore set before the model's call ever reaches dispatch) and the contacts flow requiring an `agent-commerce.json` card rather than accepting a bare MCP endpoint. Sized at a full session's work on its own to do to this codebase's standard, not a bolt-on.
+
 ---
 
 # Morning report
