@@ -25,6 +25,7 @@ from openstore.sidecar.gate.decide import (
     DecisionInput,
     Gate,
     GateRefused,
+    _first_difference,
 )
 from openstore.sidecar.gate.policy import Policy
 from openstore.sidecar.gate.settle import ProviderRecord, collect, rto, settle
@@ -248,6 +249,16 @@ async def test_the_per_order_cap_refuses(gate: Gate) -> None:
     assert exc.value.reason_code is ReasonCode.CAP_EXCEEDED
 
 
+async def test_the_per_order_cap_is_a_ceiling_not_a_floor(gate: Gate) -> None:
+    """A total sitting exactly on the cap "exceeds" nothing and must pass —
+    only cap_minor+1 is where CAP_EXCEEDED starts firing."""
+    request = _request([Line(sku="SD-STICKERS", qty=1)])
+    unbounded = await gate.decide(request)
+    at_cap = Policy(per_order_cap_minor=unbounded.total_minor)
+    decision = await Gate(gate._trait, at_cap).decide(request)  # noqa: SLF001
+    assert decision.permitted is True
+
+
 async def test_a_closed_window_refuses_plainly(gate: Gate) -> None:
     """Not 'sold out'. A Merchant who has closed the agent window is not out of
     stock, and telling a Consumer otherwise sends them away for the wrong reason."""
@@ -338,6 +349,30 @@ async def test_a_price_that_moves_between_pin_and_capture_fails_and_moves_no_mon
     assert exc.value.reason_code is ReasonCode.PRICE_CHANGED
     assert "SD-STICKERS" in exc.value.detail or "total" in exc.value.detail
     assert await ledger.entries(request.order_id) == [], "a refused decision moved money"
+
+
+async def test_first_difference_names_exactly_what_moved(gate: Gate) -> None:
+    """`_first_difference` picks the message the Consumer sees on a re-tap —
+    total first (it is the number they actually approve), then the specific
+    line, then a fallback for a change neither field captures."""
+    honest = await gate.decide(_request([Line(sku="SD-STICKERS", qty=1)]), dry_run=True)
+    pinned = honest.quote
+
+    total_moved = pinned.model_copy(update={"total_minor": pinned.total_minor + 50})
+    assert _first_difference(pinned, total_moved) == (
+        f"total {pinned.total_minor} → {pinned.total_minor + 50}"
+    )
+
+    line = pinned.lines[0]
+    bumped_line = line.model_copy(update={"line_total_minor": line.line_total_minor + 25})
+    line_moved = pinned.model_copy(update={"lines": [bumped_line]})
+    assert _first_difference(pinned, line_moved) == (
+        f"{line.sku} {line.line_total_minor} → {line.line_total_minor + 25}"
+    )
+
+    other_sku_line = line.model_copy(update={"sku": "SD-OTHER"})
+    unmatched = pinned.model_copy(update={"lines": [other_sku_line]})
+    assert _first_difference(pinned, unmatched) == "the Merchant's answer changed"
 
 
 # ── Check 12: method-enabled ─────────────────────────────────────────────────
