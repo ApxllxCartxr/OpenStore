@@ -283,6 +283,7 @@ class ToolName(StrEnum):
     READ_ITEM = "read-item"
     ADD_LINE = "add-line"
     REMOVE_LINE = "remove-line"
+    CLEAR_BASKET = "clear-basket"
     SET_DESTINATION = "set-destination"
     SET_CONTACT = "set-contact"
     CHOOSE_FULFILLMENT = "choose-fulfillment"
@@ -306,6 +307,7 @@ TOOL_SCOPES: dict[ToolName, Scope] = {
     ToolName.READ_ITEM: Scope.SEARCH,
     ToolName.ADD_LINE: Scope.BUILD_BASKET,
     ToolName.REMOVE_LINE: Scope.BUILD_BASKET,
+    ToolName.CLEAR_BASKET: Scope.BUILD_BASKET,
     ToolName.SET_DESTINATION: Scope.BUILD_BASKET,
     ToolName.SET_CONTACT: Scope.BUILD_BASKET,
     ToolName.CHOOSE_FULFILLMENT: Scope.BUILD_BASKET,

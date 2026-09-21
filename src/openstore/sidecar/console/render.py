@@ -28,45 +28,121 @@ from openstore.sidecar.evidence.bundle import format_rupees
 CONSOLE_CSS = """
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
+
+/* The app ground is the SUNKEN token and cards are the RAISED one, which is
+   what makes this read as a console rather than a document: in light that is
+   grey paper under white cards, and in dark it is near-black under slate. One
+   rule, both themes, no second palette.
+
+   Nothing here carries a literal-colour fallback. It used to, and because
+   `--paper` and `--ink` are not token names the fallbacks were what ALWAYS
+   rendered — so the console's dark theme never once worked, and a dark visitor
+   got light paper with dark-theme rules drawn on it. */
 body {
   margin: 0;
-  background: var(--paper, #f6f5f2);
-  color: var(--ink, #16161a);
+  background: var(--bg-sunken);
+  color: var(--fg);
   font-family: 'Iosevka Term SS08', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
-header { border-bottom: 1px solid var(--line, #e2e0da); padding: 12px 16px; }
-h1 { font-size: 13px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
-nav { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--line, #e2e0da); }
-nav a {
-  padding: 10px 14px; min-height: 44px; display: flex; align-items: center;
-  color: var(--ink, #16161a); text-decoration: none;
-  border-right: 1px solid var(--line, #e2e0da);
+
+/* Sidebar and content. The nav is a column because the console has nine
+   destinations and a horizontal strip of nine tabs wraps to two rows on a
+   laptop, which is where an operator actually reads this. */
+.shell { display: grid; grid-template-columns: 1fr; min-height: 100vh; }
+.side {
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+  padding: 12px 0;
 }
-nav a[aria-current='page'] { background: var(--bg-sunken, #eceae4); font-weight: 600; }
-nav a:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid var(--accent-2, #2f6b95); outline-offset: 2px; }
-main { padding: 16px; }
-section { margin-bottom: 24px; }
-h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 8px;
-     color: var(--comment, #9a9aa1); font-weight: 600; }
+.brand { padding: 4px 16px 14px; }
+.brand b { display: block; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+.brand span { color: var(--muted); font-size: 11px; }
+nav { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 8px; }
+nav a {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 8px; min-height: 34px; flex: 1 1 auto;
+  color: var(--muted); text-decoration: none;
+  border-radius: var(--radius);
+}
+nav a:hover { background: var(--bg-sunken); color: var(--fg); }
+nav a[aria-current='page'] { background: var(--bg-sunken); color: var(--fg); font-weight: 600; }
+nav a:focus-visible, a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent-2); outline-offset: 2px;
+}
+
+main { padding: 16px; min-width: 0; }
+.page-head { margin-bottom: 16px; }
+h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: 0.01em; }
+.page-head p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+
+/* A card is the unit of the dashboard. Sections keep their own heading so the
+   markup still reads as a document with stylesheets off. */
+section, .card {
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 10px;
+     color: var(--muted); font-weight: 600; }
+
 table { border-collapse: collapse; width: 100%; }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line, #e2e0da); }
-th { font-weight: 600; color: var(--comment, #9a9aa1); font-size: 11px;
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-weight: 600; color: var(--muted); font-size: 10px;
      text-transform: uppercase; letter-spacing: 0.06em; }
-td.num { text-align: right; }
-.panel { background: var(--bg-sunken, #eceae4); border: 1px solid var(--line, #e2e0da); padding: 12px; }
-.banner { border: 1px solid var(--accent, #c2415a); padding: 10px 12px; margin-bottom: 16px; }
-.banner strong { color: var(--accent, #c2415a); }
-.ok { color: var(--ok, #2f8a4d); }
-.warn { color: var(--accent, #c2415a); }
-.muted { color: var(--comment, #9a9aa1); }
+td.num, th.num { text-align: right; }
+
+/* Stat tiles. The value is the one place the console drops mono: a standalone
+   figure set in tabular digits looks loose, because every glyph is padded to
+   the width of a zero. */
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+         margin-bottom: 12px; }
+.tile { background: var(--bg-raised); border: 1px solid var(--line);
+        border-radius: var(--radius-lg); padding: 14px; }
+.tile .k { color: var(--muted); font-size: 11px; }
+.tile .v { font-family: 'Open Sauce Sans', ui-sans-serif, system-ui, sans-serif;
+           font-variant-numeric: proportional-nums; font-size: 26px; font-weight: 600;
+           line-height: 1.15; margin-top: 4px; letter-spacing: -0.02em; }
+.tile .s { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+/* Charts. One hue for every mark: these are single-series plots, so a second
+   colour would encode nothing, and colouring bars by height double-encodes the
+   height. Axis and grid are hairlines one step off the surface. */
+.chart { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .grid-line { stroke: var(--line); stroke-width: 1; }
+.chart .mark { fill: var(--accent-2); }
+.chart .mark:hover { fill: var(--fg); }
+.chart .tick { fill: var(--muted); font-size: 10px; }
+.chart .val { fill: var(--fg); font-size: 10px; font-weight: 600; }
+.chart-empty { color: var(--muted); padding: 18px 0; text-align: center; }
+.two-up { display: grid; gap: 12px; grid-template-columns: 1fr; }
+
+.banner { border: 1px solid var(--accent); border-radius: var(--radius-lg);
+          background: var(--bg-raised); padding: 10px 12px; margin-bottom: 12px; }
+.banner strong { color: var(--accent); }
+.ok { color: var(--ok); }
+.warn { color: var(--accent); }
+.muted { color: var(--muted); }
 .note { max-width: 72ch; }
+p.note { margin: 10px 0 0; }
+
+@media (min-width: 900px) {
+  .shell { grid-template-columns: 190px 1fr; }
+  .side { position: sticky; top: 0; height: 100vh; }
+  nav { flex-direction: column; }
+  main { padding: 20px 24px; }
+  .two-up { grid-template-columns: 1fr 1fr; }
+}
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 """
 
 TABS = (
+    ("overview", "Overview"),
     ("keys", "Keys"),
     ("policy", "Policy"),
     ("provider", "Provider"),
@@ -77,6 +153,184 @@ TABS = (
     ("refunds", "Refunds"),
     ("health", "Health"),
 )
+
+
+#: One line under each page title. The console has nine destinations and the
+#: names alone ("Authority", "Exposure") do not say what you are looking at.
+_SUBTITLES = {
+    "overview": "Agent-originated trade, as sealed by this sidecar",
+    "keys": "What signs receipts, and what no longer does",
+    "policy": "The limits the Gate evaluates on every basket",
+    "provider": "What the payment adapter can do, and what it may do",
+    "authority": "Which kinds of human approval this shop accepts",
+    "exposure": "Which policies Buyer Agents are allowed to see",
+    "agents": "Who has registered, and what their tier buys them",
+    "receipts": "Sealed, hash-chained, verifiable without this server",
+    "refunds": "What agents asked for, and what the shop did",
+    "health": "Clocks, holds, and where the counters live",
+}
+
+
+# ── Charts ───────────────────────────────────────────────────────────────────
+#
+# Inline SVG, no library, no script. Every mark is ONE hue (`--accent-2`)
+# because each plot here is a single series: a second colour would encode
+# nothing, and shading bars by their own height double-encodes the height.
+# `--accent` and `--ok` are deliberately not used — they mean warning and
+# healthy everywhere else in this console, and a status colour spent on data
+# stops meaning status.
+#
+# Each chart is drawn directly above the table of the same numbers, so no value
+# is reachable only by hovering.
+
+#: Bars are capped rather than filling their band, and the leftover is air.
+_BAR_MAX = 24
+#: The rounded data-end. Square at the baseline, round at the tip.
+_BAR_R = 4
+
+
+def _nice_ceiling(value: int) -> int:
+    """Round an axis top up to something a person would have chosen."""
+    if value <= 0:
+        return 1
+    # Annotated: `int ** int` is typed as Any, because a negative exponent
+    # would return a float. The exponent here is a digit count and cannot be.
+    step: int = 10 ** (len(str(value)) - 1)
+    for multiple in (1, 2, 5, 10):
+        if value <= step * multiple:
+            return step * multiple
+    return step * 10
+
+
+def _column_path(x: int, y: int, w: int, h: int) -> str:
+    """A column with a rounded cap and square feet, as one path.
+
+    Drawn as a path rather than a `<rect rx>` because `rx` rounds all four
+    corners: a bar that curves where it meets its own baseline looks like it is
+    floating off the axis.
+    """
+    r = min(_BAR_R, w // 2, h)
+    return (
+        f"M{x},{y + h} V{y + r} Q{x},{y} {x + r},{y} "
+        f"H{x + w - r} Q{x + w},{y} {x + w},{y + r} "
+        f"V{y + h} Z"
+    )
+
+
+def _bar_path(x: int, y: int, w: int, h: int) -> str:
+    """A horizontal bar: square at the axis, rounded at the tip."""
+    r = min(_BAR_R, h // 2, w)
+    return (
+        f"M{x},{y} H{x + w - r} Q{x + w},{y} {x + w},{y + r} "
+        f"V{y + h - r} Q{x + w},{y + h} {x + w - r},{y + h} "
+        f"H{x} Z"
+    )
+
+
+def _columns(series: list[tuple[str, int]], fmt: Any, caption: str) -> str:
+    """Value over time, as columns on a single baseline.
+
+    Every coordinate is an integer. SVG has no need of fractional pixels here,
+    and the money lint is right to refuse floats in this package rather than
+    take a promise that a given float never touches paise.
+    """
+    if not series or all(v == 0 for _, v in series):
+        return f'<p class="chart-empty">{_e(caption)}</p>'
+
+    width, height = 640, 190
+    pad_l, pad_r, pad_b, pad_t = 8, 8, 22, 16
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    top = _nice_ceiling(max(v for _, v in series))
+    n = len(series)
+    band = plot_w // n
+    # The 2px separator is surface, not a stroke: neighbours read as distinct
+    # because of the gap, never because a border was drawn around them.
+    bar_w = min(_BAR_MAX, band - 2)
+    peak = max(range(n), key=lambda i: series[i][1])
+
+    marks: list[str] = []
+    for i, (label, value) in enumerate(series):
+        h = value * plot_h // top if top else 0
+        x = pad_l + plot_w * i // n + (band - bar_w) // 2
+        y = pad_t + plot_h - h
+        mid = x + bar_w // 2
+        if value > 0:
+            marks.append(
+                f'<path class="mark" d="{_column_path(x, y, bar_w, h)}">'
+                f"<title>{_e(label)}: {_e(fmt(value))}</title></path>"
+            )
+        # Only the peak is labelled. A number over every column is chaos and
+        # goes unread; the rest are in the table directly below.
+        if i == peak and value > 0:
+            marks.append(
+                f'<text class="val" x="{mid}" y="{y - 5}" text-anchor="middle">{_e(fmt(value))}</text>'
+            )
+        if i % 2 == 0:
+            marks.append(
+                f'<text class="tick" x="{mid}" y="{height - 6}" text-anchor="middle">{_e(label)}</text>'
+            )
+
+    base = pad_t + plot_h
+    return (
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{_e(caption)}">'
+        f'<line class="grid-line" x1="{pad_l}" y1="{pad_t}" x2="{width - pad_r}" y2="{pad_t}"/>'
+        f'<line class="grid-line" x1="{pad_l}" y1="{base}" x2="{width - pad_r}" y2="{base}"/>'
+        f"{''.join(marks)}</svg>"
+    )
+
+
+def _bars(rows: list[tuple[str, int]], caption: str) -> str:
+    """Counts by category, as horizontal bars with the value at the tip.
+
+    Horizontal rather than a pie: these are nominal categories being compared,
+    and a pie only works part-to-whole at a glance with few segments.
+    """
+    if not rows:
+        return f'<p class="chart-empty">{_e(caption)}</p>'
+
+    # One category is not a chart. A lone bar encodes a number against a scale
+    # nobody can read, so the number says it instead — which is also the honest
+    # reading of this demo: every receipt so far ended the same way.
+    if len(rows) == 1:
+        label, count = rows[0]
+        return (
+            f'<div class="tile" style="border:0;padding:0">'
+            f'<div class="v">{count:,}</div>'
+            f'<div class="s">all of them <code>{_e(label)}</code></div></div>'
+        )
+
+    width = 640
+    row_h, gap = 30, 2
+    label_w, value_w = 140, 46
+    height = len(rows) * row_h
+    top = _nice_ceiling(max(v for _, v in rows))
+    track = width - label_w - value_w
+
+    marks: list[str] = []
+    for i, (label, count) in enumerate(rows):
+        w = max(count * track // top if top else 0, 2)
+        y = i * row_h + (row_h - _BAR_MAX) // 2 + gap // 2
+        h = _BAR_MAX - gap
+        text_y = y + h // 2 + 3
+        marks.append(
+            f'<text class="tick" x="{label_w - 10}" y="{text_y}" text-anchor="end">{_e(label)}</text>'
+            f'<path class="mark" d="{_bar_path(label_w, y, w, h)}">'
+            f"<title>{_e(label)}: {count}</title></path>"
+            f'<text class="val" x="{label_w + w + 8}" y="{text_y}">{count}</text>'
+        )
+    return (
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="{_e(caption)}">{"".join(marks)}</svg>'
+    )
+
+
+def _tile(label: str, value: str, sub: str = "") -> str:
+    sub_html = f'<div class="s">{_e(sub)}</div>' if sub else ""
+    return (
+        f'<div class="tile"><div class="k">{_e(label)}</div>'
+        f'<div class="v">{_e(value)}</div>{sub_html}</div>'
+    )
 
 
 def _e(value: Any) -> str:
@@ -118,12 +372,17 @@ def page(state: ConsoleState, tab: str) -> str:
 <style>{CONSOLE_CSS}</style>
 </head>
 <body>
-<header><h1>{_e(state.merchant_domain)} · /agentic</h1></header>
+<div class="shell">
+<div class="side">
+<div class="brand"><b>{_e(state.merchant_domain)}</b><span>/agentic</span></div>
 <nav>{"".join(_tab_link(name, label, tab) for name, label in TABS)}</nav>
+</div>
 <main>
+<div class="page-head"><h1>{_e(dict(TABS)[tab])}</h1><p>{_e(_SUBTITLES.get(tab, ""))}</p></div>
 {_banners(state)}
 {body}
 </main>
+</div>
 </body>
 </html>"""
 
@@ -164,10 +423,81 @@ def _banners(state: ConsoleState) -> str:
     return "\n".join(out)
 
 
+def _overview(state: ConsoleState) -> str:
+    """What agent-originated trade actually did, before the detail tabs.
+
+    Every number here is derived from receipts this sidecar SEALED. Nothing is
+    modelled, projected or smoothed: a demo with four receipts draws four
+    receipts, because a dashboard that flatters a thin dataset is the one thing
+    an operator can never un-learn to distrust.
+    """
+    receipts = state.receipts
+    gmv = sum(int(r.get("total_minor") or 0) for r in receipts)
+
+    # Sealings per day across a fortnight. Days with nothing keep their slot:
+    # dropping empty days would compress the axis and turn a quiet week into a
+    # busy one.
+    from collections import Counter
+    from datetime import UTC, datetime, timedelta
+
+    today = datetime.now(UTC).date()
+    window = [today - timedelta(days=i) for i in range(13, -1, -1)]
+    value_by_day: Counter[str] = Counter()
+    for r in receipts:
+        stamp = str(r.get("sealed_at") or "")[:10]
+        if stamp:
+            value_by_day[stamp] += int(r.get("total_minor") or 0)
+
+    value_series: list[tuple[str, int]] = [
+        (d.strftime("%d %b"), int(value_by_day.get(d.isoformat(), 0))) for d in window
+    ]
+    authority = Counter(str(r.get("authority") or "unknown") for r in receipts)
+    authority_rows = sorted(authority.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    recent = "".join(
+        f'<tr><td><a href="/receipt/{_e(r["receipt_id"])}">{_e(r["receipt_id"])}</a></td>'
+        f'<td class="num">{_e(format_rupees(r["total_minor"]))}</td>'
+        f"<td>{_e(r['authority'])}</td>"
+        f'<td class="muted">{_e(str(r.get("sealed_at") or "")[:16].replace("T", " "))}</td></tr>'
+        for r in receipts[:8]
+    )
+
+    open_refunds = sum(1 for r in state.refund_requests if r.get("state") == "requested")
+
+    return f"""<div class="tiles">
+{_tile("Receipts sealed", f"{len(receipts):,}", "signed and hash-chained")}
+{_tile("Agentic GMV", format_rupees(gmv), "tax-inclusive, as quoted")}
+{_tile("Agents registered", f"{len(state.agents):,}", "reputation buys throughput only")}
+{_tile("Refunds open", f"{open_refunds:,}", "an agent may ask, never move money")}
+</div>
+
+<section>
+<h2>Agentic sales, last 14 days</h2>
+{_columns(value_series, format_rupees, "No receipts sealed in the last 14 days.")}
+<p class="note muted">Value of every basket this sidecar sealed, by the day it was sealed.
+A day with no column had no agent-originated order, not a missing reading.</p>
+</section>
+
+<div class="two-up">
+<section>
+<h2>How each purchase was approved</h2>
+{_bars(authority_rows, "Nothing sealed yet, so no authority has been exercised.")}
+<p class="note muted">Every receipt names the kind of approval that ended it. No bar here is
+an agent acting alone, because there is no such receipt to draw.</p>
+</section>
+
+<section>
+<h2>Latest sealed</h2>
+<table><thead><tr><th>receipt</th><th class="num">total</th><th>authority</th><th>sealed</th></tr></thead>
+<tbody>{recent or '<tr><td colspan="4" class="muted">No sealed receipts yet.</td></tr>'}</tbody></table>
+</section>
+</div>"""
+
+
 def _keys(state: ConsoleState) -> str:
     rows = "".join(
         f"<tr><td>{_e(k['kid'])}</td><td>{_e(k['created_at'])}</td>"
-        f"<td>{'<span class=\"warn\">revoked ' + _e(k['revoked_at']) + '</span>' if k.get('revoked_at') else '<span class=\"ok\">active</span>'}</td></tr>"
+        f"<td>{'<span class="warn">revoked ' + _e(k['revoked_at']) + '</span>' if k.get('revoked_at') else '<span class="ok">active</span>'}</td></tr>"
         for k in state.keys
     )
     return f"""<section>
@@ -184,11 +514,11 @@ def _policy(state: ConsoleState) -> str:
     return f"""<section>
 <h2>Policy</h2>
 <table><tbody>
-<tr><th>Per-order cap</th><td class="num">{_e(format_rupees(p['per_order_cap_minor']))}</td></tr>
-<tr><th>Per-order line count</th><td class="num">{_e(p['per_order_line_count'])}</td></tr>
-<tr><th>Per-group quantity</th><td class="num">{_e(p['per_group_qty'])}</td></tr>
-<tr><th>Blocked tags</th><td>{_e(", ".join(p['blocked_tags']) or "—")}</td></tr>
-<tr><th>Agent window</th><td>{'open' if p['window_open'] else '<span class="warn">closed</span>'}</td></tr>
+<tr><th>Per-order cap</th><td class="num">{_e(format_rupees(p["per_order_cap_minor"]))}</td></tr>
+<tr><th>Per-order line count</th><td class="num">{_e(p["per_order_line_count"])}</td></tr>
+<tr><th>Per-group quantity</th><td class="num">{_e(p["per_group_qty"])}</td></tr>
+<tr><th>Blocked tags</th><td>{_e(", ".join(p["blocked_tags"]) or "—")}</td></tr>
+<tr><th>Agent window</th><td>{"open" if p["window_open"] else '<span class="warn">closed</span>'}</td></tr>
 </tbody></table>
 <p class="note muted">Count, quantity and caps are evaluated <strong>at the Product Group</strong>,
 so buying two of each colour cannot walk through a two-per-order cap. Stated here so nobody
@@ -201,11 +531,11 @@ def _provider(state: ConsoleState) -> str:
     return f"""<section>
 <h2>Provider</h2>
 <table><tbody>
-<tr><th>Adapter</th><td>{_e(p['adapter'])}</td></tr>
-<tr><th>Declared methods</th><td>{_e(", ".join(p['declared_methods']))}</td></tr>
-<tr><th>Enabled methods</th><td>{_e(", ".join(p['enabled_methods']))}</td></tr>
-<tr><th>Link lifetime</th><td class="num">{_e(p['link_lifetime_minutes'])} min</td></tr>
-<tr><th>Webhooks</th><td>{_e(p['webhook_status'])}</td></tr>
+<tr><th>Adapter</th><td>{_e(p["adapter"])}</td></tr>
+<tr><th>Declared methods</th><td>{_e(", ".join(p["declared_methods"]))}</td></tr>
+<tr><th>Enabled methods</th><td>{_e(", ".join(p["enabled_methods"]))}</td></tr>
+<tr><th>Link lifetime</th><td class="num">{_e(p["link_lifetime_minutes"])} min</td></tr>
+<tr><th>Webhooks</th><td>{_e(p["webhook_status"])}</td></tr>
 </tbody></table>
 <p class="note muted">Anything outside the enabled set refuses <code>method-not-supported</code>
 naming what <em>is</em> enabled. The adapter declares what it can do; you decide what it may.</p>
@@ -217,8 +547,8 @@ def _authority(state: ConsoleState) -> str:
     return f"""<section>
 <h2>Authority kinds accepted</h2>
 <table><tbody>
-<tr><th>Kinds</th><td>{_e(", ".join(a['kinds']))}</td></tr>
-<tr><th>confirmed-intent mechanisms</th><td>{_e(", ".join(a['mechanisms']))}</td></tr>
+<tr><th>Kinds</th><td>{_e(", ".join(a["kinds"]))}</td></tr>
+<tr><th>confirmed-intent mechanisms</th><td>{_e(", ".join(a["mechanisms"]))}</td></tr>
 <tr><th>Refused</th><td><code>mandate</code> — defined, registered, refused in v1</td></tr>
 </tbody></table>
 <p class="note muted">An OTP to a Contact Point is not a mechanism and cannot be configured as
@@ -243,10 +573,10 @@ def _agents(state: ConsoleState) -> str:
         f"<tr><td>{_e(a.get('name') or '—')}<br>"
         # Truncated because an agent_id is a 43-character thumbprint and the
         # Merchant recognises an agent by what it does, not by its hash.
-        f"<code class=\"muted\">{_e(str(a['agent_id'])[:16])}…</code></td>"
-        f"<td>{_e(a['tier'])}</td><td class=\"num\">{_e(a.get('calls', 0))}</td>"
+        f'<code class="muted">{_e(str(a["agent_id"])[:16])}…</code></td>'
+        f'<td>{_e(a["tier"])}</td><td class="num">{_e(a.get("calls", 0))}</td>'
         f"<td>{_e(a.get('last_seen', '—'))}</td>"
-        f"<td>{'<span class=\"warn\">blocked</span>' if a.get('blocked') else '<span class=\"ok\">allowed</span>'}</td></tr>"
+        f"<td>{'<span class="warn">blocked</span>' if a.get('blocked') else '<span class="ok">allowed</span>'}</td></tr>"
         for a in state.agents
     )
     return f"""<section>
@@ -261,8 +591,8 @@ either way.</p>
 
 def _receipts(state: ConsoleState) -> str:
     rows = "".join(
-        f"<tr><td><a href=\"/receipt/{_e(r['receipt_id'])}\">{_e(r['receipt_id'])}</a></td>"
-        f"<td class=\"num\">{_e(format_rupees(r['total_minor']))}</td>"
+        f'<tr><td><a href="/receipt/{_e(r["receipt_id"])}">{_e(r["receipt_id"])}</a></td>'
+        f'<td class="num">{_e(format_rupees(r["total_minor"]))}</td>'
         f"<td>{_e(r['authority'])}</td><td>v{_e(r['version'])}</td></tr>"
         for r in state.receipts
     )
@@ -309,7 +639,7 @@ money out of a shop it holds no credential for.</p>
 def _health(state: ConsoleState) -> str:
     rows = "".join(
         f"<tr><td>{_e(h['order_id'])}</td><td>{_e(h['status'])}</td>"
-        f"<td>{_e(h['deadline'])}</td><td class=\"num\">{_e(format_rupees(h['amount_minor']))}</td></tr>"
+        f'<td>{_e(h["deadline"])}</td><td class="num">{_e(format_rupees(h["amount_minor"]))}</td></tr>'
         for h in state.overdue_holds
     )
     return f"""<section>
@@ -330,6 +660,7 @@ this build.</p>
 
 
 _TABS = {
+    "overview": _overview,
     "keys": _keys,
     "policy": _policy,
     "provider": _provider,

@@ -63,8 +63,10 @@ class Basket:
                 # `add-line` for a SKU already in the basket answered HTTP 500
                 # rather than adding anything.
                 self.lines[index] = Line(sku=sku, qty=line.qty + qty, parent=parent)
+                self._unchoose_fulfillment()
                 return
         self.lines.append(Line(sku=sku, qty=qty, parent=parent))
+        self._unchoose_fulfillment()
 
     def remove(self, sku: str) -> bool:
         before = len(self.lines)
@@ -72,7 +74,22 @@ class Basket:
         # leaving an orphaned gift-wrap on a basket with nothing to wrap is how
         # a Consumer is charged for something they cannot receive.
         self.lines = [ln for ln in self.lines if ln.sku != sku and ln.parent != sku]
-        return len(self.lines) != before
+        if len(self.lines) != before:
+            self._unchoose_fulfillment()
+            return True
+        return False
+
+    def _unchoose_fulfillment(self) -> None:
+        """A changed basket un-chooses the delivery option, exactly as a changed
+        Destination does.
+
+        The option was offered and priced for the lines that were in the basket
+        when the shop offered it. Keeping it across an `add-line` meant a
+        fulfillment could be chosen before the basket was finished and still
+        reach the quote — so the Consumer approved delivery for a cart that no
+        longer existed. Cleared here rather than in the tools, so no caller can
+        forget."""
+        self.fulfillment_option_id = ""
 
     def quotable(self) -> bool:
         return bool(self.lines and self.destination and self.fulfillment_option_id)

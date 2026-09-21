@@ -136,11 +136,12 @@ here is a red build (SPEC §12). Generated from `core/codes.py`, diffed in CI.
 - `capture-block`
 - `release-block`
 
-## Tool names (13)
+## Tool names (14)
 - `search`
 - `read-item`
 - `add-line`
 - `remove-line`
+- `clear-basket`
 - `set-destination`
 - `set-contact`
 - `choose-fulfillment`
@@ -233,6 +234,7 @@ The call site never chooses a status; this table does.
 | `read-item` | `search` |
 | `add-line` | `build-basket` |
 | `remove-line` | `build-basket` |
+| `clear-basket` | `build-basket` |
 | `set-destination` | `build-basket` |
 | `set-contact` | `build-basket` |
 | `choose-fulfillment` | `build-basket` |

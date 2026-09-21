@@ -95,6 +95,11 @@ async def _sealed_receipts() -> list[dict[str, Any]]:
                 ),
                 "authority": (tapped.payload if tapped else {}).get("authority_kind", "—"),
                 "version": bundle.version,
+                # Carried so the overview can plot sealings over time. The
+                # console does not parse it: the date is the first 10 characters
+                # of an ISO-8601 instant, and a bundle whose seal time is blank
+                # simply falls out of the series rather than crashing it.
+                "sealed_at": bundle.sealed_at,
             }
         )
     return list(reversed(rows))
@@ -171,7 +176,7 @@ async def build_state(store: ConsoleStore) -> ConsoleState:
 @router.get("/", response_class=HTMLResponse)
 @router.get("", response_class=HTMLResponse)
 async def console_root() -> HTMLResponse:
-    return HTMLResponse(page(await build_state(get_console_store()), "health"))
+    return HTMLResponse(page(await build_state(get_console_store()), "overview"))
 
 
 @router.get("/static/tokens.css")

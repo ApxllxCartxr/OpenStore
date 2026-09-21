@@ -16,7 +16,10 @@ Two rules hold for every tool here:
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
+
+from pydantic import ValidationError
 
 from openstore.sidecar.basket import Basket
 from openstore.sidecar.core.codes import (
@@ -88,6 +91,11 @@ async def search(trait: TraitClient, query: str) -> dict[str, Any]:
                     [AvailabilityBucket(buckets[i.sku]) for i in items]
                 ).value,
                 "variants": len(items),
+                # The axes, not the variants: a group with one size needs no
+                # question, and one with two can be asked about straight from
+                # the search result instead of costing a `read-item` round trip
+                # to learn that a question exists at all.
+                "option_axes": group.option_axes,
                 "image": group.media[0] if group.media else None,
             }
         )
@@ -214,13 +222,47 @@ async def fulfillment_options(trait: TraitClient, basket: Basket) -> dict[str, A
     }
 
 
+#: What the Consumer must fix for each Destination field, in the order the
+#: fields are asked for. A pydantic dump names patterns and doc URLs; the agent
+#: — and the shopper behind it — needs the fix, not the schema.
+_DESTINATION_FIXES: tuple[tuple[str, str], ...] = (
+    ("line1", "a street address in line1"),
+    ("city", "a city"),
+    ("state", "a 2-letter state code (e.g. TN for Tamil Nadu)"),
+    ("postal_code", "a 6-digit postal code"),
+)
+
+
+def _destination_fix(exc: ValidationError) -> str:
+    bad = [
+        fix
+        for field, fix in _DESTINATION_FIXES
+        if any(err["loc"][:1] == (field,) for err in exc.errors())
+    ]
+    if not bad:
+        return (
+            "That address needs a street address, a city, a 2-letter state code "
+            "and a 6-digit postal code."
+        )
+    if len(bad) == 1:
+        needs = bad[0]
+    elif len(bad) == 2:
+        needs = f"{bad[0]} and {bad[1]}"
+    else:
+        needs = f"{', '.join(bad[:-1])} and {bad[-1]}"
+    return f"That address needs {needs}."
+
+
 def set_destination(basket: Basket, payload: dict[str, Any]) -> None:
     try:
         basket.destination = Destination.model_validate(payload)
-    except Exception as exc:  # noqa: BLE001 — the shape is the Consumer's problem to fix
+    except ValidationError as exc:
+        raise ToolRefused(ReasonCode.NOT_FOUND, _destination_fix(exc)) from None
+    except Exception:  # noqa: BLE001 — anything else is still a shape problem
         raise ToolRefused(
             ReasonCode.NOT_FOUND,
-            f"That Destination is not one this shop can read: {exc}",
+            "That address needs a street address, a city, a 2-letter state code "
+            "and a 6-digit postal code.",
         ) from None
     # A Destination change re-prices and re-hashes, so a chosen option no longer
     # applies to it.
@@ -235,6 +277,35 @@ def set_contact(basket: Basket, payload: dict[str, Any]) -> None:
             "A Contact Point is an email, a phone, or both — and one is needed.",
         )
     basket.contact = contact
+
+
+def clear_basket(basket: Basket) -> dict[str, Any]:
+    """Empty the basket back to a fresh state: lines, Destination, Contact
+    Point, chosen fulfillment and code all go, and the cart id rotates so a
+    later checkout cannot idempotently return an order from the cleared cart.
+
+    In place, so the one save path in `_run_tool` persists exactly this: a
+    delete-then-save here would race the save that follows dispatch and
+    resurrect the cleared basket.
+
+    Used when the shopper starts over. A basket that outlives its conversation
+    puts old lines into the next quote, and every one of those lines breaks
+    the invariant that a cart line traces to something this conversation asked
+    for or accepted.
+    """
+    removed = [ln.sku for ln in basket.lines]
+    basket.lines = []
+    basket.destination = None
+    basket.contact = {}
+    basket.fulfillment_option_id = ""
+    basket.discount_code = None
+    basket.cart_id = f"cart_{secrets.token_hex(8)}"
+    return {
+        "cleared": True,
+        "removed": removed,
+        "quote": None,
+        "needs": ["lines", "destination", "fulfillment"],
+    }
 
 
 async def choose_fulfillment(trait: TraitClient, basket: Basket, option_id: str) -> dict[str, Any]:
