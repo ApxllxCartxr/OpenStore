@@ -133,6 +133,25 @@ class PaymentMethod(StrEnum):
 
 
 @unique
+class RefundRequestState(StrEnum):
+    """An agent's refund *request*, which is not a refund.
+
+    Three, and there is never a fourth: a request is open, the Merchant paid it,
+    or the Merchant refused it. The money itself is `LedgerKind.REFUND` and the
+    order's own `REFUNDED` status — this set tracks the ask, not the movement,
+    and conflating the two would let an agent's request look like money the shop
+    has already sent.
+
+    Registered here rather than at the call site per §0's first standing rule;
+    the decision is logged in `LOGS.md`.
+    """
+
+    REQUESTED = "requested"
+    APPROVED = "approved"
+    DECLINED = "declined"
+
+
+@unique
 class CancellationReason(StrEnum):
     CONSUMER_WALKAWAY = "consumer-walkaway"
     CONSUMER_DECLINED = "consumer-declined"
@@ -405,6 +424,7 @@ CLOSED_SETS: dict[str, type[StrEnum]] = {
     "Transcript check results": CheckResult,
     "Payment methods": PaymentMethod,
     "Cancellation reasons": CancellationReason,
+    "Refund request states": RefundRequestState,
     "Stock-move channels": StockMoveChannel,
     "Availability buckets": AvailabilityBucket,
     "Discount visibility": DiscountVisibility,

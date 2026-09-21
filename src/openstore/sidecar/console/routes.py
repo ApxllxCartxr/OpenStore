@@ -22,6 +22,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
+from openstore.sidecar.console.refunds import get_refund_queue
 from openstore.sidecar.console.render import TABS, ConsoleState, page
 from openstore.sidecar.core.codes import (
     AuthorityKind,
@@ -132,6 +133,9 @@ def build_state(store: ConsoleStore) -> ConsoleState:
         # what the sidecar had actually admitted or sealed.
         agents=store.agents or get_surface().admission.board(),
         receipts=store.receipts or _sealed_receipts(),
+        # Live, not a list the console keeps: the queue the tool writes to is
+        # the queue the Merchant reads, or the board is decoration.
+        refund_requests=get_refund_queue().rows(),
         overdue_holds=store.overdue_holds,
         dev_profile_hosts=settings.dev_profile_hosts,
         export_acknowledged=store.export_acknowledged,

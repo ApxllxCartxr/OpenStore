@@ -74,6 +74,7 @@ TABS = (
     ("exposure", "Exposure"),
     ("agents", "Agents"),
     ("receipts", "Receipts"),
+    ("refunds", "Refunds"),
     ("health", "Health"),
 )
 
@@ -99,6 +100,7 @@ class ConsoleState:
     exposure: dict[str, Any]
     agents: list[dict[str, Any]]
     receipts: list[dict[str, Any]]
+    refund_requests: list[dict[str, Any]]
     overdue_holds: list[dict[str, Any]]
     dev_profile_hosts: tuple[str, ...] = ()
     export_acknowledged: bool = True
@@ -273,6 +275,37 @@ viewer sits outside this console's auth boundary.</p>
 </section>"""
 
 
+def _refunds(state: ConsoleState) -> str:
+    """What agents have asked for, and what the shop did about it."""
+    rows = "".join(
+        f"<tr><td><code>{_e(r['order_id'])}</code></td>"
+        f"<td>{_e(r['reason'] or '—')}</td>"
+        f'<td><code class="muted">{_e(str(r["agent_id"])[:16])}…</code></td>'
+        f"<td>{_e(r['requested_at'])}</td>"
+        + (
+            '<td><span class="warn">open</span></td>'
+            if r["state"] == "requested"
+            else f'<td><span class="ok">{_e(r["state"])}</span>'
+            + (
+                f'<br><span class="muted">{_e(r["resolution_note"])}</span>'
+                if r["resolution_note"]
+                else ""
+            )
+            + "</td>"
+        )
+        + "</tr>"
+        for r in state.refund_requests
+    )
+    return f"""<section>
+<h2>Refund requests</h2>
+<table><thead><tr><th>order</th><th>reason given</th><th>asked by</th><th>when</th><th>state</th></tr></thead>
+<tbody>{rows or '<tr><td colspan="5" class="muted">No agent has asked for a refund.</td></tr>'}</tbody></table>
+<p class="note muted">An agent can ask and nothing more. The money moves when the shop's own
+admin refunds the order, which closes the request here — an agent that could refund could move
+money out of a shop it holds no credential for.</p>
+</section>"""
+
+
 def _health(state: ConsoleState) -> str:
     rows = "".join(
         f"<tr><td>{_e(h['order_id'])}</td><td>{_e(h['status'])}</td>"
@@ -304,5 +337,6 @@ _TABS = {
     "exposure": _exposure,
     "agents": _agents,
     "receipts": _receipts,
+    "refunds": _refunds,
     "health": _health,
 }

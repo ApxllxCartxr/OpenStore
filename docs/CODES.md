@@ -71,6 +71,11 @@ here is a red build (SPEC §12). Generated from `core/codes.py`, diffed in CI.
 - `shop-reject`
 - `rto`
 
+## Refund request states (3)
+- `requested`
+- `approved`
+- `declined`
+
 ## Stock-move channels (8)
 - `site-direct`
 - `agent-reserve`

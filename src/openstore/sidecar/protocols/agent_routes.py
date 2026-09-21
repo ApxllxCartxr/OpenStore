@@ -430,6 +430,34 @@ async def _run_tool(tool: ToolName, agent_id: str, payload: dict[str, Any]) -> d
             raise ToolRefused(refusal.code, refusal.detail) from None
         return {"order_id": cancelled.order_id, "status": cancelled.status.value}
 
+    if tool is ToolName.REQUEST_REFUND:
+        # **The one thing an agent may do about a refund: ask.** A refund moves
+        # money and belongs to the Merchant; an agent that could refund could
+        # move money out of a shop it holds no credential for (ADR-0013). So
+        # this records an ask in the queue `/agentic` → Refunds shows, and says
+        # plainly that nothing has been promised.
+        from openstore.sidecar.console.refunds import get_refund_queue
+
+        order = await merchant().orders_read(str(payload.get("order_id", "")))
+        try:
+            request = get_refund_queue().request(
+                order_id=order.order_id,
+                agent_id=agent_id,
+                reason=str(payload.get("reason", "")),
+                order_status=order.status,
+            )
+        except TraitError as exc:
+            raise ToolRefused(exc.code, exc.detail) from None
+        return {
+            "request_id": request.request_id,
+            "order_id": request.order_id,
+            "state": request.state.value,
+            "note": (
+                "Queued for the shop. No money has moved and none is promised: a refund "
+                "is the Merchant's to make, and they decide the amount."
+            ),
+        }
+
     raise tools.unsupported(tool)
 
 

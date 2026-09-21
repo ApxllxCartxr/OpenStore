@@ -19,7 +19,14 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from openstore.sidecar.core.codes import CancellationReason, LedgerKind, OrderStatus, ReasonCode
+from openstore.sidecar.console.refunds import get_refund_queue
+from openstore.sidecar.core.codes import (
+    CancellationReason,
+    LedgerKind,
+    OrderStatus,
+    ReasonCode,
+    RefundRequestState,
+)
 from openstore.sidecar.gate.lifecycle import can_transition
 from openstore.sidecar.ledger.entries import Ledger, LedgerError
 from openstore.sidecar.trait.errors import TraitError
@@ -33,7 +40,7 @@ from openstore.sidecar.trait.signing import (
 
 router = APIRouter(prefix="/agentic")
 
-MERCHANT_ACTIONS = ("refund", "collect", "rto", "reject")
+MERCHANT_ACTIONS = ("refund", "refund-decline", "collect", "rto", "reject")
 
 
 @dataclass
@@ -106,6 +113,14 @@ async def refund(request: Request) -> JSONResponse:
         return _refusal(ReasonCode.AMOUNT_MISMATCH, str(exc))
 
     position = await ledger.position(order_id)
+    # If an agent asked about this order, the ask is now answered. Closed here
+    # rather than by the Merchant remembering to: a queue that only grows is a
+    # queue nobody reads twice.
+    closed = get_refund_queue().resolve(
+        order_id,
+        RefundRequestState.APPROVED,
+        note=f"refunded {entry.amount_minor} paise",
+    )
     return JSONResponse(
         {
             "order_id": order_id,
@@ -115,6 +130,38 @@ async def refund(request: Request) -> JSONResponse:
             # Full vs partial is derived, never a ninth status.
             "status": OrderStatus.REFUNDED.value,
             "restock_lines": payload.get("restock_lines", []),
+            "closed_request_id": closed.request_id if closed else None,
+        }
+    )
+
+
+@router.post("/refund-decline")
+async def refund_decline(request: Request) -> JSONResponse:
+    """Close an agent's refund request without paying it.
+
+    The other half of a queue. Without it a request the Merchant will not
+    honour stays open forever, and the board stops being work to do — which is
+    how a queue becomes decoration. **Writes no Ledger entry**: refusing to
+    refund moves no money, and a `REVERSAL` for a refund that never happened
+    would be a false entry in an append-only book.
+    """
+    try:
+        payload = await _verified_body(request, "/agentic/refund-decline")
+    except ValueError as exc:
+        return _refusal(ReasonCode.SIGNATURE_INVALID, str(exc))
+
+    order_id = str(payload.get("order_id", ""))
+    closed = get_refund_queue().resolve(
+        order_id, RefundRequestState.DECLINED, note=str(payload.get("reason", ""))
+    )
+    if closed is None:
+        return _refusal(ReasonCode.NOT_FOUND, f"no open refund request for {order_id!r} to decline")
+    return JSONResponse(
+        {
+            "order_id": order_id,
+            "request_id": closed.request_id,
+            "state": closed.state.value,
+            "ledger_entries_written": 0,
         }
     )
 
