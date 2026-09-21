@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import type { PageProps } from './$types';
+	import type { Widget } from '$lib/widgets.ts';
+	import { renderMarkdown } from '$lib/markdown.ts';
 	let { data }: PageProps = $props();
 
 	/** Results worth showing as something other than JSON: what the shop
@@ -15,10 +17,90 @@
 		})) as Parsed[]
 	);
 
-	const latest = $derived(calls.length ? calls[calls.length - 1] : null);
-	const approval = $derived(
-		calls.filter((c) => c.response?.approve_url).at(-1)?.response ?? null
-	);
+	/** One transcript in the order it happened: messages and tool calls
+	 *  interleaved by timestamp. Rendering them in two separate loops is what
+	 *  pinned every tool card to the bottom of the page, after the pending
+	 *  approval, no matter when the call actually ran. */
+	type TimelineMessage = {
+		kind: 'message';
+		key: string;
+		/** The row id, which is how a widget submission names the widget it came
+		 *  from — the definition is then read from the database, not the post. */
+		id: number;
+		role: string;
+		text: string;
+		widget: Widget | null;
+		at: string;
+	};
+	type TimelineTool = {
+		kind: 'tool';
+		key: string;
+		name: string;
+		request: any;
+		response: any;
+		at: string;
+	};
+	type TimelineItem = TimelineMessage | TimelineTool;
+	const timeline = $derived.by(() => {
+		const items = [
+			...data.thread.messages.map(
+				(m, n): TimelineMessage => ({
+					kind: 'message',
+					key: `m${n}`,
+					id: m.id,
+					role: m.role,
+					text: m.text,
+					// Stored validated; parsed here only to render. A row without one
+					// is an ordinary message, which is most of them.
+					widget: m.widget ? (JSON.parse(m.widget) as Widget) : null,
+					at: m.at
+				})
+			),
+			...calls.map((c, n): TimelineTool => ({ kind: 'tool', key: `c${n}`, ...c }))
+		].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)) as TimelineItem[];
+		// Optimistic echo: the consumer's own words appear instantly, ahead of
+		// the round trip. Keyed `optimistic` so it never collides with server
+		// rows, and dropped the moment `update()` brings the real transcript.
+		if (optimisticText) {
+			items.push({
+				kind: 'message',
+				key: 'optimistic',
+				id: 0,
+				role: 'consumer',
+				text: optimisticText,
+				widget: null,
+				at: ''
+			});
+		}
+		return items;
+	});
+
+	/** The basket exactly as the shop last reported it — the lines of the most
+	 *  recent tool result that carried any. Nothing here is local state: a panel
+	 *  the page maintained itself would be the second basket this whole design
+	 *  exists to avoid. */
+	const basket = $derived.by(() => {
+		for (let i = calls.length - 1; i >= 0; i -= 1) {
+			const lines = calls[i]?.response?.lines;
+			if (Array.isArray(lines)) return lines as { sku: string; qty: number; parent?: string }[];
+		}
+		return null;
+	});
+
+	/** Delivery costs, by option id, from the shop's own last answer. A widget
+	 *  never carries an amount; this is where the amount beside one comes from. */
+	const deliveryCosts = $derived.by(() => {
+		const costs = new Map<string, { cost_minor: number; eta_days: number }>();
+		for (const call of calls) {
+			for (const option of (call.response?.options ?? []) as any[]) {
+				costs.set(String(option.id), {
+					cost_minor: Number(option.cost_minor),
+					eta_days: Number(option.eta_days)
+				});
+			}
+		}
+		return costs;
+	});
 
 	function rupees(minor: number): string {
 		return `₹${(minor / 100).toFixed(2)}`;
@@ -29,83 +111,250 @@
 		return src.startsWith('http') ? src : `http://${data.shop?.domain}${src}`;
 	}
 	let sending = $state(false);
+	/** The verdict in flight on the consent prompt, if any. While set, the
+	 *  Allow/Decline buttons are dead and a working state shows: the decide
+	 *  round trip runs the tool *and* the agent's next turns, which is slow
+	 *  enough to need acknowledging. */
+	let deciding = $state<string | null>(null);
+	/** The consumer's words, shown instantly while the round trip runs. */
+	let optimisticText = $state<string | null>(null);
+	let draft = $state('');
+	let composerBox = $state<HTMLTextAreaElement | undefined>(undefined);
+
+	/** The answer lands above a sticky composer, so the typing bubble pulls the
+	 *  viewport down to where the reply will appear. Runs once, on mount. */
+	function follow(node: HTMLElement) {
+		node.scrollIntoView({ block: 'end', behavior: 'smooth' });
+	}
+
+	/** Every widget posts the same way: the typing bubble holds Miro's place
+	 *  while the call and the turn that follows it run. */
+	function onWidgetSubmit() {
+		sending = true;
+		return async ({ update }: { update: () => Promise<void> }) => {
+			try {
+				await update();
+			} finally {
+				sending = false;
+			}
+		};
+	}
+
+	/** Clear the field the moment the message is taken, not when the reply lands. */
+	function resetComposer() {
+		draft = '';
+		if (composerBox) composerBox.style.height = 'auto';
+	}
+
+	/** Enter sends, Shift+Enter breaks the line: the convention every assistant
+	 *  UI has already taught the Consumer. `requestSubmit` rather than `submit`
+	 *  so the progressive-enhancement handler still runs. */
+	function onKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Enter' || event.shiftKey) return;
+		event.preventDefault();
+		(event.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
+	}
+
+	/** The field grows with the message instead of scrolling a one-line box. */
+	function autogrow(event: Event) {
+		const field = event.currentTarget as HTMLTextAreaElement;
+		field.style.height = 'auto';
+		field.style.height = `${field.scrollHeight}px`;
+	}
 </script>
 
-<svelte:head><title>Duckie — buyer agent</title></svelte:head>
+<svelte:head><title>Miro, a buyer agent</title></svelte:head>
 
 <div class="thread">
-	<header style="display:flex;gap:0.75rem;align-items:baseline;flex-wrap:wrap;margin-bottom:1rem">
-		<strong>Duckie</strong>
-		{#if data.shop}
-			<span class="mono" style="color:var(--comment);font-size:0.8125rem">
-				talking to {data.shop.name} · {data.shop.domain}
-			</span>
-		{:else}
-			<span class="mono" style="color:var(--accent);font-size:0.8125rem">
-				no shop yet — <a href="/contacts">add one</a>
-			</span>
-		{/if}
-	</header>
+	{#if !data.shop}
+		<p class="meta" style="margin-bottom:var(--s-4)">
+			No shop yet. <a href="/contacts">Add one</a> to start.
+		</p>
+	{/if}
 
-	{#each data.thread.messages as message (message.at + message.role)}
-		<div class="row" data-who={message.role}>
-			<div class="bubble">{message.text}</div>
-		</div>
+	{#each timeline as item, i (item.key)}
+		{#if item.kind === 'message'}
+			<div class="row" data-who={item.role} style="--i:{i}">
+				{#if item.role === 'agent'}
+					<span class="who">Miro</span>
+				{/if}
+				{#if item.text}
+					{#if item.role === 'agent'}
+						<!-- Models format, and rendering their asterisks literally made
+						     every list of recommendations read as `- **Tote**`. The
+						     renderer escapes every character before it adds a tag, so
+						     nothing a model writes can become HTML here. The Consumer's
+						     own words below are shown exactly as typed. -->
+						<div class="bubble md">{@html renderMarkdown(item.text)}</div>
+					{:else}
+						<div class="bubble">{item.text}</div>
+					{/if}
+				{/if}
+				{#if item.widget}
+					<!-- What the agent offered to do next, as something to tap or fill
+					     in. Validated on the way in; the shop still refuses anything it
+					     does not like, and a spend step can never be one of these. -->
+					<div class="widget">
+						{#if item.widget.kind === 'chips'}
+							<div class="chips">
+								{#each item.widget.options as chip, c (item.key + c)}
+									<form method="POST" action="?/send" use:enhance={onWidgetSubmit}>
+										<input type="hidden" name="text" value={chip} />
+										<button class="chip" type="submit" disabled={sending}>{chip}</button>
+									</form>
+								{/each}
+							</div>
+						{:else if item.widget.kind === 'choices'}
+							<form method="POST" action="?/widget" use:enhance={onWidgetSubmit}>
+								<input type="hidden" name="message" value={item.id} />
+								{#if item.widget.title}<p class="widget-title">{item.widget.title}</p>{/if}
+								<div class="chips">
+									{#each item.widget.options as option, o (item.key + o)}
+										<button
+											class="chip"
+											type="submit"
+											name={item.widget.arg}
+											value={option.value}
+											disabled={sending}
+										>
+											{option.label}
+											{#if deliveryCosts.has(option.value)}
+												<span class="meta mono">
+													{rupees(deliveryCosts.get(option.value)?.cost_minor ?? 0)} ·
+													{deliveryCosts.get(option.value)?.eta_days} days
+												</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
+							</form>
+						{:else}
+							<form method="POST" action="?/widget" use:enhance={onWidgetSubmit}>
+								<input type="hidden" name="message" value={item.id} />
+								<p class="widget-title">{item.widget.title}</p>
+								<div class="fields">
+									{#each item.widget.fields as field, f (item.key + f)}
+										<label>
+											<span class="meta">{field.label}</span>
+											<input
+												name={field.name}
+												type={field.kind}
+												placeholder={field.placeholder}
+												required={field.required}
+												autocomplete="off"
+											/>
+										</label>
+									{/each}
+								</div>
+								<p class="meta">
+									Sent to {data.shop?.name ?? 'the shop'} as you typed it. Nothing is charged.
+								</p>
+								<button class="tap" type="submit" disabled={sending}>{item.widget.submit}</button>
+							</form>
+						{/if}
+					</div>
+				{/if}
+			</div>
+		{:else}
+			<details class="tool" style="--i:{i}">
+				<summary class="mono">{item.name}</summary>
+				<!-- The exact request JSON. A card that summarised could be wrong, and
+				     the Consumer would have no way to tell. -->
+				<pre class="mono">{JSON.stringify(item.request, null, 2)}</pre>
+				{#if item.response}
+					<pre class="mono" style="color:var(--muted)">{JSON.stringify(item.response, null, 2)}</pre>
+				{/if}
+			</details>
+			{#if item.response?.results?.length}
+				<div class="results">
+					{#each item.response.results as result, j (item.key + j)}
+						<div class="result" style="--i:{i}">
+							{#if result.image}
+								<img src={onShop(result.image)} alt={result.name} loading="lazy" />
+							{/if}
+							<div class="result-body">
+								<div style="font-weight:600">{result.name}</div>
+								<div class="mono meta">from {rupees(result.from_minor)}</div>
+								<span class="pill" data-b={result.availability}>{result.availability}</span>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+			{#if item.response?.quote}
+				<!-- The shop's own Quote, line for line. Nothing on this page adds up. -->
+				<table class="quote mono">
+					<tbody>
+						{#each item.response.quote.lines as line, k (item.key + k)}
+							<tr>
+								<td>{line.sku} × {line.qty}</td>
+								<td>{rupees(line.line_total_minor)}</td>
+							</tr>
+						{/each}
+						{#each item.response.quote.tax_lines as tax, t (item.key + t)}
+							<tr class="tax">
+								<td>{tax.label}</td>
+								<td>{rupees(tax.amount_minor)}</td>
+							</tr>
+						{/each}
+						<tr class="total">
+							<td>Total</td>
+							<td>{rupees(item.response.quote.total_minor)}</td>
+						</tr>
+					</tbody>
+				</table>
+			{/if}
+			{#if item.response?.approve_url}
+				<div class="notice">
+					<p style="margin:0">
+						The shop wants {rupees(item.response.total_minor)} for
+						<code>{item.response.order_id}</code>.
+					</p>
+					<p class="meta" style="margin:var(--s-1) 0 var(--s-2)">
+						You approve this on the shop's own page. I hold no payment credential and cannot
+						complete it.
+					</p>
+					<a class="tap" href={item.response.approve_url} rel="noopener">
+						Approve {rupees(item.response.total_minor)} at {data.shop?.domain}
+					</a>
+				</div>
+			{/if}
+		{/if}
 	{/each}
 
-	{#if latest?.response?.results?.length}
-		<div class="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(9rem,1fr));gap:0.75rem;margin:0.5rem 0 1rem">
-			{#each latest.response.results as result (result.group)}
-				<div class="tool" style="padding:0.5rem">
-					{#if result.image}
-						<img src={onShop(result.image)} alt={result.name} loading="lazy"
-							style="width:100%;aspect-ratio:1;object-fit:cover;background:var(--raised)" />
-					{/if}
-					<div style="margin-top:0.5rem"><strong>{result.name}</strong></div>
-					<div class="mono" style="font-size:0.8125rem;color:var(--comment)">
-						from {rupees(result.from_minor)} · {result.availability}
-					</div>
-				</div>
-			{/each}
+	{#if sending || deciding}
+		<!-- Miro's turn is being composed: the same three dots the send
+		     button shows, now in a reply bubble so the wait has a place. -->
+		<div class="row" data-who="agent" style="--i:{timeline.length}" use:follow aria-label="Miro is typing">
+			<span class="who">Miro</span>
+			<div class="bubble"><span class="thinking" aria-hidden="true"><i></i><i></i><i></i></span></div>
 		</div>
 	{/if}
 
-	{#if latest?.response?.quote}
-		<!-- The shop's own Quote, line for line. Nothing on this page adds up. -->
-		<table class="tool" style="width:100%;border-collapse:collapse;margin-bottom:1rem">
-			<tbody>
-				{#each latest.response.quote.lines as line (line.sku)}
-					<tr><td class="mono">{line.sku} × {line.qty}</td>
-						<td class="mono" style="text-align:right">{rupees(line.line_total_minor)}</td></tr>
-				{/each}
-				{#each latest.response.quote.tax_lines as tax (tax.kind)}
-					<tr style="color:var(--comment)"><td class="mono">{tax.label}</td>
-						<td class="mono" style="text-align:right">{rupees(tax.amount_minor)}</td></tr>
-				{/each}
-				<tr><td class="mono"><strong>Total</strong></td>
-					<td class="mono" style="text-align:right"><strong>{rupees(latest.response.quote.total_minor)}</strong></td></tr>
-			</tbody>
-		</table>
-	{/if}
-
-	{#if approval}
-		<div class="tool" style="border-color:var(--accent);padding:1rem;margin-bottom:1rem">
-			<p style="margin-top:0">The shop wants {rupees(approval.total_minor)} for
-				<code class="mono">{approval.order_id}</code>.</p>
-			<p class="mono" style="font-size:0.8125rem;color:var(--comment)">
-				You approve this on the shop’s own page. I hold no payment credential and
-				cannot complete it.
-			</p>
-			<a class="tap" href={approval.approve_url} rel="noopener"
-				style="display:inline-block;padding:0.75rem 1rem;border:1px solid var(--accent);text-decoration:none">
-				Approve {rupees(approval.total_minor)} at {data.shop?.domain}
-			</a>
+	{#if basket?.length}
+		<!-- The shop's basket, line for line, with the two things a Consumer
+		     should never have to talk an agent into: removing a line they did not
+		     ask for, and starting over. No prices — this panel counts nothing. -->
+		<div class="basket">
+			<p class="widget-title">In the basket</p>
+			{#each basket as line, b (line.sku + b)}
+				<div class="basket-line">
+					<span class="mono">{line.sku} × {line.qty}</span>
+					<form method="POST" action="?/basket" use:enhance={onWidgetSubmit}>
+						<input type="hidden" name="sku" value={line.sku} />
+						<button class="link" type="submit" disabled={sending}>Remove</button>
+					</form>
+				</div>
+			{/each}
+			<form method="POST" action="?/basket" use:enhance={onWidgetSubmit}>
+				<button class="link" type="submit" disabled={sending}>Start over</button>
+			</form>
 		</div>
 	{/if}
 
 	{#if data.pending}
-		<div class="tool" style="border-color:var(--accent);padding:1rem;margin-bottom:1rem">
-			<h2 style="font-size:1rem;margin-top:0">
+		<div class="notice">
+			<h2 style="font-size:1rem">
 				{data.pending.name === 'start-checkout' || data.pending.name === 'place-order'
 					? 'This step builds a paid basket'
 					: `Allow ${data.pending.name}?`}
@@ -114,45 +363,140 @@
 				<!-- Grants a SCOPE and never an amount: no total exists yet, and a
 				     prompt that reads like an amount approval teaches the Consumer
 				     to click through the tap that is one. -->
-				<p>No amount is approved here. You will see the exact total, from the shop, and
-					approve it on the shop’s own page.</p>
+				<p class="meta" style="margin-top:var(--s-1)">
+					No amount is approved here. You will see the exact total, from the shop, and approve
+					it on the shop's own page.
+				</p>
+			{:else if data.pendingNote}
+				<!-- Plain words beside the exact JSON, never instead of it: a note
+				     that replaced the request could be wrong with no way to tell. -->
+				<p class="meta" style="margin-top:var(--s-1)">{data.pendingNote}</p>
 			{/if}
-			<pre class="mono" style="background:var(--bg-sunken);padding:0.75rem;overflow-x:auto">{JSON.stringify(data.pending.args, null, 2)}</pre>
-			<form method="POST" action="?/decide" use:enhance style="display:flex;gap:0.5rem;flex-wrap:wrap">
-				<button name="verdict" value="allow-once" type="submit">Allow once</button>
+			{#if data.pendingHasArgs}
+				<!-- Shown only when the args carry something worth reading.
+				     An empty `{"id": ""}` is noise, not transparency: the note
+				     above already says what the call does. -->
+				<pre class="mono">{JSON.stringify(data.pending.args, null, 2)}</pre>
+			{/if}
+			<form
+				method="POST"
+				action="?/decide"
+				use:enhance={({ formData }) => {
+					// Answer first, then run: the buttons die instantly and a
+					// working state holds the prompt's place until `update()`
+					// lands with whatever the tool and the next turns produced.
+					deciding = String(formData.get('verdict') ?? '');
+					return async ({ update }) => {
+						try {
+							await update();
+						} finally {
+							deciding = null;
+						}
+					};
+				}}
+				class="actions"
+			>
+				<button name="verdict" value="allow-once" type="submit" disabled={deciding !== null}>
+					Allow once
+				</button>
 				{#if data.pending.name === 'search' || data.pending.name === 'read-item' || data.pending.name === 'order-status'}
-					<button class="secondary" name="verdict" value="always" type="submit">Always allow (reads only)</button>
+					<button
+						class="secondary"
+						name="verdict"
+						value="always"
+						type="submit"
+						disabled={deciding !== null}
+					>
+						Always allow (reads only)
+					</button>
 				{/if}
-				<button class="secondary" name="verdict" value="declined" type="submit">Decline</button>
+				<button
+					class="secondary"
+					name="verdict"
+					value="declined"
+					type="submit"
+					disabled={deciding !== null}
+				>
+					Decline
+				</button>
 			</form>
+			{#if deciding}
+				<p class="meta" style="margin-top:var(--s-1)" aria-live="polite">
+					<span class="thinking" aria-hidden="true"><i></i><i></i><i></i></span>
+					{deciding === 'declined' ? 'Declining…' : `Running ${data.pending.name} — one moment…`}
+				</p>
+			{/if}
 		</div>
 	{/if}
 
-	{#each calls as call (call.at + call.name)}
-		<details class="tool">
-			<summary class="mono">{call.name}</summary>
-			<!-- The exact request JSON. A card that summarised could be wrong, and
-			     the Consumer would have no way to tell. -->
-			<pre class="mono">{JSON.stringify(call.request, null, 2)}</pre>
-			{#if call.response}
-				<pre class="mono" style="color:var(--comment)">{JSON.stringify(call.response, null, 2)}</pre>
-			{/if}
-		</details>
-	{/each}
-
-	<form method="POST" action="?/send" use:enhance={() => { sending = true; return async ({ update }) => { await update(); sending = false; }; }}
-		style="display:flex;gap:0.5rem;margin-top:1.5rem;position:sticky;bottom:0;background:var(--bg);padding:0.75rem 0">
-		<input name="text" placeholder="What are you looking for?" autocomplete="off" required
-			style="flex:1;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
-		<button type="submit" disabled={sending}>{sending ? 'Asking…' : 'Send'}</button>
-	</form>
-
-	<div style="display:flex;gap:1rem;align-items:baseline;flex-wrap:wrap">
-		<p class="mono" style="color:var(--comment);font-size:0.8125rem;margin:0">
-			driver: {data.driver} · {data.tools.length} tools · this agent holds no payment credential
-		</p>
-		<form method="POST" action="?/reset" use:enhance>
-			<button class="secondary" type="submit" style="font-size:0.8125rem">Reset thread</button>
+	<div class="composer">
+		<form
+			method="POST"
+			action="?/send"
+			use:enhance={({ formData }) => {
+				// Echo first, then send: the message reflects instantly and the
+				// typing bubble holds Miro's place until `update()` lands.
+				optimisticText = String(formData.get('text') ?? '').trim() || null;
+				sending = true;
+				resetComposer();
+				return async ({ update }) => {
+					try {
+						await update();
+					} finally {
+						sending = false;
+						optimisticText = null;
+					}
+				};
+			}}
+		>
+			<div class="composer-field">
+				<textarea
+					name="text"
+					rows="1"
+					placeholder="What are you looking for?"
+					autocomplete="off"
+					required
+					bind:value={draft}
+					bind:this={composerBox}
+					onkeydown={onKeydown}
+					oninput={autogrow}
+				></textarea>
+				<button class="send" type="submit" disabled={sending || !draft.trim()} aria-label="Send message">
+					{#if sending}
+						<!-- Three dots rather than a spinner: the agent is composing a
+						     turn, not blocking on an unknown wait. -->
+						<span class="thinking" aria-hidden="true"><i></i><i></i><i></i></span>
+					{:else}
+						<!-- Arrow, not a word: at this size a label reads as a second
+						     button competing with the field. -->
+						<svg
+							viewBox="0 0 16 16"
+							width="18"
+							height="18"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.8"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M8 13.5V2.5M3.5 7 8 2.5 12.5 7" />
+						</svg>
+					{/if}
+				</button>
+			</div>
 		</form>
+
+		<div class="composer-hint">
+			<!-- Behaviour first, implementation on request: the driver string is
+			     one disclosure away instead of sitting in the conversation. -->
+			<details class="agent-meta">
+				<summary>Miro · buyer agent · {data.tools.length} tools · no payment credential</summary>
+				<p class="mono">driver: {data.driver}</p>
+			</details>
+			<form method="POST" action="?/reset" use:enhance>
+				<button class="link" type="submit">Reset thread</button>
+			</form>
+		</div>
 	</div>
 </div>

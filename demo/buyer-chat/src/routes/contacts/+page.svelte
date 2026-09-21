@@ -3,14 +3,22 @@
 	let { data, form }: PageProps = $props();
 </script>
 
-<svelte:head><title>Shops — Duckie</title></svelte:head>
+<svelte:head><title>Shops Miro knows</title></svelte:head>
 <div class="thread">
-	<h1 style="font-size:1.25rem;font-weight:600">Shops</h1>
-	<p>Paste a shop’s address. I fetch its card, check the key, and remember it.</p>
+	<h1 style="font-size:1.25rem">Shops</h1>
+	<p class="meta" style="margin-top:var(--s-1)">
+		Paste a shop's address. I fetch its card, check the key, and remember it.
+	</p>
 
-	<form method="POST" action="?/add" style="display:flex;gap:0.5rem;flex-wrap:wrap">
-		<input name="url" placeholder="https://shop.example/.well-known/agent-commerce.json" class="mono"
-			style="flex:1;min-width:20rem;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--raised);color:inherit" />
+	<form method="POST" action="?/add" class="add">
+		<label class="field">
+			<span class="meta">Card address</span>
+			<input
+				name="url"
+				class="mono"
+				placeholder="https://shop.example/.well-known/agent-commerce.json"
+			/>
+		</label>
 		<button type="submit">Add shop</button>
 	</form>
 
@@ -18,12 +26,12 @@
 		<p class="mono" style="color:{form.code ? 'var(--accent)' : 'var(--ok)'}">{form.message}</p>
 	{/if}
 
-	<ul style="list-style:none;padding:0;margin-top:1.5rem">
+	<ul class="contacts">
 		{#each data.contacts as contact (contact.domain)}
-			<li class="tool" style="margin-bottom:0.5rem;display:flex;gap:1rem;align-items:center">
+			<li class="contact">
 				<div>
 					<strong>{contact.name}</strong>
-					<div class="mono" style="color:var(--comment);font-size:0.8125rem">
+					<div class="mono meta">
 						{contact.domain} · {contact.protocols.join(', ') || 'no protocols listed'}
 					</div>
 				</div>
@@ -33,7 +41,45 @@
 				</form>
 			</li>
 		{:else}
-			<li style="color:var(--comment)">No shops yet.</li>
+			<li class="empty meta">
+				No shops yet. Add one above and Miro can start searching it.
+			</li>
 		{/each}
 	</ul>
 </div>
+
+<style>
+	.add {
+		display: flex;
+		gap: var(--s-1);
+		flex-wrap: wrap;
+		align-items: flex-end;
+		margin-top: var(--s-3);
+	}
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		flex: 1 1 22rem;
+		min-width: 0;
+	}
+
+	.contacts {
+		list-style: none;
+		padding: 0;
+		margin-top: var(--s-4);
+	}
+	.contact {
+		display: flex;
+		gap: var(--s-3);
+		align-items: center;
+		padding: var(--s-2);
+		border: 1px solid var(--line);
+		border-radius: var(--r-surface);
+		background: var(--bg-raised);
+		margin-bottom: var(--s-1);
+	}
+	.empty {
+		padding: var(--s-4) 0;
+	}
+</style>

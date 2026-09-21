@@ -16,17 +16,33 @@ import {
 import {
 	ALWAYS_ALLOWABLE,
 	assertAddonHasParent,
+	assertDestinationFromConsumer,
 	assertResolvedVariant,
 	boundedSteps,
 	MAX_STEPS,
+	consentNote,
+	hasMeaningfulArgs,
 	permissionRequest,
 	requiresFreshConsent,
 	SCOPES,
+	SYSTEM_PROMPT,
 	ToolError,
 	TOOLS,
+	TOOL_SCHEMAS,
 	validate
 } from '../src/lib/tools/loop.ts';
-import { MalformedPlan, parseCalls, SCRIPTED_SEQUENCE, ScriptedDriver } from '../src/lib/model/driver.ts';
+import {
+	isOffer,
+	MalformedPlan,
+	parseCalls,
+	SCRIPTED_SEQUENCE,
+	ScriptedDriver,
+	type Proposal
+} from '../src/lib/model/driver.ts';
+
+/** A step's identity for comparison: the tool it calls, or what it asks for. */
+const describeStep = (step: Proposal): string =>
+	isOffer(step) ? `ask:${step.widget.kind}` : step.name;
 
 /** The §16.11 worked example, as the Merchant signs it. */
 const QUOTE: SignedQuote = {
@@ -169,12 +185,118 @@ describe('the scripted driver', () => {
 		for (let i = 0; i < SCRIPTED_SEQUENCE.length; i += 1) {
 			emitted.push(...(await driver.plan()));
 		}
-		expect(emitted.map((c) => c.name)).toEqual(SCRIPTED_SEQUENCE.map((c) => c.name));
+		expect(emitted.map(describeStep)).toEqual(SCRIPTED_SEQUENCE.map(describeStep));
+		// The address and the Contact Point are asked for, never pinned: a demo
+		// that ships a literal address is where an invented one comes from.
+		const asked = SCRIPTED_SEQUENCE.filter(isOffer)
+			.map((offer) => offer.widget)
+			.filter((widget) => widget.kind === 'form');
+		expect(asked.map((widget) => widget.tool)).toEqual(['set-destination', 'set-contact']);
 		expect(await driver.plan()).toEqual([]);
 	});
 
 	it('is the default, so the demo runs with no model at all', () => {
 		expect(new ScriptedDriver().name).toBe('scripted');
+	});
+});
+
+describe('consent notes', () => {
+	it('explains an empty choose-fulfillment as listing, not choosing', () => {
+		const note = consentNote({ name: 'choose-fulfillment', args: { id: '' } });
+		expect(note).toMatch(/which delivery options/i);
+		expect(note).toMatch(/chooses nothing yet/i);
+	});
+
+	it('names the option when one is picked', () => {
+		const note = consentNote({ name: 'choose-fulfillment', args: { id: 'rest-of-india' } });
+		expect(note).toMatch(/rest-of-india/);
+		expect(note).toMatch(/approve/i);
+	});
+
+	it('says what an add-line puts in the basket', () => {
+		const note = consentNote({ name: 'add-line', args: { sku: 'SD-TOTE-BLK-M', qty: 2 } });
+		expect(note).toMatch(/SD-TOTE-BLK-M/);
+		expect(note).toMatch(/2/);
+		expect(note).toMatch(/no money moves/i);
+	});
+
+	it('leaves the spend steps to their own copy', () => {
+		expect(consentNote({ name: 'start-checkout', args: {} })).toBeNull();
+		expect(consentNote({ name: 'place-order', args: {} })).toBeNull();
+	});
+
+	it('never quotes, totals, or promises a price', () => {
+		const samples: Record<string, Record<string, unknown>> = {
+			search: { query: 'tote' },
+			'read-item': { group: 'tote' },
+			'add-line': { sku: 'SD-TOTE-BLK-M', qty: 1 },
+			'remove-line': { sku: 'SD-TOTE-BLK-M' },
+			'set-destination': { destination: {} },
+			'set-contact': { contact: {} },
+			'choose-fulfillment': { id: '' },
+			'apply-public-code': { code: 'DIWALI10' },
+			'order-status': { order_id: 'o1' },
+			'cancel-order': { order_id: 'o1' },
+			'request-refund': { order_id: 'o1' }
+		};
+		for (const tool of TOOLS) {
+			const note = consentNote({ name: tool, args: samples[tool] ?? {} });
+			expect(note ?? '', tool).not.toMatch(/₹/);
+		}
+	});
+
+	it('hides args that carry nothing worth reading', () => {
+		// The reported case: an empty choose-fulfillment shows the note, not noise.
+		expect(hasMeaningfulArgs({ id: '' })).toBe(false);
+		expect(hasMeaningfulArgs({})).toBe(false);
+		expect(hasMeaningfulArgs({ id: '   ' })).toBe(false);
+		expect(hasMeaningfulArgs({ destination: { line1: '', city: null } })).toBe(false);
+		expect(hasMeaningfulArgs(null)).toBe(false);
+	});
+
+	it('keeps args that carry anything worth reading', () => {
+		expect(hasMeaningfulArgs({ id: 'rest-of-india' })).toBe(true);
+		expect(hasMeaningfulArgs({ sku: 'SD-TOTE-BLK-M', qty: 1 })).toBe(true);
+		// A 0 or false is a value, not an absence — hiding it would mislead.
+		expect(hasMeaningfulArgs({ qty: 0 })).toBe(true);
+		expect(hasMeaningfulArgs({ destination: { city: 'Chennai' } })).toBe(true);
+	});
+});
+
+describe('catalogue browsing', () => {
+	it('lets search run with no query, for browsing the whole catalogue', () => {
+		const parameters = TOOL_SCHEMAS.search.parameters as { required?: string[] };
+		expect(parameters.required ?? []).not.toContain('query');
+		expect(TOOL_SCHEMAS.search.description).toMatch(/empty/i);
+	});
+
+	it('tells the model to browse first for gifts and occasions', () => {
+		expect(SYSTEM_PROMPT).toMatch(/birthday gift/i);
+		expect(SYSTEM_PROMPT).toMatch(/empty query/i);
+	});
+
+	it('forbids recommending products it has not seen', () => {
+		expect(SYSTEM_PROMPT).toMatch(/never recommend a\s+product you have not seen/i);
+	});
+
+	it('only acts on what the shopper asked for or accepted', () => {
+		expect(SYSTEM_PROMPT).toMatch(/only do what the shopper asked for or accepted/i);
+		expect(SYSTEM_PROMPT).toMatch(/stop and ask/i);
+	});
+
+	it('orders the flow: cart, then destination, then fulfillment, then quote', () => {
+		expect(SYSTEM_PROMPT).toMatch(/build the cart completely first/i);
+	});
+
+	it('forbids inventing a destination, placeholder or otherwise', () => {
+		expect(SYSTEM_PROMPT).toMatch(/not\s+even a placeholder/i);
+	});
+
+	it('offers a consented fresh start', () => {
+		expect(SCOPES['clear-basket']).toBe('build-basket');
+		const parameters = TOOL_SCHEMAS['clear-basket'].parameters as { required?: unknown };
+		expect(parameters.required ?? []).toEqual([]);
+		expect(consentNote({ name: 'clear-basket', args: {} })).toMatch(/starting over/i);
 	});
 });
 
@@ -198,5 +320,35 @@ describe('refusal copy', () => {
 
 	it('falls back rather than inventing copy for an unknown code', () => {
 		expect(explain('brand-new-code')).toMatch(/brand-new-code/);
+	});
+});
+
+
+describe('an address the shopper never gave is never sent', () => {
+	const SAID = 'I want a tote and a phone charm. Send it to 12 Church Street, Bengaluru 560001.';
+	const GIVEN = {
+		destination: { line1: '12 Church Street', city: 'Bengaluru', state: 'KA', postal_code: '560001' }
+	};
+
+	it('passes an address the shopper typed', () => {
+		expect(() => assertDestinationFromConsumer(GIVEN, SAID)).not.toThrow();
+	});
+
+	it('ignores punctuation and spacing the shopper used', () => {
+		const spaced = { destination: { ...GIVEN.destination, postal_code: '560001' } };
+		expect(() => assertDestinationFromConsumer(spaced, 'ship to 12, Church Street — 560 001')).not.toThrow();
+	});
+
+	it('refuses a placeholder the model invented', () => {
+		const invented = {
+			destination: { line1: '123 Your Street', city: 'Bangalore', state: 'KA', postal_code: '560001' }
+		};
+		expect(() => assertDestinationFromConsumer(invented, SAID)).toThrow(ToolError);
+	});
+
+	it('refuses when the shopper has given no address at all', () => {
+		expect(() => assertDestinationFromConsumer(GIVEN, 'I want a tote and a phone charm.')).toThrow(
+			/address you have given me/
+		);
 	});
 });

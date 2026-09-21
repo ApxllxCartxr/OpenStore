@@ -12,38 +12,70 @@
  * laptop.
  */
 import { SYSTEM_PROMPT, TOOL_SCHEMAS } from '../tools/loop.ts';
+import type { Widget } from '../widgets.ts';
 
 export type ToolCall = { name: string; args: Record<string, unknown> };
+
+/** Something to say plus an interface to say it with: the driver asking the
+ *  Consumer for what only the Consumer has. A driver that guessed instead
+ *  would be inventing an address, which is the one thing none of them may do. */
+export type Offer = { say: string; widget: Widget };
+
+/** What a driver may propose: a call to make, or a thing to ask. */
+export type Proposal = ToolCall | Offer;
+
+export function isOffer(proposal: Proposal): proposal is Offer {
+	return 'say' in proposal;
+}
 
 export type Message = { role: 'consumer' | 'agent'; text: string };
 
 export interface ModelDriver {
 	readonly name: string;
-	plan(messages: Message[], tools: string[]): Promise<ToolCall[]>;
+	plan(messages: Message[], tools: string[]): Promise<Proposal[]>;
 }
 
 /** §16.9's pinned sequence, exactly. */
-export const SCRIPTED_SEQUENCE: ToolCall[] = [
+export const SCRIPTED_SEQUENCE: Proposal[] = [
 	{ name: 'search', args: { query: 'black tote' } },
 	{ name: 'read-item', args: { group: 'tote' } },
 	{ name: 'add-line', args: { sku: 'SD-TOTE-BLK-M', qty: 1 } },
 	{ name: 'add-line', args: { sku: 'SD-GIFTWRAP', qty: 1, parent: 'SD-TOTE-BLK-M' } },
 	{ name: 'add-line', args: { sku: 'SD-CHARMBAR-SEAT', qty: 1 } },
+	// The address and the Contact Point are **asked for, not pinned.** They used
+	// to be literals here — a Mumbai address nobody in the conversation had
+	// given — and a pinned sequence is exactly where an invented address comes
+	// from when the demo is the thing being copied. Asking is also the shorter
+	// demo: it shows the widget the real model path uses.
 	{
-		name: 'set-destination',
-		args: {
-			destination: {
-				line1: 'Dadar West',
-				city: 'Mumbai',
-				state: 'MH',
-				postal_code: '400028',
-				country: 'IN'
-			}
+		say: 'Where should this go?',
+		widget: {
+			kind: 'form',
+			title: 'Delivery address',
+			submit: 'Use this address',
+			tool: 'set-destination',
+			group: 'destination',
+			fields: [
+				{ name: 'line1', label: 'Street address', kind: 'text', required: true, placeholder: '' },
+				{ name: 'city', label: 'City', kind: 'text', required: true, placeholder: '' },
+				{ name: 'state', label: 'State code', kind: 'text', required: true, placeholder: 'KA' },
+				{ name: 'postal_code', label: 'PIN code', kind: 'text', required: true, placeholder: '' }
+			]
 		}
 	},
 	{
-		name: 'set-contact',
-		args: { contact: { phone: '+919000000001', email: 'demo@spoiledduckie.test' } }
+		say: 'And where should the shop send the confirmation?',
+		widget: {
+			kind: 'form',
+			title: 'Contact point',
+			submit: 'Save',
+			tool: 'set-contact',
+			group: 'contact',
+			fields: [
+				{ name: 'email', label: 'Email', kind: 'email', required: false, placeholder: '' },
+				{ name: 'phone', label: 'Phone', kind: 'tel', required: false, placeholder: '' }
+			]
+		}
 	},
 	{ name: 'choose-fulfillment', args: { id: 'rest-of-india' } },
 	{ name: 'start-checkout', args: {} },
@@ -55,11 +87,11 @@ export class ScriptedDriver implements ModelDriver {
 	readonly name = 'scripted';
 	#step = 0;
 
-	async plan(): Promise<ToolCall[]> {
-		const call = SCRIPTED_SEQUENCE[this.#step];
-		if (!call) return [];
+	async plan(): Promise<Proposal[]> {
+		const step = SCRIPTED_SEQUENCE[this.#step];
+		if (!step) return [];
 		this.#step += 1;
-		return [call];
+		return [step];
 	}
 
 	reset(): void {

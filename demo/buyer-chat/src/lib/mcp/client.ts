@@ -14,6 +14,8 @@
  * `place-order` returns a link for the Consumer to approve on the shop's own
  * origin. Nothing here holds a payment credential.
  */
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { agentProfile, loadOrCreate } from '../identity/keys.ts';
 
 export type ToolResult = Record<string, unknown>;
@@ -29,7 +31,49 @@ export class ShopError extends Error {
 
 type Session = { token: string; expiresAt: number; agentId: string };
 
+/**
+ * Tokens live beside the agent's key, on the same volume and for the same
+ * reason: **a restart is not a new agent.**
+ *
+ * Held only in memory, every rebuilt container re-registered — and
+ * registration is capped at five an hour per IP (§16.8), so a few rebuilds
+ * during a working session left the chat unable to reach the shop at all,
+ * reported to the shopper as "the shop is rate-limiting searches". The key
+ * already survives a `docker compose down`; the token it was issued for should
+ * not be the thing that does not.
+ *
+ * Not in the session database: that is threads and display, and a bearer token
+ * is neither.
+ */
+const TOKEN_PATH = process.env.CHAT_TOKEN_PATH ?? '/data/agent-tokens.json';
+
 const sessions = new Map<string, Session>();
+let loaded = false;
+
+function remember(): void {
+	if (loaded) return;
+	loaded = true;
+	try {
+		const stored = JSON.parse(readFileSync(TOKEN_PATH, 'utf8')) as Record<string, Session>;
+		for (const [domain, session] of Object.entries(stored)) {
+			if (session?.token && session.expiresAt > Date.now()) sessions.set(domain, session);
+		}
+	} catch {
+		// No file, or one this build cannot read. Registering is the fallback and
+		// it always works — this cache is an optimisation, never a dependency.
+	}
+}
+
+function persist(): void {
+	try {
+		mkdirSync(dirname(TOKEN_PATH), { recursive: true });
+		// 0600, like the key: a token is a credential to act as this agent.
+		writeFileSync(TOKEN_PATH, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
+	} catch {
+		// A read-only volume costs this process nothing but a re-registration on
+		// its next start. Never a reason to fail the call in flight.
+	}
+}
 
 /** Where the chat tells the shop to fetch its profile from.
  *
@@ -80,10 +124,12 @@ async function register(domain: string): Promise<Session> {
 		expiresAt: Date.parse(String(body.expires_at)) || Date.now() + 60_000
 	};
 	sessions.set(domain, session);
+	persist();
 	return session;
 }
 
 async function sessionFor(domain: string): Promise<Session> {
+	remember();
 	const held = sessions.get(domain);
 	// A minute of headroom: a token that expires mid-call fails the call rather
 	// than the conversation.
@@ -100,7 +146,8 @@ export async function agentId(): Promise<string> {
 export async function call(
 	domain: string,
 	tool: string,
-	args: Record<string, unknown> = {}
+	args: Record<string, unknown> = {},
+	retry = true
 ): Promise<ToolResult> {
 	const session = await sessionFor(domain);
 	const response = await fetch(`${dial(domain)}/agent/mcp`, {
@@ -111,6 +158,16 @@ export async function call(
 		},
 		body: JSON.stringify({ tool, input: args })
 	});
+	// A token the shop no longer knows — it restarted, or the token expired
+	// early — is worth exactly one fresh registration, not a refusal the
+	// shopper has to act on. Once: a shop that refuses the new token too is
+	// refusing this agent, and retrying that is how a rate limit is spent.
+	if (response.status === 401 && retry) {
+		sessions.delete(domain);
+		persist();
+		await register(domain);
+		return call(domain, tool, args, false);
+	}
 	const body = (await response.json()) as Record<string, any>;
 	if (!response.ok) {
 		// The shop's own reason, verbatim. An agent that rewrites a refusal into

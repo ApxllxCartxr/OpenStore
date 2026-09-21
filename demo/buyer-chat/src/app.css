@@ -1,44 +1,760 @@
 /* Claude-shaped: a centred 68ch column, message rows, streaming text.
    `--accent-2` is primary here so chat and shop never look like the same app
-   (§4). Same tokens, different weighting. */
+   (§4). Same tokens, different weighting.
+
+   The shape follows the convention the Consumer already knows from an assistant
+   UI: the human's turn is a contained bubble on the right, the agent's turn is
+   unbounded text on the left. Reversing that reads as a support-ticket form. */
 @import 'tailwindcss';
 @import '../../../design/tokens.css';
 
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); }
+:root {
+	--s-1: 0.5rem;
+	--s-2: 0.75rem;
+	--s-3: 1rem;
+	--s-4: 1.5rem;
+	--s-5: 2.5rem;
 
-.mono, code, .price, .sku { font-family: 'Iosevka Term SS08', ui-monospace, monospace;
-  font-variant-numeric: tabular-nums; }
-.chat-name { font-family: 'EB Garamond', Georgia, serif; }
+	/* Controls take `--radius`, surfaces take `--radius-lg`, and the composer
+	   and message bubbles take the one larger radius that makes a chat read as
+	   a chat. One rule, three steps, no exceptions below. */
+	--r-control: var(--radius);
+	--r-surface: var(--radius-lg);
+	--r-bubble: 16px;
+	--ease: cubic-bezier(0.16, 1, 0.3, 1);
+	--lift: color-mix(in srgb, var(--fg) 8%, transparent);
+}
 
-.thread { max-width: 68ch; margin: 0 auto; padding: 1.5rem 1rem 8rem; }
-.row { margin-bottom: 1.5rem; }
-.row[data-who='consumer'] { text-align: right; }
-.bubble { display: inline-block; text-align: left; max-width: 90%; padding: 0.75rem 1rem;
-  border: 1px solid var(--line); background: var(--raised); }
-.row[data-who='consumer'] .bubble { background: var(--bg-sunken); }
+* {
+	box-sizing: border-box;
+}
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+}
 
-/* Tool-call cards expand to the exact request JSON — the Consumer can always
-   see precisely what was asked for, which is the difference between a tool call
-   and a black box. */
-.tool { border: 1px solid var(--line); background: var(--bg-sunken); padding: 0.5rem 0.75rem; }
-.tool summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
-.tool pre { overflow-x: auto; font-size: 0.8125rem; }
+.mono,
+code,
+.price,
+.sku {
+	font-family: 'Iosevka Term SS08', ui-monospace, monospace;
+	font-variant-numeric: tabular-nums;
+}
+.chat-name {
+	font-family: 'EB Garamond', Georgia, serif;
+	letter-spacing: -0.01em;
+}
 
-.modal-scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: 1rem; }
-.modal { background: var(--raised); border: 1px solid var(--line); padding: 1.25rem; max-width: 40rem; width: 100%; }
+h1,
+h2,
+h3 {
+	font-weight: 600;
+	line-height: 1.2;
+	letter-spacing: -0.01em;
+	margin: 0;
+}
+.meta {
+	font-size: var(--t-caption);
+	color: var(--muted);
+}
 
-button, .button { min-height: 44px; padding: 0 1rem; border: 1px solid var(--line);
-  background: var(--accent-2); color: var(--paper); font: inherit; cursor: pointer; }
-button.secondary { background: var(--raised); color: var(--ink); }
-button[disabled] { background: var(--bg-sunken); color: var(--comment); cursor: not-allowed; }
-:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+/* ---------------------------------------------------------------
+   Shell
+   --------------------------------------------------------------- */
+.topbar {
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	background: var(--bg);
+	border-bottom: 1px solid var(--line);
+}
+.topbar-inner {
+	max-width: 46rem;
+	margin: 0 auto;
+	padding: var(--s-2) var(--s-3);
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--s-1) var(--s-2);
+	align-items: baseline;
+}
+.topbar a {
+	color: var(--muted);
+	text-decoration: none;
+}
+.topbar a:hover {
+	color: var(--fg);
+	text-decoration: underline;
+}
+/* The one thing in the bar you press. A quiet outline rather than a filled
+   button: it is a download beside the conversation, not a step in it. */
+.topbar-action {
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	padding: 0.15rem var(--s-2);
+	white-space: nowrap;
+}
+.topbar-action:hover {
+	border-color: var(--muted);
+	text-decoration: none;
+}
 
-.pill { display: inline-block; padding: 0.125rem 0.5rem; border: 1px solid var(--line); font-size: 0.8125rem; }
-.pill[data-b='sold-out'] { color: var(--comment); }
-.pill[data-b='low-stock'] { color: var(--accent); }
-.pill[data-b='in-stock'] { color: var(--ok); }
+/* The conversation column: wide enough to read, narrow enough to scan.
+   46rem lands inside the 700–760px band at the body size; the page around it
+   stays empty surface, never another container.
+   The column is always at least viewport-tall with the composer pushed to its
+   end, so the input sits at the viewport bottom on short threads instead of
+   dangling right under the last message. On long threads the free space is
+   zero and the composer just follows the content, kept in view by stickiness.
+   3.25rem approximates the sticky topbar above (padding plus one text line);
+   being a few pixels off only moves the composer, never the conversation. */
+.thread {
+	max-width: 46rem;
+	margin: 0 auto;
+	padding: var(--s-4) var(--s-3) var(--s-5);
+	min-height: calc(100dvh - 3.25rem);
+	display: flex;
+	flex-direction: column;
+}
+.thread .composer {
+	margin-top: auto;
+}
 
-.quote-line { display: flex; justify-content: space-between; gap: 1rem; }
-.quote-total { border-top: 1px solid var(--line); padding-top: 0.5rem; margin-top: 0.5rem; font-weight: 600; }
-@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+/* ---------------------------------------------------------------
+   Turns
+
+   The agent's turn is plain text in the column. Wrapping it in a card
+   would put a box around every answer and make the transcript read as
+   a list of receipts rather than a conversation.
+   --------------------------------------------------------------- */
+.row {
+	margin-bottom: var(--s-4);
+}
+.row[data-who='consumer'] {
+	display: flex;
+	justify-content: flex-end;
+}
+.row[data-who='consumer'] .bubble {
+	max-width: 85%;
+	padding: var(--s-2) var(--s-3);
+	border-radius: var(--r-bubble);
+	background: var(--bg-sunken);
+	border: 1px solid var(--line);
+}
+.row[data-who='agent'] .bubble {
+	display: block;
+	line-height: 1.6;
+}
+.who {
+	display: block;
+	font-size: var(--t-caption);
+	color: var(--muted);
+	margin-bottom: 0.25rem;
+}
+
+/* ---------------------------------------------------------------
+   Tool calls
+
+   Collapsed to one mono line by default and expanding to the exact
+   request JSON: the Consumer can always see precisely what was asked
+   for, which is the difference between a tool call and a black box.
+   --------------------------------------------------------------- */
+.tool {
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	background: var(--bg-raised);
+	margin-bottom: var(--s-2);
+	overflow: hidden;
+}
+.tool summary {
+	cursor: pointer;
+	min-height: 44px;
+	display: flex;
+	align-items: center;
+	gap: var(--s-1);
+	padding: 0 var(--s-2);
+	font-size: var(--t-caption);
+	color: var(--muted);
+	list-style: none;
+}
+.tool summary::-webkit-details-marker {
+	display: none;
+}
+.tool summary::before {
+	content: '▸';
+	color: var(--comment);
+	transition: transform 0.18s var(--ease);
+}
+.tool[open] summary::before {
+	transform: rotate(90deg);
+}
+.tool summary:hover {
+	background: var(--bg-sunken);
+	color: var(--fg);
+}
+.tool pre {
+	overflow-x: auto;
+	font-size: 0.8125rem;
+	margin: 0;
+	padding: var(--s-2);
+	border-top: 1px solid var(--line);
+	background: var(--bg-sunken);
+	line-height: 1.5;
+}
+
+/* A panel the Consumer has to act on, rather than one they may expand. */
+.notice {
+	border: 1px solid var(--accent);
+	border-radius: var(--r-surface);
+	background: var(--bg-raised);
+	padding: var(--s-3);
+	margin-bottom: var(--s-3);
+}
+.notice pre {
+	overflow-x: auto;
+	font-size: 0.8125rem;
+	margin: var(--s-2) 0;
+	padding: var(--s-2);
+	border-radius: var(--r-control);
+	background: var(--bg-sunken);
+}
+.notice .actions {
+	display: flex;
+	gap: var(--s-1);
+	flex-wrap: wrap;
+	margin-top: var(--s-2);
+}
+
+/* ---------------------------------------------------------------
+   Result cards and the shop's own Quote
+   --------------------------------------------------------------- */
+.results {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+	gap: var(--s-2);
+	margin-bottom: var(--s-3);
+}
+.result {
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	background: var(--bg-raised);
+	overflow: hidden;
+}
+.result img {
+	width: 100%;
+	aspect-ratio: 1;
+	object-fit: cover;
+	display: block;
+	background: var(--bg-sunken);
+}
+.result-body {
+	padding: var(--s-1) var(--s-2) var(--s-2);
+}
+
+.quote {
+	width: 100%;
+	border-collapse: collapse;
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	background: var(--bg-raised);
+	margin-bottom: var(--s-3);
+	font-size: var(--t-caption);
+}
+.quote td {
+	padding: 0.4rem var(--s-2);
+}
+.quote td:last-child {
+	text-align: right;
+}
+.quote tr.tax {
+	color: var(--muted);
+}
+.quote tr.total td {
+	border-top: 1px solid var(--line);
+	font-weight: 600;
+	color: var(--fg);
+}
+
+/* ---------------------------------------------------------------
+   Composer: one rounded field that grows with the message, with the
+   send control parked inside it.
+   --------------------------------------------------------------- */
+.composer {
+	position: sticky;
+	bottom: 0;
+	background: linear-gradient(to bottom, transparent, var(--bg) 30%);
+	padding-block: var(--s-3) max(var(--s-2), env(safe-area-inset-bottom));
+}
+.composer-field {
+	display: flex;
+	align-items: flex-end;
+	gap: var(--s-1);
+	padding: var(--s-1);
+	border: 1px solid var(--line);
+	border-radius: var(--r-bubble);
+	background: var(--bg-raised);
+	transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.composer-field:focus-within {
+	border-color: var(--accent-2);
+	box-shadow: 0 4px 18px var(--lift);
+}
+.composer-field textarea {
+	flex: 1;
+	border: 0;
+	outline: 0;
+	resize: none;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	line-height: 1.5;
+	padding: 0.55rem var(--s-2);
+	max-height: 12rem;
+}
+.composer-field textarea::placeholder {
+	color: var(--muted);
+}
+.composer-hint {
+	margin-top: var(--s-1);
+	display: flex;
+	gap: var(--s-2);
+	align-items: baseline;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	font-size: var(--t-caption);
+	color: var(--muted);
+}
+
+/* Agent metadata: behaviour on the surface, implementation one disclosure
+   away. The summary names what Miro is; the driver string underneath is for
+   whoever goes looking, not for the conversation. */
+.agent-meta {
+	font-size: 0.8125rem;
+	color: var(--muted);
+}
+.agent-meta summary {
+	cursor: pointer;
+	list-style: none;
+	display: flex;
+	align-items: baseline;
+	gap: var(--s-1);
+}
+.agent-meta summary::-webkit-details-marker {
+	display: none;
+}
+.agent-meta summary::before {
+	content: '▸';
+	color: var(--comment);
+}
+.agent-meta[open] summary::before {
+	content: '▾';
+}
+.agent-meta summary:hover {
+	color: var(--fg);
+}
+.agent-meta p {
+	margin: var(--s-1) 0 0;
+	font-size: 0.8125rem;
+}
+
+/* ---------------------------------------------------------------
+   Controls
+   --------------------------------------------------------------- */
+button,
+.button {
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--s-1);
+	padding: 0 var(--s-3);
+	border: 1px solid transparent;
+	border-radius: var(--r-control);
+	background: var(--accent-2);
+	color: var(--bg);
+	font: inherit;
+	font-weight: 500;
+	text-decoration: none;
+	cursor: pointer;
+	transition: transform 0.12s var(--ease), box-shadow 0.2s var(--ease);
+}
+button:hover,
+.button:hover {
+	box-shadow: 0 4px 14px var(--lift);
+}
+button:active,
+.button:active {
+	transform: translateY(1px);
+}
+button.secondary {
+	background: transparent;
+	color: var(--fg);
+	border-color: var(--line);
+}
+button.secondary:hover {
+	border-color: var(--fg);
+}
+button.send {
+	/* The one control allowed to be a circle: at field height an arrow reads
+	   as "send", while a labelled pill would read as a second action
+	   competing with the field itself. */
+	flex: none;
+	width: 2.5rem;
+	height: 2.5rem;
+	min-height: 0;
+	padding: 0;
+	border-radius: 50%;
+}
+button.send svg {
+	display: block;
+}
+button[disabled] {
+	background: var(--bg-sunken);
+	color: var(--comment);
+	border-color: var(--line);
+	cursor: not-allowed;
+	box-shadow: none;
+}
+button.link {
+	min-height: 0;
+	padding: 0;
+	background: none;
+	border: 0;
+	color: var(--muted);
+	font-size: var(--t-caption);
+	text-decoration: underline;
+}
+button.link:hover {
+	color: var(--fg);
+	box-shadow: none;
+}
+:focus-visible {
+	outline: 2px solid var(--accent-2);
+	outline-offset: 2px;
+}
+
+input {
+	min-height: 44px;
+	padding: 0 var(--s-2);
+	border: 1px solid var(--line);
+	border-radius: var(--r-control);
+	background: var(--bg-raised);
+	color: inherit;
+	font: inherit;
+}
+input::placeholder {
+	color: var(--muted);
+}
+
+/* The approve link is the one control on this page that leaves for the
+   merchant's domain, so it is outlined in the accent rather than filled:
+   the agent is handing the Consumer off, not completing anything. */
+.tap {
+	display: inline-flex;
+	align-items: center;
+	min-height: 44px;
+	padding: 0 var(--s-3);
+	border: 1px solid var(--accent);
+	border-radius: var(--r-control);
+	color: var(--fg);
+	text-decoration: none;
+	font-weight: 500;
+}
+.tap:hover {
+	background: var(--bg-sunken);
+}
+
+.pill {
+	display: inline-block;
+	padding: 0.125rem var(--s-1);
+	border: 1px solid var(--line);
+	border-radius: var(--r-control);
+	font-size: var(--t-caption);
+}
+.pill[data-b='sold-out'] {
+	color: var(--comment);
+}
+.pill[data-b='low-stock'] {
+	color: var(--accent);
+}
+.pill[data-b='in-stock'] {
+	color: var(--ok);
+}
+
+.modal-scrim {
+	position: fixed;
+	inset: 0;
+	background: var(--scrim);
+	display: grid;
+	place-items: center;
+	padding: var(--s-3);
+}
+.modal {
+	background: var(--bg-raised);
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	padding: var(--s-4);
+	max-width: 40rem;
+	width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		animation: none !important;
+		transition: none !important;
+	}
+}
+
+/* ---------------------------------------------------------------
+   Motion
+
+   Every animation here is doing one of three jobs: showing that a
+   turn has ARRIVED, showing that the agent is WORKING, or confirming
+   a press. Nothing loops for decoration, and nothing on the approval
+   path pulses for attention: a money control that throbs is asking to
+   be clicked, which is the opposite of what this surface is for.
+
+   The whole block is gated behind `prefers-reduced-motion` by the
+   rule at the bottom of this file, which kills animations outright
+   rather than shortening them.
+   --------------------------------------------------------------- */
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	/* Turns arrive in the order they were said. The stagger is small: this is
+	   a transcript re-rendering after a POST, not a reveal sequence, so it has
+	   to finish before it is noticed. */
+	.row,
+	.result,
+	.quote,
+	.notice {
+		animation: rise 0.34s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+		animation-delay: calc(var(--i, 0) * 45ms);
+	}
+	/* Tool cards come last and faster: they are evidence, not conversation. */
+	.tool {
+		animation: rise 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+		animation-delay: calc(var(--i, 0) * 25ms);
+	}
+}
+
+/* The disclosure caret is a state transition, so it moves even under the
+   stagger rules above: it is feedback for a press the Consumer just made. */
+.tool summary::before {
+	transition: transform 0.18s var(--ease);
+}
+
+/* Working. Three dots rather than a spinner: a spinner says "wait", these say
+   "a turn is being composed", which is what is actually happening. */
+.thinking {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+}
+.thinking i {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: currentColor;
+	opacity: 0.35;
+}
+@media (prefers-reduced-motion: no-preference) {
+	.thinking i {
+		animation: blink 1.1s ease-in-out infinite;
+	}
+	.thinking i:nth-child(2) {
+		animation-delay: 0.16s;
+	}
+	.thinking i:nth-child(3) {
+		animation-delay: 0.32s;
+	}
+}
+@keyframes blink {
+	0%,
+	80%,
+	100% {
+		opacity: 0.35;
+	}
+	40% {
+		opacity: 1;
+	}
+}
+
+/* The composer lifts very slightly while a turn is in flight, so the surface
+   acknowledges the send before the answer exists. */
+.composer-field:has(button[disabled]) {
+	border-color: var(--accent-2);
+}
+
+/* ---------------------------------------------------------------
+   Small screens: tighter chrome, a full touch target on send, and wider
+   consumer bubbles so turns don't collapse into ribbons. The thread keeps
+   its 16px gutters; nothing here introduces horizontal scroll.
+   --------------------------------------------------------------- */
+@media (max-width: 480px) {
+	.topbar-inner {
+		padding-inline: var(--s-2);
+		gap: var(--s-1);
+	}
+	.row[data-who='consumer'] .bubble {
+		max-width: 92%;
+	}
+	button.send {
+		width: 2.75rem;
+		height: 2.75rem;
+	}
+	.composer {
+		padding-block: var(--s-2) max(var(--s-2), env(safe-area-inset-bottom));
+	}
+}
+
+/* ---------------------------------------------------------------
+   Widgets: what the agent offered to do next, as something to tap
+   or fill in rather than a sentence to compose an answer to.
+
+   Sits under the agent's own bubble and is indented with it, so it
+   reads as part of what Miro said — not as chrome the page added.
+   --------------------------------------------------------------- */
+.widget {
+	margin-top: var(--s-2);
+	max-width: 32rem;
+}
+.widget-title {
+	margin: 0 0 var(--s-2);
+	font-weight: 500;
+}
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--s-1);
+}
+/* A tap target first and a label second: 44px is the floor on a phone,
+   and the option's own cost — when the shop returned one — sits under
+   the label rather than competing with it. */
+.chip {
+	display: inline-flex;
+	flex-direction: column;
+	align-items: flex-start;
+	justify-content: center;
+	gap: 0.125rem;
+	min-height: 44px;
+	padding: var(--s-1) var(--s-2);
+	border: 1px solid var(--line);
+	border-radius: var(--r-control);
+	background: var(--bg-raised);
+	color: var(--fg);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.chip:hover:not(:disabled) {
+	border-color: var(--accent);
+}
+.chip:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+.fields {
+	display: grid;
+	gap: var(--s-2);
+	margin-bottom: var(--s-2);
+}
+.fields label {
+	display: grid;
+	gap: 0.25rem;
+}
+.fields input {
+	min-height: 44px;
+	padding: 0 var(--s-2);
+	border: 1px solid var(--line);
+	border-radius: var(--r-control);
+	background: var(--bg-raised);
+	color: var(--fg);
+	font: inherit;
+}
+.fields input:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+.widget .tap {
+	background: none;
+	cursor: pointer;
+}
+
+/* The basket, as the shop last reported it. No prices: this panel counts
+   nothing, and the total only ever comes from a Quote. */
+.basket {
+	border: 1px solid var(--line);
+	border-radius: var(--r-surface);
+	background: var(--bg-raised);
+	padding: var(--s-3);
+	margin-bottom: var(--s-3);
+}
+.basket-line {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s-2);
+	padding: var(--s-1) 0;
+	border-bottom: 1px solid var(--line);
+}
+.basket form {
+	margin-top: var(--s-1);
+}
+
+/* ---------------------------------------------------------------
+   Markdown inside an agent bubble.
+
+   A message is not a document: headings are strong lines, lists are
+   tight, and nothing here introduces a second type scale.
+   --------------------------------------------------------------- */
+.md > :first-child {
+	margin-top: 0;
+}
+.md > :last-child {
+	margin-bottom: 0;
+}
+.md p {
+	margin: 0 0 var(--s-2);
+}
+.md ul,
+.md ol {
+	margin: 0 0 var(--s-2);
+	padding-left: 1.25rem;
+}
+.md li {
+	margin-bottom: 0.25rem;
+}
+.md li::marker {
+	color: var(--comment);
+}
+.md-lead {
+	font-weight: 600;
+}
+.md code {
+	padding: 0.0625rem 0.25rem;
+	border-radius: var(--r-control);
+	background: var(--bg-sunken);
+	/* The family comes from the `code` rule at the top of this file. */
+	font-size: 0.875em;
+}
+.md pre {
+	overflow-x: auto;
+	margin: 0 0 var(--s-2);
+	padding: var(--s-2);
+	border-radius: var(--r-control);
+	background: var(--bg-sunken);
+}
+.md pre code {
+	padding: 0;
+	background: none;
+}

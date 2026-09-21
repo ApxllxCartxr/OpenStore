@@ -26,11 +26,16 @@ db.exec(`
 	  title       TEXT NOT NULL DEFAULT 'New chat',
 	  created_at  TEXT NOT NULL
 	);
+	-- The widget column is the interface the agent offered with a message: a
+	-- form's labels and field names, a choice's options. Definitions only:
+	-- what the Consumer types into one is their own message, and what they
+	-- choose is a tool call. No answers are kept here.
 	CREATE TABLE IF NOT EXISTS messages (
 	  id        INTEGER PRIMARY KEY AUTOINCREMENT,
 	  thread_id TEXT NOT NULL REFERENCES threads(id),
 	  role      TEXT NOT NULL CHECK (role IN ('consumer','agent')),
 	  text      TEXT NOT NULL,
+	  widget    TEXT,
 	  at        TEXT NOT NULL
 	);
 	-- Tool calls are kept for display: the card expands to the exact request
@@ -79,6 +84,13 @@ if (!contactColumns.includes('jwks_url')) {
 	db.exec(`ALTER TABLE contacts ADD COLUMN jwks_url TEXT NOT NULL DEFAULT ''`);
 }
 
+const messageColumns = (db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[]).map(
+	(column) => column.name
+);
+if (!messageColumns.includes('widget')) {
+	db.exec(`ALTER TABLE messages ADD COLUMN widget TEXT`);
+}
+
 /**
  * Column names this database may never grow.
  *
@@ -114,6 +126,10 @@ export function schemaColumns(): string[] {
 	);
 }
 
+/** The one thread this demo keeps. Shared so the export endpoint reads the
+ *  same rows the page renders, rather than a second guess at the id. */
+export const THREAD = 'thread_demo';
+
 export function createThread(id: string, title = 'New chat'): void {
 	db.prepare(`INSERT OR IGNORE INTO threads (id, title, created_at) VALUES (?, ?, ?)`).run(
 		id,
@@ -122,13 +138,25 @@ export function createThread(id: string, title = 'New chat'): void {
 	);
 }
 
-export function addMessage(threadId: string, role: 'consumer' | 'agent', text: string): void {
-	db.prepare(`INSERT INTO messages (thread_id, role, text, at) VALUES (?, ?, ?, ?)`).run(
-		threadId,
-		role,
-		text,
-		new Date().toISOString()
-	);
+export function addMessage(
+	threadId: string,
+	role: 'consumer' | 'agent',
+	text: string,
+	widget: unknown = null
+): void {
+	db.prepare(
+		`INSERT INTO messages (thread_id, role, text, widget, at) VALUES (?, ?, ?, ?, ?)`
+	).run(threadId, role, text, widget ? JSON.stringify(widget) : null, new Date().toISOString());
+}
+
+/** One message's widget definition, read back from the database rather than
+ *  from the browser. A submission posts values; the shape they go into is the
+ *  one this chat stored when it offered the widget. */
+export function widgetFor(threadId: string, messageId: number): string | null {
+	const row = db
+		.prepare(`SELECT widget FROM messages WHERE id = ? AND thread_id = ?`)
+		.get(messageId, threadId) as { widget: string | null } | undefined;
+	return row?.widget ?? null;
 }
 
 export function recordToolCall(
@@ -145,8 +173,14 @@ export function recordToolCall(
 export function thread(threadId: string) {
 	return {
 		messages: db
-			.prepare(`SELECT role, text, at FROM messages WHERE thread_id = ? ORDER BY id`)
-			.all(threadId) as { role: string; text: string; at: string }[],
+			.prepare(`SELECT id, role, text, widget, at FROM messages WHERE thread_id = ? ORDER BY id`)
+			.all(threadId) as {
+			id: number;
+			role: string;
+			text: string;
+			widget: string | null;
+			at: string;
+		}[],
 		toolCalls: db
 			.prepare(`SELECT name, request, response, at FROM tool_calls WHERE thread_id = ? ORDER BY id`)
 			.all(threadId) as { name: string; request: string; response: string; at: string }[]
