@@ -148,6 +148,12 @@ export async function agentId(): Promise<string> {
  *  to its request. */
 let nextId = 1;
 
+/** A shop that hangs — a bad deploy, a network partition — used to hang this
+ *  call forever with it: nothing here ever timed out. This repo's own shops
+ *  are more trusted than a generic Consumer-pasted server, but "more
+ *  trusted" is not "never fails to answer". */
+const SHOP_FETCH_TIMEOUT_MS = 15_000;
+
 export async function call(
 	domain: string,
 	tool: string,
@@ -155,19 +161,29 @@ export async function call(
 	retry = true
 ): Promise<ToolResult> {
 	const session = await sessionFor(domain);
-	const response = await fetch(`${dial(domain)}/agent/mcp`, {
-		method: 'POST',
-		headers: {
-			'content-type': 'application/json',
-			authorization: `Bearer ${session.token}`
-		},
-		body: JSON.stringify({
-			jsonrpc: '2.0',
-			id: nextId++,
-			method: 'tools/call',
-			params: { name: tool, arguments: args }
-		})
-	});
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), SHOP_FETCH_TIMEOUT_MS);
+	let response: Response;
+	try {
+		response = await fetch(`${dial(domain)}/agent/mcp`, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				authorization: `Bearer ${session.token}`
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: nextId++,
+				method: 'tools/call',
+				params: { name: tool, arguments: args }
+			}),
+			signal: controller.signal
+		});
+	} catch {
+		throw new ShopError('unreachable', `${domain} did not answer in time.`);
+	} finally {
+		clearTimeout(timer);
+	}
 	// A token the shop no longer knows — it restarted, or the token expired
 	// early — is worth exactly one fresh registration, not a refusal the
 	// shopper has to act on. Once: a shop that refuses the new token too is
@@ -230,17 +246,34 @@ export type ToolDescriptor = {
 	};
 };
 
+// A generic server is Consumer-pasted and untrusted the same way a card's URL
+// is (`contacts.ts`'s own FETCH_TIMEOUT_MS/MAX_CARD_BYTES) — but this path is
+// hit on every tool call, not once at add time, so a slow or oversized answer
+// here is a live request hanging, not just a contact that failed to add.
+const MCP_FETCH_TIMEOUT_MS = 10_000;
+const MAX_MCP_RESPONSE_BYTES = 256 * 1024;
+
 async function rpc(
 	endpoint: string,
 	method: string,
 	params: Record<string, unknown> = {},
 	fetcher: typeof fetch = fetch
 ): Promise<any> {
-	const response = await fetcher(endpoint, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params })
-	});
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), MCP_FETCH_TIMEOUT_MS);
+	let response: Response;
+	try {
+		response = await fetcher(endpoint, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params }),
+			signal: controller.signal
+		});
+	} catch {
+		throw new ShopError('unreachable', `${new URL(endpoint).hostname} did not answer in time.`);
+	} finally {
+		clearTimeout(timer);
+	}
 	if (response.status === 401 || response.status === 403) {
 		throw new ShopError(
 			'auth-required',
@@ -248,6 +281,9 @@ async function rpc(
 		);
 	}
 	const text = await response.text();
+	if (text.length > MAX_MCP_RESPONSE_BYTES) {
+		throw new ShopError('too-large', `${new URL(endpoint).hostname} answered with more than this chat will read.`);
+	}
 	let body: any;
 	try {
 		body = JSON.parse(text);

@@ -364,7 +364,9 @@ export async function connectMcp(
 		tools = await listToolsGeneric(url, fetcher);
 	} catch (error) {
 		if (error instanceof ShopError) {
-			throw new ContactError(error.code === 'auth-required' ? 'blocked' : 'unreachable', error.message);
+			const code =
+				error.code === 'auth-required' ? 'blocked' : error.code === 'too-large' ? 'too-large' : 'unreachable';
+			throw new ContactError(code, error.message);
 		}
 		throw error;
 	}

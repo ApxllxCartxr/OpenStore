@@ -119,4 +119,42 @@ describe('callGeneric', () => {
 			expect((error as ShopError).code).toBe('auth-required');
 		}
 	});
+
+	it('gives up on a server that never answers, rather than hanging forever', async () => {
+		// A server this slow to respond is indistinguishable, from here, from
+		// one that will never respond at all — and a request with no timeout
+		// hangs identically either way. Fake timers so the test proves the
+		// timeout fires without actually waiting it out.
+		vi.useFakeTimers();
+		vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+			return new Promise((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+			});
+		});
+		// Attached before advancing time, so the rejection is never briefly
+		// unhandled — only the assertion happens after.
+		const pending = callGeneric('http://toybox.example/mcp', 'roll_dice', {}).catch((error) => error);
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(await pending).toMatchObject({ code: 'unreachable' });
+		vi.useRealTimers();
+	});
+
+	it('refuses a response larger than this chat will read', async () => {
+		const huge = 'x'.repeat(300 * 1024);
+		vi.stubGlobal(
+			'fetch',
+			async () =>
+				new Response(
+					JSON.stringify({
+						jsonrpc: '2.0',
+						id: 1,
+						result: { content: [{ type: 'text', text: huge }], isError: false }
+					}),
+					{ status: 200 }
+				)
+		);
+		await expect(callGeneric('http://toybox.example/mcp', 'roll_dice', {})).rejects.toMatchObject({
+			code: 'too-large'
+		});
+	});
 });
