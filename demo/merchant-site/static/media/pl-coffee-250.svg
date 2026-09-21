@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1250" width="1000" height="1250" role="img" aria-label="Filter coffee powder, 250g">
+  <rect width="1000" height="1250" fill="#efe9e0"/>
+  <rect x="120" y="150" width="760" height="950" rx="6" fill="#3f4a55"/>
+  <rect x="150" y="180" width="700" height="890" rx="3" fill="none" stroke="#efe9e0" stroke-opacity="0.35" stroke-width="2"/>
+  <text x="500" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="56" fill="#f4efe6"><tspan x="500" y="437">Filter coffee</tspan><tspan x="500" y="503">powder, 250g</tspan></text>
+  
+  <text x="500" y="1010" text-anchor="middle" font-family="ui-monospace, monospace" font-size="26" fill="#f4efe6" fill-opacity="0.55">PantryLine</text>
+  <text x="500" y="1160" text-anchor="middle" font-family="ui-monospace, monospace" font-size="24" fill="#8a8078">placeholder — not a photograph</text>
+</svg>

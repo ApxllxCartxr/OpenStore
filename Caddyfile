@@ -107,6 +107,254 @@ http://dogeared.localhost {
 	}
 }
 
+http://circuityard.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-cy:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-cy:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-cy:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-cy:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-cy:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-cy:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://ironlist.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-il:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-il:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-il:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-il:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-il:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-il:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://pantryline.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-pl:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-pl:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-pl:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-pl:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-pl:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-pl:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://kettleandgrain.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-kg:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-kg:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-kg:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-kg:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-kg:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-kg:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://deskfield.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-df:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-df:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-df:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-df:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-df:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-df:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://rootandleaf.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-rl:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-rl:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-rl:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-rl:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-rl:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-rl:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://playspool.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-ps:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-ps:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-ps:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-ps:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-ps:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-ps:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+http://furrow.localhost {
+	handle /.well-known/* {
+		reverse_proxy sidecar-fw:8000
+	}
+	handle /agent/* {
+		reverse_proxy sidecar-fw:8000
+	}
+	handle /agentic/* {
+		reverse_proxy sidecar-fw:8000
+	}
+	handle /receipt/* {
+		reverse_proxy sidecar-fw:8000
+	}
+	handle /provider/* {
+		reverse_proxy sidecar-fw:8000
+	}
+	handle /trait* {
+		respond "Not found" 404
+	}
+	handle /admin* {
+		respond "Not found" 404
+	}
+	handle {
+		reverse_proxy store-fw:3000
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
 http://chat.localhost {
 	reverse_proxy buyer-chat:3001
 

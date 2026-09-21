@@ -16,7 +16,15 @@
  */
 import { sql } from '../src/lib/db.ts';
 import { SeedError, validateRows, writeProfile, type Profile, type Row } from './seed-core.ts';
+import { CIRCUITYARD } from './profiles/circuityard.ts';
+import { DESKFIELD } from './profiles/deskfield.ts';
 import { DOGEARED } from './profiles/dogeared.ts';
+import { FURROW } from './profiles/furrow.ts';
+import { IRONLIST } from './profiles/ironlist.ts';
+import { KETTLEANDGRAIN } from './profiles/kettleandgrain.ts';
+import { PANTRYLINE } from './profiles/pantryline.ts';
+import { PLAYSPOOL } from './profiles/playspool.ts';
+import { ROOTANDLEAF } from './profiles/rootandleaf.ts';
 
 const GROUPS: [string, string, Record<string, string[]>][] = [
 	['tote', 'Tote', { colour: ['black', 'red'], size: ['M', 'L'] }],
@@ -193,9 +201,17 @@ export const SPOILEDDUCKIE: Profile = {
  *  profile into the wrong database is a truncate away from a shop selling
  *  somebody else's catalogue — the name is required rather than guessed when
  *  it is anything but the default. */
-const PROFILES: Record<string, Profile> = {
+export const PROFILES: Record<string, Profile> = {
 	spoiledduckie: SPOILEDDUCKIE,
-	dogeared: DOGEARED
+	dogeared: DOGEARED,
+	circuityard: CIRCUITYARD,
+	ironlist: IRONLIST,
+	pantryline: PANTRYLINE,
+	kettleandgrain: KETTLEANDGRAIN,
+	deskfield: DESKFIELD,
+	rootandleaf: ROOTANDLEAF,
+	playspool: PLAYSPOOL,
+	furrow: FURROW
 };
 
 export async function seed(): Promise<void> {

@@ -10,7 +10,7 @@
  * eleven flat rectangles.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { DOGEARED } from './profiles/dogeared.ts';
+import { PROFILES } from './seed.ts';
 import type { Profile } from './seed-core.ts';
 
 const OUT = new URL('../static/media/', import.meta.url);
@@ -75,6 +75,18 @@ export function writeTiles(profile: Profile): string[] {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-	const written = writeTiles(DOGEARED);
-	console.log(`Wrote ${written.length} placeholder tiles to static/media/.`);
+	// One name argument writes that shop's tiles only; none writes every
+	// profile's — the common case once there are ten of them.
+	const only = process.argv[2];
+	const profiles = only ? [PROFILES[only]].filter((p): p is Profile => Boolean(p)) : Object.values(PROFILES);
+	if (only && profiles.length === 0) {
+		throw new Error(`no profile ${JSON.stringify(only)}; known: ${Object.keys(PROFILES).join(', ')}`);
+	}
+	let total = 0;
+	for (const profile of profiles) {
+		const written = writeTiles(profile);
+		console.log(`${profile.shop}: wrote ${written.length} placeholder tiles.`);
+		total += written.length;
+	}
+	console.log(`Wrote ${total} placeholder tiles to static/media/.`);
 }

@@ -27,6 +27,14 @@ services:
           # to mean Caddy here, or it dials itself and gets nothing.
           - spoiledduckie.localhost
           - dogeared.localhost
+          - circuityard.localhost
+          - ironlist.localhost
+          - pantryline.localhost
+          - kettleandgrain.localhost
+          - deskfield.localhost
+          - rootandleaf.localhost
+          - playspool.localhost
+          - furrow.localhost
           - chat.localhost
     restart: unless-stopped
 
@@ -174,6 +182,454 @@ services:
       - "127.0.0.1:3010:3000"
     restart: unless-stopped
 
+  sidecar-cy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: circuityard.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://circuityard.localhost
+      WEBAUTHN_RP_ID: circuityard.localhost
+      WEBAUTHN_RP_NAME: "CircuitYard"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://sccy_app:sccy_app_dev@postgres:5432/sidecar_cy
+      STORE_INTERNAL_URL: http://store-cy:3000
+      TRAIT_BASE_URL: http://store-cy:3000
+      TRAIT_HMAC_SECRET: conformance-secret-cy
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-cy-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-cy
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cysidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-cy:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://cy_app:cy_app_dev@postgres:5432/circuityard
+      TRAIT_HMAC_SECRET: conformance-secret-cy
+      SIDECAR_INTERNAL_URL: http://sidecar-cy:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://circuityard.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "CircuitYard"
+      PUBLIC_SHOP_TAGLINE: "Cables, chargers and small gadgets."
+      PUBLIC_SHOP_BLURB: "an electronics counter in Pune"
+      PUBLIC_SHOP_ACCENT: "#3f6b8a"
+      SEED_PROFILE: circuityard
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3020:3000"
+    restart: unless-stopped
+
+  sidecar-il:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: ironlist.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://ironlist.localhost
+      WEBAUTHN_RP_ID: ironlist.localhost
+      WEBAUTHN_RP_NAME: "IronList"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://scil_app:scil_app_dev@postgres:5432/sidecar_il
+      STORE_INTERNAL_URL: http://store-il:3000
+      TRAIT_BASE_URL: http://store-il:3000
+      TRAIT_HMAC_SECRET: conformance-secret-il
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-il-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-il
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ilsidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-il:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://il_app:il_app_dev@postgres:5432/ironlist
+      TRAIT_HMAC_SECRET: conformance-secret-il
+      SIDECAR_INTERNAL_URL: http://sidecar-il:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://ironlist.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "IronList"
+      PUBLIC_SHOP_TAGLINE: "Hand tools and hardware, no fuss."
+      PUBLIC_SHOP_BLURB: "a hardware shop in Chennai"
+      PUBLIC_SHOP_ACCENT: "#7a5c3e"
+      SEED_PROFILE: ironlist
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3030:3000"
+    restart: unless-stopped
+
+  sidecar-pl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: pantryline.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://pantryline.localhost
+      WEBAUTHN_RP_ID: pantryline.localhost
+      WEBAUTHN_RP_NAME: "PantryLine"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://scpl_app:scpl_app_dev@postgres:5432/sidecar_pl
+      STORE_INTERNAL_URL: http://store-pl:3000
+      TRAIT_BASE_URL: http://store-pl:3000
+      TRAIT_HMAC_SECRET: conformance-secret-pl
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-pl-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-pl
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - plsidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-pl:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://pl_app:pl_app_dev@postgres:5432/pantryline
+      TRAIT_HMAC_SECRET: conformance-secret-pl
+      SIDECAR_INTERNAL_URL: http://sidecar-pl:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://pantryline.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "PantryLine"
+      PUBLIC_SHOP_TAGLINE: "Pantry staples, sourced and packed."
+      PUBLIC_SHOP_BLURB: "a grocer in Ahmedabad"
+      PUBLIC_SHOP_ACCENT: "#8a6d2f"
+      SEED_PROFILE: pantryline
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3040:3000"
+    restart: unless-stopped
+
+  sidecar-kg:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: kettleandgrain.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://kettleandgrain.localhost
+      WEBAUTHN_RP_ID: kettleandgrain.localhost
+      WEBAUTHN_RP_NAME: "Kettle & Grain"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://sckg_app:sckg_app_dev@postgres:5432/sidecar_kg
+      STORE_INTERNAL_URL: http://store-kg:3000
+      TRAIT_BASE_URL: http://store-kg:3000
+      TRAIT_HMAC_SECRET: conformance-secret-kg
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-kg-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-kg
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - kgsidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-kg:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://kg_app:kg_app_dev@postgres:5432/kettleandgrain
+      TRAIT_HMAC_SECRET: conformance-secret-kg
+      SIDECAR_INTERNAL_URL: http://sidecar-kg:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://kettleandgrain.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "Kettle & Grain"
+      PUBLIC_SHOP_TAGLINE: "Kitchenware and coffee equipment."
+      PUBLIC_SHOP_BLURB: "a kitchenware shop in Jaipur"
+      PUBLIC_SHOP_ACCENT: "#8a4a3f"
+      SEED_PROFILE: kettleandgrain
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3050:3000"
+    restart: unless-stopped
+
+  sidecar-df:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: deskfield.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://deskfield.localhost
+      WEBAUTHN_RP_ID: deskfield.localhost
+      WEBAUTHN_RP_NAME: "DeskField"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://scdf_app:scdf_app_dev@postgres:5432/sidecar_df
+      STORE_INTERNAL_URL: http://store-df:3000
+      TRAIT_BASE_URL: http://store-df:3000
+      TRAIT_HMAC_SECRET: conformance-secret-df
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-df-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-df
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - dfsidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-df:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://df_app:df_app_dev@postgres:5432/deskfield
+      TRAIT_HMAC_SECRET: conformance-secret-df
+      SIDECAR_INTERNAL_URL: http://sidecar-df:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://deskfield.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "DeskField"
+      PUBLIC_SHOP_TAGLINE: "Stationery and office supplies."
+      PUBLIC_SHOP_BLURB: "a stationer in Delhi"
+      PUBLIC_SHOP_ACCENT: "#4a5c8a"
+      SEED_PROFILE: deskfield
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3060:3000"
+    restart: unless-stopped
+
+  sidecar-rl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: rootandleaf.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://rootandleaf.localhost
+      WEBAUTHN_RP_ID: rootandleaf.localhost
+      WEBAUTHN_RP_NAME: "Root & Leaf"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://scrl_app:scrl_app_dev@postgres:5432/sidecar_rl
+      STORE_INTERNAL_URL: http://store-rl:3000
+      TRAIT_BASE_URL: http://store-rl:3000
+      TRAIT_HMAC_SECRET: conformance-secret-rl
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-rl-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-rl
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - rlsidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-rl:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://rl_app:rl_app_dev@postgres:5432/rootandleaf
+      TRAIT_HMAC_SECRET: conformance-secret-rl
+      SIDECAR_INTERNAL_URL: http://sidecar-rl:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://rootandleaf.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "Root & Leaf"
+      PUBLIC_SHOP_TAGLINE: "Potted plants and garden supplies."
+      PUBLIC_SHOP_BLURB: "a nursery in Kochi"
+      PUBLIC_SHOP_ACCENT: "#4a8a5c"
+      SEED_PROFILE: rootandleaf
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3070:3000"
+    restart: unless-stopped
+
+  sidecar-ps:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: playspool.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://playspool.localhost
+      WEBAUTHN_RP_ID: playspool.localhost
+      WEBAUTHN_RP_NAME: "Playspool"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://scps_app:scps_app_dev@postgres:5432/sidecar_ps
+      STORE_INTERNAL_URL: http://store-ps:3000
+      TRAIT_BASE_URL: http://store-ps:3000
+      TRAIT_HMAC_SECRET: conformance-secret-ps
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-ps-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-ps
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - pssidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-ps:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://ps_app:ps_app_dev@postgres:5432/playspool
+      TRAIT_HMAC_SECRET: conformance-secret-ps
+      SIDECAR_INTERNAL_URL: http://sidecar-ps:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://playspool.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "Playspool"
+      PUBLIC_SHOP_TAGLINE: "Toys and games for every age."
+      PUBLIC_SHOP_BLURB: "a toyshop in Ludhiana"
+      PUBLIC_SHOP_ACCENT: "#8a3f6b"
+      SEED_PROFILE: playspool
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3080:3000"
+    restart: unless-stopped
+
+  sidecar-fw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENSTORE_MERCHANT_DOMAIN: furrow.localhost
+      OPENSTORE_PUBLIC_ORIGIN: http://furrow.localhost
+      WEBAUTHN_RP_ID: furrow.localhost
+      WEBAUTHN_RP_NAME: "Furrow"
+      SIDECAR_DATABASE_URL: postgresql+psycopg://scfw_app:scfw_app_dev@postgres:5432/sidecar_fw
+      STORE_INTERNAL_URL: http://store-fw:3000
+      TRAIT_BASE_URL: http://store-fw:3000
+      TRAIT_HMAC_SECRET: conformance-secret-fw
+      PAYMENT_PROVIDER: fake
+      DEPLOY_PSEUDONYM_KEY: demo-fw-pseudonym-key-32bytes
+      OAUTH_CLIENT_ID: demo-agent
+      OAUTH_CLIENT_SECRET: demo-agent-secret-fw
+      SIDECAR_SIGNING_KEY_PATH: /keys/signing-keys.json
+      OPENSTORE_DEMO_MODE: "true"
+      OPENSTORE_DEV_PROFILE_HOSTS: buyer-chat:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - fwsidecarkeys:/keys
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  store-fw:
+    build:
+      context: .
+      dockerfile: demo/merchant-site/Dockerfile
+    environment:
+      PORT: "3000"
+      MERCHANT_DATABASE_URL: postgresql://fw_app:fw_app_dev@postgres:5432/furrow
+      TRAIT_HMAC_SECRET: conformance-secret-fw
+      SIDECAR_INTERNAL_URL: http://sidecar-fw:8000
+      OPENSTORE_PUBLIC_ORIGIN: http://furrow.localhost
+      ADMIN_SEED_PASSWORD: demo-operator-pw
+      PUBLIC_SHOP_NAME: "Furrow"
+      PUBLIC_SHOP_TAGLINE: "Everyday pet supplies."
+      PUBLIC_SHOP_BLURB: "a pet shop in Lucknow"
+      PUBLIC_SHOP_ACCENT: "#6b8a3f"
+      SEED_PROFILE: furrow
+      PROTOCOL_HEADER: x-forwarded-proto
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3090:3000"
+    restart: unless-stopped
+
   buyer-chat:
     build:
       context: .
@@ -209,7 +665,7 @@ services:
       # The chat dials the shop by its own domain (the edge answers to it on
       # this network), and names it as the one host it may reach over plain
       # http — the mirror of the sidecar's own exception.
-      OPENSTORE_DEV_PROFILE_HOSTS: spoiledduckie.localhost,dogeared.localhost
+      OPENSTORE_DEV_PROFILE_HOSTS: spoiledduckie.localhost,dogeared.localhost,circuityard.localhost,ironlist.localhost,pantryline.localhost,kettleandgrain.localhost,deskfield.localhost,rootandleaf.localhost,playspool.localhost,furrow.localhost
       # adapter-node assumes https when no protocol header is named, so the
       # origin it computes is https://<host> while the browser posts from
       # http://<host> — and SvelteKit's CSRF check refuses every form on the
@@ -247,3 +703,11 @@ volumes:
   chatdata:
   sidecarkeys:
   booksidecarkeys:
+  cysidecarkeys:
+  ilsidecarkeys:
+  plsidecarkeys:
+  kgsidecarkeys:
+  dfsidecarkeys:
+  rlsidecarkeys:
+  pssidecarkeys:
+  fwsidecarkeys:

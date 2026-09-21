@@ -11,7 +11,8 @@
     "preview": "vite preview --port 3000",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "seed": "node --experimental-strip-types scripts/seed.ts"
+    "seed": "node --experimental-strip-types scripts/seed.ts",
+    "placeholders": "node --experimental-strip-types scripts/make-placeholders.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.5.7",

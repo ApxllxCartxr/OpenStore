@@ -9,20 +9,25 @@ help: ## Show this help
 
 up: ## Build and start the whole stack, then seed it
 	docker compose up -d --build
-	@echo "Waiting for the shop to answer..."
-	@# `/healthz`, not `/`. The home page needs a seeded catalogue, and the seed
-	@# runs after this wait — waiting for `/` is waiting for the thing this step
-	@# is about to do.
+	@echo "Waiting for every shop to answer..."
+	@# `/healthz` on the one port-published store (`store`, 127.0.0.1:3000), not
+	@# `/` — the home page needs a seeded catalogue, and the seed runs after this
+	@# wait. The other nine shops are reached over the compose network only, so
+	@# their own healthchecks (already in docker-compose.yml) are what compose
+	@# itself waits on; this loop is the host-visible proxy for "Postgres and the
+	@# build pipeline are generally up," not a check of all ten individually.
 	@for i in $$(seq 1 60); do \
 		curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1 && break; \
 		sleep 2; \
 	done
 	@$(MAKE) --no-print-directory seed
-	@echo "Checking the shop renders..."
-	@curl -fsS -H 'Host: spoiledduckie.localhost' http://127.0.0.1/ >/dev/null \
-		|| { echo "The shop did not render after seeding."; docker compose logs --no-color store | tail -20; exit 1; }
+	@echo "Checking the shops render..."
+	@for d in spoiledduckie dogeared circuityard ironlist pantryline kettleandgrain deskfield rootandleaf playspool furrow; do \
+		curl -fsS -H "Host: $$d.localhost" http://127.0.0.1/ >/dev/null \
+			|| { echo "$$d did not render after seeding."; exit 1; }; \
+	done
 	@echo ""
-	@echo "  Shop     http://spoiledduckie.localhost"
+	@echo "  Shop     http://spoiledduckie.localhost  (+ 9 more — see README)"
 	@echo "  Console  http://spoiledduckie.localhost/agentic"
 	@echo "  Chat     http://chat.localhost"
 	@echo "  Card     http://spoiledduckie.localhost/.well-known/agent-commerce.json"
@@ -31,8 +36,18 @@ up: ## Build and start the whole stack, then seed it
 	@echo "  does not resolve it — that is §10.1, and it is the single most"
 	@echo "  likely way to lose an afternoon."
 
-seed: ## Seed the merchant catalogue (12 groups, 15 items)
-	docker compose exec -T store node --experimental-strip-types scripts/seed.ts
+#: Every merchant-site service, one per shop. `store-books` was never in this
+#: list before the ten-shop pass — Dog-Eared had no seed profile at all wired
+#: to `make up`, and its catalogue existed only if someone remembered to exec
+#: the seed manually. Adding a shop from here on means adding its service name
+#: here, not a new make target.
+STORE_SERVICES := store store-books store-cy store-il store-pl store-kg store-df store-rl store-ps store-fw
+
+seed: ## Seed every shop's catalogue (SEED_PROFILE is set per service in docker-compose.yml)
+	@for s in $(STORE_SERVICES); do \
+		echo "-- $$s --"; \
+		docker compose exec -T $$s node --experimental-strip-types scripts/seed.ts || exit 1; \
+	done
 
 down: ## Stop everything and remove the volumes
 	docker compose down -v
