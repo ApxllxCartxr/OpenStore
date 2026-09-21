@@ -264,6 +264,55 @@ async def test_a_challenge_is_spent_once(rp: PasskeyRP, device: SoftwareAuthenti
     assert refusal.value.code is ReasonCode.AUTHORITY_STALE
 
 
+async def test_the_stored_sign_count_advances_after_an_assertion(
+    rp: PasskeyRP, device: SoftwareAuthenticator
+) -> None:
+    """The stored counter is what makes a cloned authenticator detectable —
+    a clone replaying an old signature presents a counter that does not
+    advance from what was last seen. Never checking it move is indistinguishable
+    from it staying pinned at its zero default forever."""
+    _, _, challenge = await _begin(rp, token="tok1")
+    created = device.create(challenge, attestation="none")
+    raw_id = base64url_to_bytes(str(created["id"]))
+    await rp.verify_enrollment(
+        token="tok1", credential=created, cart_hash=CART, total_minor=TOTAL
+    )
+    after_enrollment = (await rp.credential(raw_id)).sign_count
+
+    _, _, challenge2 = await _begin(rp, token="tok2")
+    await rp.verify_assertion(
+        token="tok2",
+        credential=device.get(challenge2, str(created["id"])),
+        cart_hash=CART,
+        total_minor=TOTAL,
+    )
+    assert (await rp.credential(raw_id)).sign_count > after_enrollment
+
+
+async def test_an_assertion_without_user_verification_is_refused(sessionmaker) -> None:  # type: ignore[no-untyped-def]
+    """`require_user_verification=True` is what turns "this key signed it"
+    into "a human present and verified authorized it" — the whole reason
+    this Authority kind outranks a bare signature."""
+    device = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN, user_verified=True)
+    rp = PasskeyRP(rp_id=RP_ID, origin=ORIGIN, rp_name="SpoiledDuckie", sessionmaker=sessionmaker)
+    _, _, challenge = await _begin(rp, token="tok1")
+    created = device.create(challenge, attestation="none")
+    await rp.verify_enrollment(
+        token="tok1", credential=created, cart_hash=CART, total_minor=TOTAL
+    )
+
+    device.user_verified = False
+    _, _, challenge2 = await _begin(rp, token="tok2")
+    with pytest.raises(PasskeyRefused) as refusal:
+        await rp.verify_assertion(
+            token="tok2",
+            credential=device.get(challenge2, str(created["id"])),
+            cart_hash=CART,
+            total_minor=TOTAL,
+        )
+    assert refusal.value.code is ReasonCode.AUTHORITY_STALE
+
+
 async def test_a_credential_this_shop_never_enrolled_is_refused(
     rp: PasskeyRP, device: SoftwareAuthenticator
 ) -> None:
