@@ -44,6 +44,16 @@ Verified live: 8 shops added as chat contacts, search for "AA batteries" fanned 
 
 Not yet exercised live: the `shop-required` disambiguation widget itself. With this catalogue's SKU-prefixing convention (`CY-`, `IL-`, …), a write's SKU essentially never collides across two shops — only `group` ids do (e.g. both battery shops use `aa-batteries`), and reads fan out before that could matter. The widget is unit-tested and reachable by the empty-catalogue "you have N shops, which one" branch; genuine SKU collision on a write remains a defensive path for a catalogue that doesn't prefix as consistently as this demo's does.
 
+## 2026-09-22 · The budget question, answered and shipped
+
+Closed the operator's original question with a real feature, not just consent copy. A Consumer-set advisory spend ceiling: entered on the Shops page in rupees, stored as a Consumer preference (a new `settings` key-value table, deliberately generic for whatever preference comes next), checked when `place-order` is pending against the same shop's most recent `start-checkout` total. Over the ceiling adds one line to the existing consent modal, explicit that it is a flag, not a block — nothing here claims or attempts enforcement, because nothing here has the authority to (ADR-0008, ADR-0024 — a rail-held mandate stays deliberately unbuilt, this is UX, not a payment-rail feature).
+
+While driving a real checkout live to test it, hit a second real gap the multi-shop dispatch work above left open: `set-destination`, `set-contact`, `start-checkout` and `place-order` carry no sku/group to resolve a shop by, so with 2+ shops known, every step past `add-line` re-asked "which shop?" — including immediately after `add-line` had just resolved one. Fixed: `shopsFor` now falls back to whichever single shop holds basket lines when no id resolves one.
+
+Verified live, start to finish: added SpoiledDuckie, set a ₹100 ceiling, drove tote → destination → contact → fulfillment → checkout (₹948) through the real `openrouter:openai/gpt-oss-20b` driver with 9 other shops known throughout, no shop-required refusals past the first, and the ceiling flag rendered correctly on the pending place-order card. 146 buyer-chat tests green, 582 Python tests green, both live suites green.
+
+Phase 2 scorecard: MCP wire correctness ✓, always-allow widened ✓, ten stores ✓, multi-shop dispatch ✓, budget question ✓ (with a real feature, not just an explanation). Still open: thinking blocks, a real model switcher UI (env-var only today), and true "paste any MCP server, not just this repo's" genericity — the tool set is still the closed 14-name OpenStore list, not fetched from whatever server was pasted.
+
 ---
 
 # Morning report
