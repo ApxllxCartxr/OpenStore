@@ -1,0 +1,124 @@
+{
+  "admission": {
+    "agent_id": "RFC 7638 JWK thumbprint",
+    "oauth_client_credentials": true,
+    "self_registration": true,
+    "signature": "RFC 9421 over @method, @target-uri and content-digest"
+  },
+  "authority": {
+    "completion": "redirect-only",
+    "kinds_accepted": [
+      "confirmed-intent",
+      "passkey",
+      "upi-pin"
+    ],
+    "note": "Every spend terminates in a fresh human Authority at the approve URL on this domain. An agent may build a basket; it may not spend."
+  },
+  "conformance": [
+    {
+      "capability": "supported",
+      "completion": "redirect-only",
+      "deviations": [
+        "Completion is redirect-only: every spend terminates in a fresh human Authority at /agentic/approve on the Merchant's own domain.",
+        "Agent-held delegated payment credentials are refused by design, not unimplemented (ADR-0008, ADR-0013)."
+      ],
+      "payment_instruments_enabled": [
+        "cash-on-delivery",
+        "upi"
+      ],
+      "protocol": "mcp",
+      "rides_on": null,
+      "shape": "envelope",
+      "version": "as carried on main"
+    },
+    {
+      "capability": "supported",
+      "completion": "redirect-only",
+      "deviations": [
+        "Completion is redirect-only: every spend terminates in a fresh human Authority at /agentic/approve on the Merchant's own domain.",
+        "Agent-held delegated payment credentials are refused by design, not unimplemented (ADR-0008, ADR-0013).",
+        "direct-checkout-inside-AI completion: Completion is a same-domain approve handoff, which is UCP's own buyer escalation path rather than a deviation from it. Every spend terminates in a fresh Authority at /agentic/approve."
+      ],
+      "payment_instruments_enabled": [
+        "cash-on-delivery",
+        "upi"
+      ],
+      "protocol": "ucp",
+      "rides_on": null,
+      "shape": "envelope",
+      "version": "as carried on main"
+    },
+    {
+      "capability": "supported",
+      "completion": "redirect-only",
+      "deviations": [
+        "Completion is redirect-only: every spend terminates in a fresh human Authority at /agentic/approve on the Merchant's own domain.",
+        "Agent-held delegated payment credentials are refused by design, not unimplemented (ADR-0008, ADR-0013).",
+        "Human Not Present (Autonomous): Autonomous mode is the `mandate` Authority kind, which is defined, registered and refused in v1 (ADR-0017). Human Present (Direct) completes through the approve ceremony, which is the Trusted Surface AP2's own specification describes."
+      ],
+      "payment_instruments_enabled": [
+        "cash-on-delivery",
+        "upi"
+      ],
+      "protocol": "ap2",
+      "rides_on": "ucp",
+      "shape": "layer",
+      "version": "main @ 2026-09-20"
+    },
+    {
+      "capability": "supported",
+      "completion": "redirect-only",
+      "deviations": [
+        "Completion is redirect-only: every spend terminates in a fresh human Authority at /agentic/approve on the Merchant's own domain.",
+        "Agent-held delegated payment credentials are refused by design, not unimplemented (ADR-0008, ADR-0013).",
+        "completeCheckoutSession: POST /checkout_sessions/{id}/complete hands the merchant a delegated payment credential (a Shared Payment Token or a vault token). That is exactly the authority we removed from agents (ADR-0008, ADR-0013), so the step is refused with a named code and an approve URL. The other four operations work normally."
+      ],
+      "payment_instruments_enabled": [
+        "cash-on-delivery",
+        "upi"
+      ],
+      "protocol": "acp",
+      "rides_on": null,
+      "shape": "envelope",
+      "version": "2026-04-17"
+    }
+  ],
+  "demo": true,
+  "endpoints": {
+    "acp_checkout_sessions": "http://spoiledduckie.localhost/agent/acp/checkout_sessions",
+    "ap2_checkout": "http://spoiledduckie.localhost/agent/ap2/checkout",
+    "approve": "http://spoiledduckie.localhost/agentic/approve",
+    "feed": "http://spoiledduckie.localhost/agent/feed.json",
+    "jwks": "http://spoiledduckie.localhost/.well-known/jwks.json",
+    "mcp": "http://spoiledduckie.localhost/agent/mcp",
+    "register": "http://spoiledduckie.localhost/agent/register",
+    "token": "http://spoiledduckie.localhost/agent/token",
+    "tools": "http://spoiledduckie.localhost/agent/tools",
+    "ucp_checkout": "http://spoiledduckie.localhost/agent/ucp/checkout"
+  },
+  "merchant": {
+    "domain": "spoiledduckie.localhost",
+    "name": "SpoiledDuckie"
+  },
+  "payment": {
+    "delegated_credentials": "refused",
+    "methods_enabled": [
+      "cash-on-delivery",
+      "upi"
+    ],
+    "note": "This Merchant does not accept agent-held payment credentials. Their absence is deliberate (ADR-0008, ADR-0013), not unimplemented."
+  },
+  "protocols": [
+    "mcp",
+    "ucp",
+    "ap2",
+    "acp"
+  ],
+  "scopes": [
+    "search",
+    "build-basket",
+    "start-checkout",
+    "confirm"
+  ],
+  "version": "1"
+}

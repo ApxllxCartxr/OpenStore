@@ -1,0 +1,19 @@
+{
+  "capabilities": {
+    "buyer_escalation": true,
+    "catalog": true,
+    "checkout": true,
+    "direct_completion": false
+  },
+  "deviations": [
+    "Completion is redirect-only: every spend terminates in a fresh human Authority at /agentic/approve on the Merchant's own domain.",
+    "Agent-held delegated payment credentials are refused by design, not unimplemented (ADR-0008, ADR-0013).",
+    "direct-checkout-inside-AI completion: Completion is a same-domain approve handoff, which is UCP's own buyer escalation path rather than a deviation from it. Every spend terminates in a fresh Authority at /agentic/approve."
+  ],
+  "escalation_url": "http://spoiledduckie.localhost/agentic/approve",
+  "merchant": {
+    "domain": "spoiledduckie.localhost",
+    "name": "SpoiledDuckie"
+  },
+  "ucp_version": "as carried on main"
+}
