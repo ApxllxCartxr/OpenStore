@@ -35,7 +35,6 @@ from openstore.sidecar.core.codes import (
 from openstore.sidecar.gate.policy import Policy
 from openstore.sidecar.gate.transcript import Transcript, binding_for
 from openstore.sidecar.trait.client import TraitClient
-from openstore.sidecar.trait.errors import TraitError
 from openstore.sidecar.trait.models import Destination, Line, Quote
 
 
@@ -514,23 +513,3 @@ def _first_difference(pinned: Quote, fresh: Quote) -> str:
         if was is not None and was != ql.line_total_minor:
             return f"{ql.sku} {was} → {ql.line_total_minor}"
     return "the Merchant's answer changed"
-
-
-async def reserve_or_refuse(
-    trait: TraitClient, request: DecisionInput, *, attempt: int = 1
-) -> None:
-    """The reserve that follows a passing `decide()`.
-
-    Separate from the Gate because the Gate decides and does not act. A
-    `sold-out` here means no hold was ever taken, which is why nothing releases
-    one afterwards.
-    """
-    try:
-        await trait.reserve(
-            request.order_id,
-            request.lines,
-            attempt=attempt,
-            discount_code=request.discount_code,
-        )
-    except TraitError:
-        raise
