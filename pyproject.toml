@@ -89,9 +89,14 @@ ignore_missing_imports = true
 source_paths = ["src/openstore/sidecar"]
 # gate/decide.py: the single authorizer every money decision passes through.
 # ledger/entries.py: the actual money-movement bookkeeping the Gate's PASS
-# authorizes — the next-highest-value target once the Gate's own backlog is
-# triaged (see mutmut_survivor_backlog memory).
-only_mutate = ["src/openstore/sidecar/gate/decide.py", "src/openstore/sidecar/ledger/entries.py"]
+# authorizes. authority/passkey.py: the WebAuthn ceremony that binds an
+# Authority to a cart/amount/merchant/expiry in the first place — the input
+# the Gate's authority check trusts (see mutmut_survivor_backlog memory).
+only_mutate = [
+    "src/openstore/sidecar/gate/decide.py",
+    "src/openstore/sidecar/ledger/entries.py",
+    "src/openstore/sidecar/authority/passkey.py",
+]
 # Test selection MUST stay narrower than "tests/" — mutmut's isolated
 # mutants/ copy only clones tests/ plus source_paths, not the rest of src/,
 # so collecting the full suite there fails on the first test that reads a
@@ -101,7 +106,12 @@ only_mutate = ["src/openstore/sidecar/gate/decide.py", "src/openstore/sidecar/le
 # "everything" on purpose for a first re-established baseline; widen to
 # test_golden_replays.py + test_protocols.py before trusting a "survived"
 # verdict enough to skip it.
-pytest_add_cli_args_test_selection = ["tests/test_gate.py", "tests/test_ledger.py"]
+pytest_add_cli_args_test_selection = [
+    "tests/test_gate.py",
+    "tests/test_ledger.py",
+    "tests/test_passkey.py",
+    "tests/test_durability.py",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
