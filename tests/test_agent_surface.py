@@ -378,3 +378,28 @@ def test_an_expired_token_is_refused(client: TestClient, tokens: TokenStore) -> 
 def test_the_demo_banner_says_no_real_money_moves(client: TestClient, tokens: TokenStore) -> None:
     tap = tokens.issue_tap("ord_1", "cart-hash", 259700)
     assert "no real money moves" in client.get(f"/agentic/approve?t={tap.token}").text
+
+
+def test_adding_a_sku_twice_makes_one_line_of_two() -> None:
+    """Quantities accumulate per SKU. `Line` is frozen because it is a value in
+    the `cart_hash` preimage, so this used to raise `frozen_instance` and answer
+    HTTP 500 — found by driving the running shop, not by a suite."""
+    from openstore.sidecar.basket import Basket
+
+    basket = Basket(agent_id="agent_x")
+    basket.add("SD-TOTE-BLK-M", 1)
+    basket.add("SD-TOTE-BLK-M", 2)
+
+    assert [(ln.sku, ln.qty) for ln in basket.lines] == [("SD-TOTE-BLK-M", 3)]
+
+
+def test_an_addon_is_its_own_line_from_the_same_sku() -> None:
+    """Parent is part of the line's identity: a gift-wrap hanging off a tote is
+    not the same line as a gift-wrap bought on its own."""
+    from openstore.sidecar.basket import Basket
+
+    basket = Basket(agent_id="agent_x")
+    basket.add("SD-GIFTWRAP", 1)
+    basket.add("SD-GIFTWRAP", 1, parent="SD-TOTE-BLK-M")
+
+    assert len(basket.lines) == 2

@@ -32,9 +32,15 @@ class Basket:
     def add(self, sku: str, qty: int, parent: str | None = None) -> None:
         """Quantities accumulate per SKU: two `add-line` calls for one SKU are
         one line of two, not two lines the Merchant would quote separately."""
-        for line in self.lines:
+        for index, line in enumerate(self.lines):
             if line.sku == sku and line.parent == parent:
-                line.qty += qty
+                # **Replaced, not mutated.** `Line` is frozen — it is a value in
+                # the `cart_hash` preimage, and one that could be edited in place
+                # is one that can change after it has been hashed. Incrementing
+                # it raised a pydantic `frozen_instance` error, so a second
+                # `add-line` for a SKU already in the basket answered HTTP 500
+                # rather than adding anything.
+                self.lines[index] = Line(sku=sku, qty=line.qty + qty, parent=parent)
                 return
         self.lines.append(Line(sku=sku, qty=qty, parent=parent))
 
