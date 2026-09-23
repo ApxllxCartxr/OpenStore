@@ -68,3 +68,44 @@ describe('the marks a shop assistant actually writes', () => {
 		expect(renderMarkdown('   \n  ')).toBe('');
 	});
 });
+
+describe('tables, because a shop assistant compares things', () => {
+	it('renders a table the model wrote directly under its lead-in', () => {
+		// No blank line between the sentence and the pipes, which is how models
+		// actually emit this. Before tables existed the whole thing rendered as
+		// one paragraph of pipes separated by <br />.
+		const out = renderMarkdown(
+			'Here are a few ideas:\n| Shop | Item | Price |\n|---|---|---|\n| Shop 2 | Mug set | 1,199 |'
+		);
+		expect(out).toContain('<p>Here are a few ideas:</p>');
+		expect(out).toContain('<th>Shop</th>');
+		expect(out).toContain('<td>Mug set</td>');
+		expect(out).not.toContain('|');
+	});
+
+	it('honours GFM column alignment', () => {
+		const out = renderMarkdown('| A | B |\n|:--|--:|\n| x | 1 |');
+		expect(out).toContain('<th class="md-right">B</th>');
+		expect(out).toContain('<td class="md-right">1</td>');
+		expect(out).toContain('<th>A</th>');
+	});
+
+	it('leaves pipes in a sentence alone', () => {
+		// The delimiter row is what makes a table. Without it this is prose, and
+		// a renderer that split on pipes alone would eat half of it.
+		const out = renderMarkdown('We stock small | medium | large sizes.');
+		expect(out).toBe('<p>We stock small | medium | large sizes.</p>');
+	});
+
+	it('keeps inline marks and escaping inside cells', () => {
+		const out = renderMarkdown('| Item |\n|---|\n| **Tote** <img src=x> |');
+		expect(out).toContain('<td><strong>Tote</strong> &lt;img');
+		expect(out).not.toContain('<img');
+	});
+
+	it('keeps a ragged row rather than dropping it', () => {
+		// A row with a missing cell is still something the model said.
+		const out = renderMarkdown('| A | B |\n|---|---|\n| only one |');
+		expect(out).toContain('<td>only one</td>');
+	});
+});

@@ -35,11 +35,20 @@ from openstore.sidecar.core.codes import (
     ToolName,
 )
 from openstore.sidecar.core.feed import build_feed
+from openstore.sidecar.gate.policy import Policy, current_policy
 from openstore.sidecar.protocols import acp, ap2, mcp, tools, ucp
+from openstore.sidecar.protocols.events import EventStore
+from openstore.sidecar.protocols.idempotency import (
+    MAX_KEY_LENGTH,
+    IdempotencyConflict,
+    IdempotencyStore,
+    fingerprint,
+)
 from openstore.sidecar.protocols.tools import ToolRefused
 from openstore.sidecar.protocols.wellknown import (
     agent_commerce_card,
     jwks_document,
+    policy_limits,
     ucp_manifest,
 )
 from openstore.sidecar.trait.errors import TraitError
@@ -53,18 +62,36 @@ class AgentSurface:
 
     merchant_domain: str = "spoiledduckie.localhost"
     merchant_name: str = "SpoiledDuckie"
+    #: What this shop sells, for the card's discovery hint. Declared, unverified,
+    #: and never a filter — see `agent_commerce_card`.
+    merchant_description: str = ""
+    merchant_categories: tuple[str, ...] = ()
     public_origin: str = ""
     """The origin the cards advertise. Empty means `https://<merchant_domain>`,
     which is right for every real install and wrong for the plain-http demo —
     so the demo sets it."""
     demo: bool = True
-    enabled_methods: frozenset[PaymentMethod] = frozenset(
-        {PaymentMethod.UPI, PaymentMethod.CASH_ON_DELIVERY}
-    )
-    enabled_authority_kinds: frozenset[AuthorityKind] = frozenset(
-        {AuthorityKind.UPI_PIN, AuthorityKind.PASSKEY, AuthorityKind.CONFIRMED_INTENT}
-    )
+
+    @property
+    def policy(self) -> Policy:
+        """The Merchant's live Policy — the same one the Gate
+        evaluates. The card publishes limits an agent plans against, so it has
+        to report what is enforced rather than a copy taken at boot: these were
+        two frozensets on this dataclass that nothing ever set from a Policy,
+        so the card agreed with the Gate only because the defaults matched."""
+        return current_policy()
+
+    @property
+    def enabled_methods(self) -> frozenset[PaymentMethod]:
+        return self.policy.enabled_methods
+
+    @property
+    def enabled_authority_kinds(self) -> frozenset[AuthorityKind]:
+        return self.policy.enabled_authority_kinds
+
     admission: Admission = field(default_factory=Admission)
+    idempotency: IdempotencyStore = field(default_factory=IdempotencyStore)
+    events: EventStore = field(default_factory=EventStore)
     limiter: RateLimiter = field(default_factory=RateLimiter)
     fetcher: ProfileFetcher = field(default_factory=ProfileFetcher)
     jwks: dict[str, Any] = field(default_factory=lambda: {"keys": []})
@@ -87,6 +114,14 @@ class AgentSurface:
 #: The tools that read or write the Consumer's cart. Everything else — browsing,
 #: placing, asking after an order — touches no basket, and is dispatched without
 #: one so a missing database cannot break the catalogue.
+#: Reads. Never stored against an idempotency key: they change nothing, so a
+#: repeat is already harmless, and keeping their results would turn the key
+#: table into a catalogue cache with no invalidation — an agent retrying
+#: `search` would be served yesterday's stock.
+READ_TOOLS: frozenset[ToolName] = frozenset(
+    {ToolName.SEARCH, ToolName.READ_ITEM, ToolName.ORDER_STATUS}
+)
+
 BASKET_TOOLS: frozenset[ToolName] = frozenset(
     {
         ToolName.ADD_LINE,
@@ -150,6 +185,9 @@ def card() -> dict[str, Any]:
         enabled_methods=_surface.enabled_methods,
         enabled_authority_kinds=_surface.enabled_authority_kinds,
         demo=_surface.demo,
+        description=_surface.merchant_description,
+        categories=_surface.merchant_categories,
+        limits=policy_limits(_surface.policy),
     )
 
 
@@ -190,9 +228,24 @@ async def register(request: Request) -> JSONResponse:
     except ProfileRefused as exc:
         return _refuse(exc.code, exc.detail)
 
+    # Validated at registration so a bad callback is a refusal the agent sees
+    # now, rather than six silent delivery failures it never hears about. It is
+    # re-checked on every send as well: a hostname that was public today can
+    # point at loopback tomorrow, and only the check at send time is load
+    # bearing.
+    callback = profile.callback_url
+    if callback:
+        try:
+            _surface.fetcher.check_url(callback)
+        except ProfileRefused as exc:
+            return _refuse(exc.code, f"callback_url: {exc.detail}")
+
     try:
         token = _surface.admission.issue_for_stranger(
-            profile.agent_id, name=profile.name, profile_url=profile.source_url
+            profile.agent_id,
+            name=profile.name,
+            profile_url=profile.source_url,
+            callback_url=callback,
         )
     except TraitError as exc:
         return _refuse(exc.code, exc.detail)
@@ -200,6 +253,9 @@ async def register(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "agent_id": profile.agent_id,
+            # Echoed so an agent can tell whether its callback was accepted
+            # without inferring it from the absence of a refusal.
+            "events": {"callback_url": callback, "enabled": bool(callback)},
             "access_token": token.token,
             "token_type": "Bearer",
             "expires_at": token.expires_at.isoformat(),
@@ -338,13 +394,46 @@ async def mcp_call(request: Request) -> JSONResponse:
     _surface.admission.note_call(agent.agent_id)
     raw_arguments = params.get("arguments")
     arguments: dict[str, Any] = raw_arguments if isinstance(raw_arguments, dict) else {}
+
+    # The idempotency key rides beside the arguments, not inside them: it is a
+    # property of the delivery attempt and not something any tool's schema
+    # declares, and folding it into `arguments` would put it in the digest of
+    # the very request it identifies.
+    key = str(params.get("idempotency_key") or "").strip()
+    if key and len(key) > MAX_KEY_LENGTH:
+        return _jsonrpc_result(
+            id_,
+            mcp.call_error(
+                ReasonCode.IDEMPOTENCY_CONFLICT,
+                f"An idempotency key is at most {MAX_KEY_LENGTH} characters.",
+            ),
+        )
+    replayable = bool(key) and _surface.idempotency.enabled and tool not in READ_TOOLS
+    digest = fingerprint(tool.value, arguments) if replayable else ""
+    if replayable:
+        try:
+            stored = await _surface.idempotency.replay(key, agent.agent_id, digest)
+        except IdempotencyConflict as clash:
+            return _jsonrpc_result(id_, mcp.call_error(ReasonCode.IDEMPOTENCY_CONFLICT, str(clash)))
+        if stored is not None:
+            # The first answer, verbatim, flagged so a client can tell a replay
+            # from a fresh run. Without the flag an agent cannot distinguish
+            # "your retry worked" from "it ran twice and this is the second".
+            return _jsonrpc_result(id_, mcp.call_result({**stored, "replayed": True}))
+
     try:
         result = await _run_tool(tool, agent.agent_id, arguments)
     except ToolRefused as refusal:
-        return _jsonrpc_result(id_, mcp.call_error(refusal.code, refusal.detail))
+        return _jsonrpc_result(id_, mcp.call_error(refusal.code, refusal.detail, **refusal.fields))
     except TraitError as exc:
         # The Merchant refused. Its reason is better than any we could invent.
         return _jsonrpc_result(id_, mcp.call_error(exc.code, exc.detail))
+
+    # Stored only on success. A refusal is not an outcome worth replaying: the
+    # agent that fixes its arguments and retries with the same key is asking a
+    # different question, and would get a conflict for having corrected itself.
+    if replayable:
+        await _surface.idempotency.remember(key, agent.agent_id, tool.value, digest, result)
     return _jsonrpc_result(id_, mcp.call_result(result))
 
 
@@ -421,7 +510,13 @@ async def _dispatch(
         return basket
 
     if tool is ToolName.SEARCH:
-        return await tools.search(merchant(), str(payload.get("query", "")))
+        raw_limit = payload.get("limit")
+        return await tools.search(
+            merchant(),
+            str(payload.get("query", "")),
+            limit=int(raw_limit) if isinstance(raw_limit, int) else None,
+            cursor=str(payload.get("cursor", "")),
+        )
     if tool is ToolName.READ_ITEM:
         return await tools.read_item(merchant(), str(payload.get("group", "")))
     if tool is ToolName.ADD_LINE:
@@ -669,7 +764,7 @@ async def ucp_checkout(request: Request) -> JSONResponse:
     try:
         checkout = await _start_from(await request.json(), agent.agent_id)
     except ToolRefused as exc:
-        return _refuse(exc.code, exc.detail)
+        return _refuse(exc.code, exc.detail, **exc.fields)
     except TraitError as exc:
         return _refuse(exc.code, exc.detail)
 
@@ -695,7 +790,7 @@ async def acp_create_session(request: Request) -> JSONResponse:
     try:
         checkout = await _start_from(await request.json(), agent.agent_id)
     except ToolRefused as exc:
-        return _refuse(exc.code, exc.detail)
+        return _refuse(exc.code, exc.detail, **exc.fields)
     except TraitError as exc:
         return _refuse(exc.code, exc.detail)
 
@@ -757,7 +852,7 @@ async def ap2_checkout(request: Request) -> JSONResponse:
     try:
         checkout = await _start_from(await request.json(), agent.agent_id)
     except ToolRefused as exc:
-        return _refuse(exc.code, exc.detail)
+        return _refuse(exc.code, exc.detail, **exc.fields)
     except TraitError as exc:
         return _refuse(exc.code, exc.detail)
 

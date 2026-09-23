@@ -24,10 +24,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from openstore.sidecar.core.codes import AuthorityKind, PaymentMethod  # noqa: E402
+from openstore.sidecar.gate.policy import Policy  # noqa: E402
 from openstore.sidecar.protocols.wellknown import (  # noqa: E402
     agent_commerce_card,
     jwks_document,
+    policy_limits,
     ucp_manifest,
 )
 
@@ -49,15 +50,20 @@ KEYRING_JWKS = {
     ]
 }
 
+# The default Policy, which is what an unconfigured deployment enforces and so
+# what the route serves. Built through `policy_limits` rather than written out
+# here: a golden whose limits were typed by hand would agree with nothing, and
+# the point of this file is to fail when the served card moves.
+DEFAULT_POLICY = Policy()
+
 CARD = agent_commerce_card(
     merchant_domain=DOMAIN,
     merchant_name="SpoiledDuckie",
     origin=ORIGIN,
-    enabled_methods=frozenset({PaymentMethod.UPI, PaymentMethod.CASH_ON_DELIVERY}),
-    enabled_authority_kinds=frozenset(
-        {AuthorityKind.UPI_PIN, AuthorityKind.PASSKEY, AuthorityKind.CONFIRMED_INTENT}
-    ),
+    enabled_methods=DEFAULT_POLICY.enabled_methods,
+    enabled_authority_kinds=DEFAULT_POLICY.enabled_authority_kinds,
     demo=True,
+    limits=policy_limits(DEFAULT_POLICY),
 )
 MANIFEST = ucp_manifest(merchant_domain=DOMAIN, merchant_name="SpoiledDuckie", origin=ORIGIN)
 JWKS = jwks_document(KEYRING_JWKS)

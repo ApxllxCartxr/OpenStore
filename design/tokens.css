@@ -11,11 +11,14 @@
 
 /* ============================================================
    Fonts — self-hosted, subsetted to woff2 (see /static/fonts)
-   Roles:  EB Garamond → the name, the one display face, used once
-           Open Sauce Sans → body and titles
-           Iosevka Term SS08 → every mono label, chip, clock and spec row
-           PP Kyoto → every other serif touchpoint (flourishes, pull quotes)
-   Iosevka is OFL 1.1 — see static/fonts/LICENSE-Iosevka.txt.
+   Two families, and only two:
+           EB Garamond → the name, the one display face, used once
+           Open Sauce Sans → everything else, body and titles alike
+   The mono and second-serif roles still exist as tokens, because the
+   surfaces name them, but they resolve to these two faces: Iosevka and
+   PP Kyoto are no longer loaded. Money surfaces keep their instrument
+   feel from `font-variant-numeric: tabular-nums`, which Open Sauce Sans
+   supports, rather than from a monospaced family.
    EB Garamond is OFL 1.1 — see static/fonts/LICENSE-EBGaramond.txt.
    ============================================================ */
 @font-face {
@@ -41,21 +44,6 @@
 }
 
 @font-face {
-	font-family: 'Iosevka Term SS08';
-	src: url('/fonts/IosevkaTermSS08-Regular.woff2') format('woff2');
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-@font-face {
-	font-family: 'Iosevka Term SS08';
-	src: url('/fonts/IosevkaTermSS08-SemiBold.woff2') format('woff2');
-	font-weight: 600 700;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
 	font-family: 'EB Garamond';
 	src: url('/fonts/EBGaramond-400.woff2') format('woff2');
 	font-weight: 400;
@@ -70,114 +58,84 @@
 	font-display: swap;
 }
 
-@font-face {
-	font-family: 'PP Kyoto';
-	src: url('/fonts/PPKyoto-Medium.woff2') format('woff2');
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-@font-face {
-	font-family: 'PP Kyoto';
-	src: url('/fonts/PPKyoto-Extrabold.woff2') format('woff2');
-	font-weight: 700;
-	font-style: normal;
-	font-display: swap;
-}
+/* `:root`, not `@theme`. Tailwind compiles an `@theme` block into `:root` at
+   build time, so the two SvelteKit roots could not tell the difference — but
+   the sidecar serves this file RAW at `/agentic/static/tokens.css`, with no
+   build step anywhere in the path. A browser treats an unknown at-rule as an
+   error and skips the whole block, so every `--font-*` came back undefined and
+   `font-family: var(--font-mono)` fell through to the browser default. That is
+   why the console rendered in serif while `/` did not. Every other token in
+   this file is already declared here for the same reason.
 
-@theme {
+   Nothing needs the `@theme` form: no surface uses Tailwind's generated
+   `font-*` utilities, they all read `var(--font-…)` directly. */
+:root {
 	--font-display: 'EB Garamond', Georgia, serif; /* main name */
 	/* Titles share the body family at SemiBold — EB Garamond is the only
 	   display face on the page, used once, on the name — a second serif
 	   underneath it would read as two headings arguing. */
 	--font-title: 'Open Sauce Sans', ui-sans-serif, system-ui, sans-serif;
 	--font-body: 'Open Sauce Sans', ui-sans-serif, system-ui, sans-serif; /* body */
-	/* Every other serif touchpoint (flourishes, pull quotes) is PP Kyoto,
-	   kept distinct from the EB Garamond display face. */
-	--font-serif: 'PP Kyoto', Georgia, serif;
-	/* Mono is load-bearing here — chips, spec rows, the clock, every meta
-	   label — so it ships rather than falling back to whatever the OS has. */
-	--font-mono: 'Iosevka Term SS08', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	/* The serif touchpoints (flourishes, pull quotes) are the display face
+	   now that PP Kyoto is gone — one serif on the page, not two. */
+	--font-serif: 'EB Garamond', Georgia, serif;
+	/* Mono is a ROLE, not a family, here: chips, spec rows, prices and hashes
+	   still want figures that line up, so they take the body face with
+	   `font-variant-numeric: tabular-nums`. Keeping the token means no surface
+	   has to learn that the monospaced face went away. */
+	--font-mono: 'Open Sauce Sans', ui-sans-serif, system-ui, sans-serif;
 }
 
 /* ============================================================
-   PALETTE — pitch-black background (#000000) on every surface.
-   Both themes use the dark (Tokyo Night) foreground set so body
-   copy stays readable on black; page ground (--bg) is pure black.
-   Components never reference a literal colour.
+   PALETTE — warm paper, one theme. Every surface is light: the ground
+   is paper (`--bg`), cards sit a shade brighter (`--bg-raised`) and
+   recessed panels a shade darker (`--bg-sunken`). Components never
+   reference a literal colour, so a surface gets this by importing the
+   file and nothing else.
 
-   Dark base: Tokyo Night (tokyo-night/tokyo-night-vscode-theme)
-           fg #c0caf5 · red #f7768e · cyan #7dcfff
-
-   --muted is for secondary text; --comment is decoration-only
+   `--muted` is for secondary text; `--comment` is decoration-only
    (rules, disabled glyphs) — too low-contrast for body copy.
    ============================================================ */
 :root {
-	--bg: #000000;
-	--bg-raised: #20212e;
-	--bg-sunken: #15161f;
-	--fg: #c0caf5;
-	--muted: #a9b1d6;
-	--line: #3b4261;
-	--accent: #f7768e;
-	--accent-2: #7dcfff;
-	--comment: #565f89;
-	--ok: #9ece6a;
-	--scrim: rgb(0 0 0 / 0.55);
-}
+	color-scheme: light;
 
-/* The inline script in app.html stamps data-theme before first paint, so the
-   media query only decides for visitors who have never picked a theme. */
-@media (prefers-color-scheme: dark) {
-	:root:not([data-theme='light']) {
-		--bg: #000000;
-		--bg-raised: #20212e;
-		--bg-sunken: #15161f;
-		--fg: #c0caf5;
-		--muted: #a9b1d6;
-		--line: #3b4261;
-		--accent: #f7768e;
-		--accent-2: #7dcfff;
-		--comment: #565f89;
-		--ok: #9ece6a;
-		--scrim: rgb(0 0 0 / 0.55);
-	}
-}
-
-:root[data-theme='dark'] {
-	--bg: #000000;
-	--bg-raised: #20212e;
-	--bg-sunken: #15161f;
-	--fg: #c0caf5;
-	--muted: #a9b1d6;
-	--line: #3b4261;
-	--accent: #f7768e;
-	--accent-2: #7dcfff;
-	--comment: #565f89;
-	--ok: #9ece6a;
-	--scrim: rgb(0 0 0 / 0.55);
+	--bg: #f6f5f2;
+	--bg-raised: #fffdfa;
+	--bg-sunken: #edece7;
+	--fg: #1b1b1f;
+	--muted: #55585f;
+	--line: #e2e0da;
+	--accent: #b03a52;
+	--accent-2: #1a6491;
+	--comment: #8a8d96;
+	--ok: #2f7d32;
+	--scrim: rgb(27 27 31 / 0.4);
 }
 
 /* ============================================================
    TYPE SCALE — defined as custom properties so every surface
    resolves to one source of truth. Steps are dramatic on purpose:
    display → title → body is a cliff, not a slope. Caption sits
-   below body in size AND goes mono + tracked + uppercase, so
-   metadata never competes with the headline above it.
+   below body in size AND goes tracked + uppercase, so metadata
+   never competes with the headline above it.
    ============================================================ */
 :root {
-	--t-display: clamp(3.25rem, 9vw, 6rem); /* hero name */
-	--t-h1: clamp(1.85rem, 3.5vw, 2.6rem); /* section title (job role) */
-	--t-h2: 0.72rem; /* small mono badge: the "live" status dot */
-	--t-section: clamp(1.6rem, 2.8vw, 2.2rem); /* section titles: Work, Experience, Stack, Writing */
-	--t-body: 1rem;
+	--t-display: clamp(3.75rem, 9.5vw, 6.5rem); /* hero name */
+	--t-h1: clamp(2.1rem, 3.8vw, 3rem); /* section title (job role) */
+	--t-h2: 0.85rem; /* small badge: the "live" status dot */
+	--t-section: clamp(1.8rem, 3vw, 2.5rem); /* section titles: Work, Experience, Stack, Writing */
+	/* `html` sets its font-size from this token, so it is the ONE lever for
+	   overall text size: every rem elsewhere is measured against it. 1.125rem
+	   is 18px against the browser default, which is the step up this design
+	   asked for — nothing downstream had to change to get it. */
+	--t-body: 1.125rem;
 	/* Caption is metadata, not fine print. It used to sit at 0.75rem tracked
 	   mono, which turned every label on the page into something you had to
 	   lean in for — nothing here reads below this size any more. */
-	--t-caption: 0.95rem;
+	--t-caption: 0.9375rem;
 	--t-track: 0.06em;
 
-	--t-label-ordinal: clamp(1.5rem, 3vw, 2.4rem); /* wall-label ordinal */
+	--t-label-ordinal: clamp(1.7rem, 3.2vw, 2.7rem); /* wall-label ordinal */
 
 	--measure: 64ch;
 	--col-label: 8.5rem;

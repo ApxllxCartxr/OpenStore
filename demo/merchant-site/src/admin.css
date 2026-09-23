@@ -29,7 +29,7 @@ body {
 }
 .admin-brand b {
 	display: block;
-	font-size: 0.875rem;
+	font-size: var(--t-body);
 	font-weight: 600;
 }
 .admin-brand span {
@@ -184,11 +184,11 @@ body {
 }
 .chart .tick {
 	fill: var(--muted);
-	font-size: 10px;
+	font-size: 13px;
 }
 .chart .val {
 	fill: var(--fg);
-	font-size: 10px;
+	font-size: 13px;
 	font-weight: 600;
 }
 .chart-empty {

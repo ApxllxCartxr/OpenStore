@@ -19,7 +19,20 @@ export const sql = postgres(url, {
 	types: {
 		bigint: postgres.BigInt
 	},
-	transform: { undefined: null }
+	transform: { undefined: null },
+	// `migrate()` is idempotent by design, so every re-run raises one
+	// `42P07 relation ... already exists, skipping` per object. postgres.js
+	// prints those by default, which buried the line that actually matters —
+	// what the seed wrote — under sixteen stack-shaped objects per shop.
+	//
+	// Only that one code is dropped, and anything else postgres has to say is
+	// still printed. A blanket `onnotice: () => {}` would also swallow the
+	// notices worth reading: a truncated identifier, a deprecated cast, a
+	// constraint quietly not created.
+	onnotice: (notice) => {
+		if (notice.code === '42P07') return;
+		console.warn(notice);
+	}
 });
 
 export async function migrate(): Promise<void> {

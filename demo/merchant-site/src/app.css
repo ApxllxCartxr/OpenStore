@@ -41,13 +41,15 @@ body {
 	color: var(--fg);
 }
 
-/* Iosevka is load-bearing, not decoration: every price, SKU, reason code and
-   hash. This is what makes the money surfaces look like instruments. */
+/* The money surfaces — every price, SKU, reason code and hash — keep their
+   instrument feel from tabular figures rather than from a second family: there
+   is no monospaced face on the page any more, so `--font-mono` resolves to the
+   body face and the digits do the work. */
 .mono,
 .price,
 .sku,
 code {
-	font-family: 'Iosevka Term SS08', ui-monospace, monospace;
+	font-family: var(--font-mono);
 	font-variant-numeric: tabular-nums;
 }
 
@@ -55,7 +57,7 @@ code {
    Every other heading is Open Sauce Sans at 600, which is why headings below
    set a weight but never a family. */
 .shop-name {
-	font-family: 'EB Garamond', Georgia, serif;
+	font-family: var(--font-display);
 	font-weight: 400;
 	letter-spacing: -0.01em;
 }

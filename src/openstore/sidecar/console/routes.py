@@ -14,6 +14,7 @@ wrong forever, so it is asserted by tests here rather than left to the
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -31,8 +32,9 @@ from openstore.sidecar.core.codes import (
     ReasonCode,
 )
 from openstore.sidecar.core.settings import get_settings
-from openstore.sidecar.gate.policy import Policy
-from openstore.sidecar.protocols.agent_routes import get_surface
+from openstore.sidecar.gate.policy import Policy, current_policy, set_current_policy
+from openstore.sidecar.protocols import mcp
+from openstore.sidecar.protocols.agent_routes import card, get_surface, jwks, ucp_card
 
 router = APIRouter(prefix="/agentic")
 
@@ -55,7 +57,12 @@ class ConsoleStore:
     """Live console state. Policy edits land here and the Gate reads them, so an
     edit changes Gate outcomes without a restart."""
 
-    policy: Policy = field(default_factory=Policy)
+    @property
+    def policy(self) -> Policy:
+        """The live Policy — the same one the Gate evaluates and the card
+        publishes, read through the holder rather than kept here."""
+        return current_policy()
+
     keys: list[dict[str, Any]] = field(default_factory=list)
     agents: list[dict[str, Any]] = field(default_factory=list)
     receipts: list[dict[str, Any]] = field(default_factory=list)
@@ -170,6 +177,15 @@ async def build_state(store: ConsoleStore) -> ConsoleState:
         overdue_holds=store.overdue_holds,
         dev_profile_hosts=settings.dev_profile_hosts,
         export_acknowledged=store.export_acknowledged,
+        # Read from the handlers that serve these paths, not rebuilt here. A
+        # console that assembled its own copy of the card would be a second
+        # source of truth for the one document strangers integrate against.
+        discovery={
+            "/.well-known/agent-commerce.json": card(),
+            "/.well-known/ucp.json": ucp_card(),
+            "/.well-known/jwks.json": jwks(),
+        },
+        tools=mcp.tools_list(),
     )
 
 
@@ -187,6 +203,15 @@ def tokens_css() -> Response:
 
     path = Path("design/tokens.css")
     if not path.exists():
+        # Loud, because the failure is not. The page still renders with every
+        # custom property undefined, which looks like a font bug rather than a
+        # missing file — the console falls back to the browser's default serif
+        # and nothing in the logs says why.
+        logging.getLogger("openstore").warning(
+            "NO TOKEN LAYER: %s is missing, so the console and the receipt viewer "
+            "render with every design token undefined.",
+            path.resolve(),
+        )
         return Response(status_code=404, content="")
     return Response(content=path.read_text(encoding="utf-8"), media_type="text/css")
 
@@ -228,9 +253,19 @@ def record_overdue_hold(order_id: str, status: str, deadline: datetime, amount_m
 
 
 def set_policy(policy: Policy) -> None:
-    """A policy edit. The Gate reads the same object, so the next decision uses
-    it — no restart, and no second copy to drift."""
-    get_console_store().policy = policy
+    """A policy edit, applied to the one live Policy.
+
+    Rebinding a local copy was the bug. `ConsoleStore`, `CheckoutContext` and
+    `AgentSurface` each held their own `Policy`, and this function replaced only
+    the console's — so an edit changed what `/agentic` displayed and nothing the
+    Gate enforced. The cap, the window switch, the blocked tags: all rendered
+    correctly, all applied to nothing.
+
+    The test meant to catch it read `get_console_store().policy` back, which was
+    the object this function had just written. It asserted this function against
+    itself and passed while its own name was false.
+    """
+    set_current_policy(policy)
 
 
 __all__ = [

@@ -12,6 +12,21 @@
 	auto_https off
 }
 
+(fonts) {
+	# The shared type layer, from ONE place for every origin.
+	#
+	# `design/tokens.css` asks for `/fonts/*.woff2` on whatever origin it was
+	# loaded from — a shop, its console, the chat — so serving them per app
+	# would be a copy of the same five files in every static/ directory and
+	# four chances to update only some of them. Nothing served them at all
+	# until now, which is why every surface was quietly rendering in the
+	# system fallback rather than in Open Sauce Sans.
+	handle /fonts/* {
+		root * /srv
+		file_server
+	}
+}
+
 http://spoiledduckie.localhost {
 	# The sidecar's three mount points. Everything else is the store's.
 	handle /.well-known/* {
@@ -47,6 +62,8 @@ http://spoiledduckie.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+
+	import fonts
 
 	handle {
 		reverse_proxy store:3000
@@ -97,6 +114,8 @@ http://dogeared.localhost {
 		respond "Not found" 404
 	}
 
+	import fonts
+
 	handle {
 		reverse_proxy store-books:3000
 	}
@@ -129,6 +148,8 @@ http://circuityard.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-cy:3000
 	}
@@ -160,6 +181,8 @@ http://ironlist.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-il:3000
 	}
@@ -191,6 +214,8 @@ http://pantryline.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-pl:3000
 	}
@@ -222,6 +247,8 @@ http://kettleandgrain.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-kg:3000
 	}
@@ -253,6 +280,8 @@ http://deskfield.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-df:3000
 	}
@@ -284,6 +313,8 @@ http://rootandleaf.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-rl:3000
 	}
@@ -315,6 +346,8 @@ http://playspool.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-ps:3000
 	}
@@ -346,6 +379,8 @@ http://furrow.localhost {
 	handle /admin* {
 		respond "Not found" 404
 	}
+	import fonts
+
 	handle {
 		reverse_proxy store-fw:3000
 	}
@@ -356,7 +391,11 @@ http://furrow.localhost {
 }
 
 http://chat.localhost {
-	reverse_proxy buyer-chat:3001
+	import fonts
+
+	handle {
+		reverse_proxy buyer-chat:3001
+	}
 
 	log {
 		output stdout

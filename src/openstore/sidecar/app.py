@@ -16,8 +16,8 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from openstore.sidecar.authority.tokens import TokenStore
 from openstore.sidecar.basket import BasketStore
@@ -26,13 +26,16 @@ from openstore.sidecar.console.approve import router as approve_router
 from openstore.sidecar.console.merchant_actions import router as merchant_actions_router
 from openstore.sidecar.console.refunds import configure_refunds
 from openstore.sidecar.console.routes import router as console_router
+from openstore.sidecar.core.correlation import new_request_id, request_id, set_request_id
 from openstore.sidecar.core.settings import Settings, get_settings
+from openstore.sidecar.evidence.bundle import Bundle
 from openstore.sidecar.evidence.keys import Keyring, load_or_enroll
 from openstore.sidecar.evidence.store import ReceiptStore, configure_receipts, get_receipt_store
+from openstore.sidecar.evidence.viewer import not_found_page, receipt_page
 from openstore.sidecar.protocols.agent_routes import get_surface
 from openstore.sidecar.protocols.agent_routes import router as agent_router
 from openstore.sidecar.provider.routes import router as provider_router
-from openstore.sidecar.verify.checks import verify
+from openstore.sidecar.verify.checks import VerifyResult, verify
 
 
 @asynccontextmanager
@@ -55,9 +58,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from openstore.sidecar.console.approve import configure as configure_approve
     from openstore.sidecar.core.db import ensure_schema, make_engine, make_sessionmaker
     from openstore.sidecar.evidence.store import get_receipt_store
-    from openstore.sidecar.gate.policy import Policy
     from openstore.sidecar.protocols.agent_routes import AgentSurface
     from openstore.sidecar.protocols.agent_routes import configure as configure_surface
+    from openstore.sidecar.protocols.events import EventStore
+    from openstore.sidecar.protocols.idempotency import IdempotencyStore
     from openstore.sidecar.trait.client import TraitClient
 
     settings = get_settings()
@@ -76,6 +80,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         AgentSurface(
             merchant_domain=merchant_domain,
             merchant_name=settings.webauthn_rp_name or "This shop",
+            merchant_description=settings.openstore_merchant_description,
+            merchant_categories=settings.merchant_categories,
             public_origin=settings.openstore_public_origin,
             demo=settings.openstore_demo_mode,
             trait=trait,
@@ -121,15 +127,27 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_receipts(sessionmaker)
     configure_refunds(sessionmaker)
     get_surface().baskets = BasketStore(sessionmaker=sessionmaker)
+    # Durable on purpose: the process that took the first call is the process
+    # that died, which is why the client is retrying. An in-memory table would
+    # be exactly as correct in tests and useless in the one case it exists for.
+    get_surface().idempotency = IdempotencyStore(sessionmaker=sessionmaker)
+    get_surface().events = EventStore(sessionmaker=sessionmaker)
 
     provider = _provider_for(settings)
     _configure_webhooks(settings, provider)
-    policy = Policy()
+    # ONE Policy. The Gate, the console and the card each read it through
+    # `current_policy()` at the moment they need it, rather than keeping a copy:
+    # three copies with the same defaults look identical right up until a
+    # Merchant edits one, and then the console shows the edit, the Gate ignores
+    # it, and the card advertises a limit nobody enforces. This local is only
+    # for the passkey wiring below, which needs the value once at boot.
+    from openstore.sidecar.gate.policy import current_policy
+
+    policy = current_policy()
     passkey_rp = _passkey_rp_for(settings, merchant_domain, policy, sessionmaker)
     tokens = TokenStore(sessionmaker=sessionmaker)
     checkout_context = CheckoutContext(
         trait=trait,
-        policy=policy,
         tokens=tokens,
         provider=provider,
         keyring=keyring,
@@ -365,6 +383,24 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def correlate(request: Request, call_next: Any) -> Response:
+    """Stamp every request with an id, and return it on the response.
+
+    The id we generate is ours. An inbound `x-request-id` is echoed in
+    `x-correlation-id` rather than adopted: a caller-supplied log key means two
+    requests can claim to be the same one, and a Merchant chasing an incident
+    would find a stranger's entries mixed into their own.
+    """
+    set_request_id(new_request_id())
+    response: Response = await call_next(request)
+    response.headers["x-request-id"] = request_id()
+    upstream = request.headers.get("x-request-id", "")
+    if upstream:
+        response.headers["x-correlation-id"] = upstream[:200]
+    return response
+
+
 # Order matters: the console's /agentic/{tab} catch-all would otherwise swallow
 # every sibling route and answer "no console tab". The approve page in
 # particular is authenticated by its one-time token and NOT by the Merchant
@@ -442,9 +478,48 @@ def readyz() -> JSONResponse:
     return JSONResponse(status_code=200, content=body)
 
 
-@app.get("/receipt/{receipt_id}")
-async def receipt(receipt_id: str) -> JSONResponse:
-    """The public receipt viewer.
+def _receipt_body(bundle: Bundle, result: VerifyResult) -> dict[str, Any]:
+    """The machine reading. One dict, so the HTML page and the JSON cannot drift
+    into describing different receipts."""
+    return {
+        "receipt": bundle.to_dict(),
+        "verification": {
+            "status": result.exit_code.name,
+            "claims": result.claims,
+            "unopened": result.unopened,
+            "findings": [
+                {"ok": f.ok, "label": f.label, "detail": f.detail} for f in result.findings
+            ],
+        },
+    }
+
+
+#: The two receipt routes share this. A missing receipt and a wrong id answer
+#: identically, because the difference between them is exactly the oracle the
+#: unguessable id exists to close — and the HTML page must not become the
+#: friendlier channel that gives it away.
+_RECEIPT_404 = {"error": {"code": "not-found", "detail": "No receipt with that id."}}
+
+
+@app.get("/receipt/{receipt_id}.json")
+async def receipt_json(receipt_id: str) -> JSONResponse:
+    """The machine reading of a receipt, and what `openstore-verify` is handed.
+
+    **Declared above the HTML route on purpose.** FastAPI matches in
+    registration order and `{receipt_id}` happily swallows a dot, so the
+    catch-all registered first would answer this with an HTML page whose id was
+    `rcpt_….json`.
+    """
+    store: ReceiptStore = get_receipt_store()
+    bundle = await store.get(receipt_id)
+    if bundle is None:
+        return JSONResponse(status_code=404, content=_RECEIPT_404)
+    return JSONResponse(status_code=200, content=_receipt_body(bundle, verify(bundle)))
+
+
+@app.get("/receipt/{receipt_id}", response_class=HTMLResponse)
+async def receipt(receipt_id: str) -> Response:
+    """The public receipt viewer, rendered for the person who bought the thing.
 
     **Outside the console's auth boundary, deliberately.** `/agentic` is
     session-authenticated for the Merchant, and a receipt that opens by
@@ -452,29 +527,13 @@ async def receipt(receipt_id: str) -> JSONResponse:
     mean no Consumer could ever open their own. The ID is the only credential
     and 128 bits is the protection.
 
-    A missing receipt and a wrong id answer identically, because the difference
-    between them is exactly the oracle the unguessable id exists to close.
+    HTML here and JSON at `.json`, rather than one path negotiating on `Accept`:
+    negotiation means the bytes a verifier receives differ from the bytes the
+    reader saw, gated on a header and a `Vary` some proxy in the middle may not
+    honour. Two paths, one body builder, nothing to disagree.
     """
     store: ReceiptStore = get_receipt_store()
     bundle = await store.get(receipt_id)
     if bundle is None:
-        return JSONResponse(
-            status_code=404,
-            content={"error": {"code": "not-found", "detail": "No receipt with that id."}},
-        )
-
-    result = verify(bundle)
-    return JSONResponse(
-        status_code=200,
-        content={
-            "receipt": bundle.to_dict(),
-            "verification": {
-                "status": result.exit_code.name,
-                "claims": result.claims,
-                "unopened": result.unopened,
-                "findings": [
-                    {"ok": f.ok, "label": f.label, "detail": f.detail} for f in result.findings
-                ],
-            },
-        },
-    )
+        return HTMLResponse(status_code=404, content=not_found_page())
+    return HTMLResponse(status_code=200, content=receipt_page(bundle, verify(bundle)))

@@ -54,6 +54,10 @@ class AgentRecord:
     tier: Tier
     name: str = ""
     profile_url: str = ""
+    callback_url: str = ""
+    """Where this agent asked for order events. Kept on the record rather than
+    on the token, because a token expires every hour and a callback should not
+    have to be re-declared to keep working."""
     first_seen: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_seen: datetime = field(default_factory=lambda: datetime.now(UTC))
     calls: int = 0
@@ -87,20 +91,32 @@ class Admission:
         return self._issue(client_id, Tier.ALLOWLISTED)
 
     def issue_for_stranger(
-        self, agent_id: str, *, name: str = "", profile_url: str = ""
+        self, agent_id: str, *, name: str = "", profile_url: str = "", callback_url: str = ""
     ) -> AgentToken:
         """Issued on the spot, with no prior Merchant action. That is the
         product: admission is open by design, and the Gate is what makes it
         safe."""
         self._refuse_if_blocked(agent_id)
-        return self._issue(agent_id, Tier.SELF_REGISTERED, name=name, profile_url=profile_url)
+        return self._issue(
+            agent_id,
+            Tier.SELF_REGISTERED,
+            name=name,
+            profile_url=profile_url,
+            callback_url=callback_url,
+        )
 
     def _refuse_if_blocked(self, agent_id: str) -> None:
         if agent_id in self.blocklist:
             raise TraitError(ReasonCode.AGENT_BLOCKED, "this agent is blocked by the Merchant")
 
     def _issue(
-        self, agent_id: str, tier: Tier, *, name: str = "", profile_url: str = ""
+        self,
+        agent_id: str,
+        tier: Tier,
+        *,
+        name: str = "",
+        profile_url: str = "",
+        callback_url: str = "",
     ) -> AgentToken:
         token = AgentToken(
             token=secrets.token_urlsafe(24),
@@ -112,14 +128,20 @@ class Admission:
             expires_at=datetime.now(UTC) + TOKEN_TTL,
         )
         self.tokens[token.token] = token
-        self._note(agent_id, tier, name=name, profile_url=profile_url)
+        self._note(agent_id, tier, name=name, profile_url=profile_url, callback_url=callback_url)
         return token
 
-    def _note(self, agent_id: str, tier: Tier, *, name: str, profile_url: str) -> None:
+    def _note(
+        self, agent_id: str, tier: Tier, *, name: str, profile_url: str, callback_url: str = ""
+    ) -> None:
         record = self.seen.get(agent_id)
         if record is None:
             self.seen[agent_id] = AgentRecord(
-                agent_id=agent_id, tier=tier, name=name, profile_url=profile_url
+                agent_id=agent_id,
+                tier=tier,
+                name=name,
+                profile_url=profile_url,
+                callback_url=callback_url,
             )
             return
         record.last_seen = datetime.now(UTC)
@@ -128,6 +150,12 @@ class Admission:
         # nothing.
         record.name = name or record.name
         record.profile_url = profile_url or record.profile_url
+        # A re-registration that declares no callback is an agent that has not
+        # changed its mind, not one withdrawing. Withdrawal is publishing a
+        # Profile without the field and is therefore indistinguishable — so the
+        # documented way to stop events is to answer them with a 410, which
+        # parks the queue after MAX_ATTEMPTS.
+        record.callback_url = callback_url or record.callback_url
 
     def note_call(self, agent_id: str) -> None:
         """One tool call by this agent. The board's "last seen" is about use,

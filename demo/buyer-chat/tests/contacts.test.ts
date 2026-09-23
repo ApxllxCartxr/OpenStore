@@ -152,6 +152,7 @@ describe('TOFU key trust', () => {
 describe('the contact book', () => {
 	const card = {
 		name: 'SpoiledDuckie',
+		description: 'Bags and small leather accessories.',
 		category: 'accessories',
 		domain: 'shop.test',
 		protocols: ['mcp', 'ucp'],

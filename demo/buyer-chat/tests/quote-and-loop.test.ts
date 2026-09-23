@@ -27,6 +27,8 @@ import {
 	permissionRequest,
 	requiresFreshConsent,
 	SCOPES,
+	answeredAlready,
+	shopRoster,
 	shopsFor,
 	SYSTEM_PROMPT,
 	ToolError,
@@ -195,6 +197,39 @@ describe('shopsFor — an unaddressed write never reaches a shop it was not mean
 			{ shop: SD, name: 'add-line', args: { sku: 'SD-TOTE-BLK-M' }, result: { lines: [{ sku: 'SD-TOTE-BLK-M', qty: 1 }] } }
 		]);
 		expect(shopsFor({ name: 'set-destination', args: {} }, midCheckout, shops)).toEqual([SD]);
+	});
+
+	it('sends a read to the shop the transcript already located it at', () => {
+		// The memory for this was always there — `seen.sources` — and the read
+		// branch returned before consulting it, so a `read-item` for a group
+		// known to be at one shop was asked of every shop and answered
+		// `not-found` by all the others in front of the Consumer.
+		const located = catalogueFrom([
+			{
+				shop: DE,
+				name: 'search',
+				args: { query: 'notebook' },
+				result: { results: [{ group: 'sewn-notebook' }] }
+			}
+		]);
+		expect(shopsFor({ name: 'read-item', args: { group: 'sewn-notebook' } }, located, shops)).toEqual([DE]);
+	});
+
+	it('asks only the shops that actually stock an overlapping id', () => {
+		const both = catalogueFrom([
+			{ shop: SD, name: 'search', args: {}, result: { results: [{ group: 'aa-batteries' }] } },
+			{ shop: DE, name: 'search', args: {}, result: { results: [{ group: 'aa-batteries' }] } }
+		]);
+		const reached = shopsFor({ name: 'read-item', args: { group: 'aa-batteries' } }, both, shops);
+		expect(reached.sort()).toEqual([SD, DE].sort());
+	});
+
+	it('still fans out a read that names nothing to resolve by', () => {
+		// `search` carries a query, not an id. Nothing to remember, so it asks
+		// everyone — which is the whole point of a multi-shop chat.
+		expect(shopsFor({ name: 'search', args: { query: 'mug' } }, seen, shops).sort()).toEqual(
+			[SD, DE].sort()
+		);
 	});
 
 	it('still asks when two shops both have an open basket', () => {
@@ -419,5 +454,91 @@ describe('an address the shopper never gave is never sent', () => {
 		expect(() => assertDestinationFromConsumer(GIVEN, 'I want a tote and a phone charm.')).toThrow(
 			/address you have given me/
 		);
+	});
+});
+
+describe('answeredAlready — the agent does not ask a shop what it just asked', () => {
+	const SD = 'spoiledduckie.localhost';
+	const DE = 'dogeared.localhost';
+	const read = { shop: SD, name: 'read-item', args: { group: 'tote' }, result: { group: 'tote' } };
+
+	it('skips an identical read with nothing written since', () => {
+		expect(answeredAlready([read], SD, { name: 'read-item', args: { group: 'tote' } })).toBe(true);
+	});
+
+	it('ignores the order the model happened to write the arguments in', () => {
+		const prior = [{ ...read, args: { group: 'tote', qty: 1 } }];
+		expect(answeredAlready(prior, SD, { name: 'read-item', args: { qty: 1, group: 'tote' } })).toBe(
+			true
+		);
+	});
+
+	it('asks a different shop even for the same question', () => {
+		expect(answeredAlready([read], DE, { name: 'read-item', args: { group: 'tote' } })).toBe(false);
+	});
+
+	it('asks again once something has been written', () => {
+		// A write can move stock or empty a basket, so every read after one is a
+		// genuinely new question.
+		const afterWrite = [read, { shop: SD, name: 'add-line', args: { sku: 'SD-TOTE-BLK-M' }, result: {} }];
+		expect(answeredAlready(afterWrite, SD, { name: 'read-item', args: { group: 'tote' } })).toBe(
+			false
+		);
+	});
+
+	it('never skips order-status', () => {
+		// An order's fate moves on the shop's side without this chat doing
+		// anything, so "nothing written here" says nothing about the answer.
+		const prior = [{ shop: SD, name: 'order-status', args: { order_id: 'ord_1' }, result: { status: 'confirmed' } }];
+		expect(answeredAlready(prior, SD, { name: 'order-status', args: { order_id: 'ord_1' } })).toBe(
+			false
+		);
+	});
+
+	it('retries a read the shop refused', () => {
+		const refused = [{ shop: SD, name: 'read-item', args: { group: 'tote' }, result: { error: 'rate-limited' } }];
+		expect(answeredAlready(refused, SD, { name: 'read-item', args: { group: 'tote' } })).toBe(false);
+	});
+});
+
+describe('shopRoster — the model is told who is who before it asks anyone', () => {
+	const shops = [
+		{
+			domain: 'kettleandgrain.localhost',
+			name: 'Kettle & Grain',
+			description: 'Kitchenware and brewing gear.',
+			category: 'kitchenware, homeware'
+		},
+		{ domain: 'dogeared.localhost', name: 'Dog-Eared', description: 'A bookshop.' }
+	];
+
+	it('names every shop with what it says it sells', () => {
+		const roster = shopRoster(shops);
+		expect(roster).toContain('Kettle & Grain (kettleandgrain.localhost)');
+		expect(roster).toContain('Kitchenware and brewing gear.');
+		expect(roster).toContain('Dog-Eared (dogeared.localhost)');
+	});
+
+	it('tells the model the descriptions are unverified and never a filter', () => {
+		// This is the whole safety property of the feature. A roster the model
+		// reads as authoritative turns "ask the likely shop first" into
+		// "confidently tell the shopper a shop has nothing" — and four SKUs in
+		// this demo sit in two shops at once.
+		const roster = shopRoster(shops);
+		expect(roster).toContain('nobody checked it');
+		expect(roster).toContain('never to decide a shop does not stock something');
+		expect(roster).toContain('widen to the rest');
+	});
+
+	it('survives a shop that declared nothing about itself', () => {
+		const bare = shopRoster([{ domain: 'plain.test', name: 'Plain' }]);
+		// Its line ends at the domain: no dangling dash where a description
+		// would have gone.
+		expect(bare).toContain('- Plain (plain.test)\n');
+		expect(bare).not.toContain('(plain.test) —');
+	});
+
+	it('says so plainly when there are no shops', () => {
+		expect(shopRoster([])).toBe('No shops have been added yet.');
 	});
 });

@@ -388,7 +388,7 @@
 
 	{#if data.pending}
 		<div class="notice">
-			<h2 style="font-size:1rem">
+			<h2 style="font-size:1.15rem">
 				{data.pending.name === 'start-checkout' || data.pending.name === 'place-order'
 					? 'This step builds a paid basket'
 					: `Allow ${data.pending.name}?`}

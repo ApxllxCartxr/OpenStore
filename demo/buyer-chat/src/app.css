@@ -38,11 +38,11 @@ body {
 code,
 .price,
 .sku {
-	font-family: 'Iosevka Term SS08', ui-monospace, monospace;
+	font-family: var(--font-mono);
 	font-variant-numeric: tabular-nums;
 }
 .chat-name {
-	font-family: 'EB Garamond', Georgia, serif;
+	font-family: var(--font-display);
 	letter-spacing: -0.01em;
 }
 
@@ -194,7 +194,7 @@ h3 {
 }
 .tool pre {
 	overflow-x: auto;
-	font-size: 0.8125rem;
+	font-size: var(--t-caption);
 	margin: 0;
 	padding: var(--s-2);
 	border-top: 1px solid var(--line);
@@ -212,7 +212,7 @@ h3 {
 }
 .notice pre {
 	overflow-x: auto;
-	font-size: 0.8125rem;
+	font-size: var(--t-caption);
 	margin: var(--s-2) 0;
 	padding: var(--s-2);
 	border-radius: var(--r-control);
@@ -329,7 +329,7 @@ h3 {
    away. The summary names what Miro is; the driver string underneath is for
    whoever goes looking, not for the conversation. */
 .agent-meta {
-	font-size: 0.8125rem;
+	font-size: var(--t-caption);
 	color: var(--muted);
 }
 .agent-meta summary {
@@ -354,7 +354,7 @@ h3 {
 }
 .agent-meta p {
 	margin: var(--s-1) 0 0;
-	font-size: 0.8125rem;
+	font-size: var(--t-caption);
 }
 .model-switch {
 	margin-top: var(--s-1);
@@ -363,11 +363,11 @@ h3 {
 	display: flex;
 	align-items: center;
 	gap: var(--s-1);
-	font-size: 0.8125rem;
+	font-size: var(--t-caption);
 }
 .model-switch select {
 	font: inherit;
-	font-size: 0.8125rem;
+	font-size: var(--t-caption);
 	color: var(--fg);
 	background: var(--bg-raised);
 	border: 1px solid var(--line);
@@ -807,4 +807,38 @@ input::placeholder {
 .md pre code {
 	padding: 0;
 	background: none;
+}
+
+/* A table in a bubble. Hairlines under the rows and nothing around the
+   outside: a bordered grid inside a bordered bubble reads as two boxes.
+   The wrapper scrolls rather than the bubble, so a four-column comparison
+   on a phone widens its own table and never the conversation. */
+.md table {
+	display: block;
+	overflow-x: auto;
+	width: 100%;
+	margin: 0 0 var(--s-2);
+	border-collapse: collapse;
+	/* Prices line up column-wise without asking the model to pad anything. */
+	font-variant-numeric: tabular-nums;
+}
+.md th,
+.md td {
+	padding: var(--s-1) var(--s-2);
+	text-align: left;
+	border-bottom: 1px solid var(--line);
+	white-space: nowrap;
+}
+.md th {
+	font-weight: 600;
+	color: var(--muted);
+}
+.md tbody tr:last-child td {
+	border-bottom: 0;
+}
+.md .md-right {
+	text-align: right;
+}
+.md .md-center {
+	text-align: center;
 }

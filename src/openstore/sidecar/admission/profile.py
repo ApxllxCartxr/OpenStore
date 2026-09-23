@@ -62,6 +62,14 @@ class AgentProfile:
     contact: str
     jwks: dict[str, object]
     source_url: str
+    callback_url: str = ""
+    """Where this agent wants order events posted. Optional — an agent that
+    declares none keeps polling `order-status`, which is the behaviour every
+    agent had before events existed.
+
+    Declared in the Profile rather than passed at registration so it is a fact
+    the agent publishes about itself at a URL this sidecar already fetched and
+    hardened, not a string an unauthenticated caller hands over."""
 
 
 def _is_public(address: str) -> bool:
@@ -213,6 +221,7 @@ def parse_profile(document: object, *, source_url: str) -> AgentProfile:
         contact=str(document.get("contact", "")),
         jwks=jwks,
         source_url=source_url,
+        callback_url=str(document.get("callback_url", "")),
     )
 
 

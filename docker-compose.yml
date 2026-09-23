@@ -15,6 +15,10 @@ services:
       - "80:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The type layer, mounted once and served at /fonts/* on every origin by
+      # the `(fonts)` snippet. Read-only: the proxy serves these, nothing here
+      # writes them.
+      - ./design/fonts:/srv/fonts:ro
     depends_on:
       sidecar:
         condition: service_healthy
@@ -48,6 +52,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://spoiledduckie.localhost
       WEBAUTHN_RP_ID: spoiledduckie.localhost
       WEBAUTHN_RP_NAME: SpoiledDuckie
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Bags and small leather accessories — totes, pouches, straps and card holders."
+      OPENSTORE_MERCHANT_CATEGORIES: "accessories, bags"
       SIDECAR_DATABASE_URL: postgresql+psycopg://sc_app:sc_app_dev@postgres:5432/sidecar
       STORE_INTERNAL_URL: http://store:3000
       # The ORIGIN, not the /trait prefix: the client appends `/trait/<door>`
@@ -127,6 +136,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://dogeared.localhost
       WEBAUTHN_RP_ID: dogeared.localhost
       WEBAUTHN_RP_NAME: Dog-Eared
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "A bookshop: fiction, cookbooks, notebooks and sewn journals."
+      OPENSTORE_MERCHANT_CATEGORIES: "books, stationery"
       SIDECAR_DATABASE_URL: postgresql+psycopg://scb_app:scb_app_dev@postgres:5432/sidecar_books
       STORE_INTERNAL_URL: http://store-books:3000
       TRAIT_BASE_URL: http://store-books:3000
@@ -191,6 +205,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://circuityard.localhost
       WEBAUTHN_RP_ID: circuityard.localhost
       WEBAUTHN_RP_NAME: "CircuitYard"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Consumer electronics and components — cables, batteries, chargers and adapters."
+      OPENSTORE_MERCHANT_CATEGORIES: "electronics"
       SIDECAR_DATABASE_URL: postgresql+psycopg://sccy_app:sccy_app_dev@postgres:5432/sidecar_cy
       STORE_INTERNAL_URL: http://store-cy:3000
       TRAIT_BASE_URL: http://store-cy:3000
@@ -247,6 +266,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://ironlist.localhost
       WEBAUTHN_RP_ID: ironlist.localhost
       WEBAUTHN_RP_NAME: "IronList"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Hardware and tools — fasteners, hand tools, tape and workshop supplies."
+      OPENSTORE_MERCHANT_CATEGORIES: "hardware, tools"
       SIDECAR_DATABASE_URL: postgresql+psycopg://scil_app:scil_app_dev@postgres:5432/sidecar_il
       STORE_INTERNAL_URL: http://store-il:3000
       TRAIT_BASE_URL: http://store-il:3000
@@ -303,6 +327,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://pantryline.localhost
       WEBAUTHN_RP_ID: pantryline.localhost
       WEBAUTHN_RP_NAME: "PantryLine"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Everyday groceries — staples, filter coffee, spices and packaged food."
+      OPENSTORE_MERCHANT_CATEGORIES: "grocery, food"
       SIDECAR_DATABASE_URL: postgresql+psycopg://scpl_app:scpl_app_dev@postgres:5432/sidecar_pl
       STORE_INTERNAL_URL: http://store-pl:3000
       TRAIT_BASE_URL: http://store-pl:3000
@@ -359,6 +388,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://kettleandgrain.localhost
       WEBAUTHN_RP_ID: kettleandgrain.localhost
       WEBAUTHN_RP_NAME: "Kettle & Grain"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Kitchenware and brewing gear — kettles, grinders, mug sets and filters."
+      OPENSTORE_MERCHANT_CATEGORIES: "kitchenware, homeware"
       SIDECAR_DATABASE_URL: postgresql+psycopg://sckg_app:sckg_app_dev@postgres:5432/sidecar_kg
       STORE_INTERNAL_URL: http://store-kg:3000
       TRAIT_BASE_URL: http://store-kg:3000
@@ -415,6 +449,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://deskfield.localhost
       WEBAUTHN_RP_ID: deskfield.localhost
       WEBAUTHN_RP_NAME: "DeskField"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Desk and stationery supplies — notebooks, pens, organisers and desk mats."
+      OPENSTORE_MERCHANT_CATEGORIES: "stationery, office"
       SIDECAR_DATABASE_URL: postgresql+psycopg://scdf_app:scdf_app_dev@postgres:5432/sidecar_df
       STORE_INTERNAL_URL: http://store-df:3000
       TRAIT_BASE_URL: http://store-df:3000
@@ -471,6 +510,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://rootandleaf.localhost
       WEBAUTHN_RP_ID: rootandleaf.localhost
       WEBAUTHN_RP_NAME: "Root & Leaf"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Houseplants and growing supplies — pots, potting mix, tools and planters."
+      OPENSTORE_MERCHANT_CATEGORIES: "plants, garden"
       SIDECAR_DATABASE_URL: postgresql+psycopg://scrl_app:scrl_app_dev@postgres:5432/sidecar_rl
       STORE_INTERNAL_URL: http://store-rl:3000
       TRAIT_BASE_URL: http://store-rl:3000
@@ -527,6 +571,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://playspool.localhost
       WEBAUTHN_RP_ID: playspool.localhost
       WEBAUTHN_RP_NAME: "Playspool"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Toys and games — puzzles, building sets, balls and outdoor play."
+      OPENSTORE_MERCHANT_CATEGORIES: "toys, games"
       SIDECAR_DATABASE_URL: postgresql+psycopg://scps_app:scps_app_dev@postgres:5432/sidecar_ps
       STORE_INTERNAL_URL: http://store-ps:3000
       TRAIT_BASE_URL: http://store-ps:3000
@@ -583,6 +632,11 @@ services:
       OPENSTORE_PUBLIC_ORIGIN: http://furrow.localhost
       WEBAUTHN_RP_ID: furrow.localhost
       WEBAUTHN_RP_NAME: "Furrow"
+      # The discovery hint on this shop's card: what it sells, so an agent
+      # holding ten shops asks the likely ones first. Declared, unverified,
+      # and never a filter — overlapping stock is the ordinary case here.
+      OPENSTORE_MERCHANT_DESCRIPTION: "Pet supplies — food, bowls, leads, bedding and toys for cats and dogs."
+      OPENSTORE_MERCHANT_CATEGORIES: "pet supplies, pets"
       SIDECAR_DATABASE_URL: postgresql+psycopg://scfw_app:scfw_app_dev@postgres:5432/sidecar_fw
       STORE_INTERNAL_URL: http://store-fw:3000
       TRAIT_BASE_URL: http://store-fw:3000

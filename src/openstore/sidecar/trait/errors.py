@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from openstore.sidecar.core.codes import ReasonCode, http_status
+from openstore.sidecar.core.correlation import request_id
 
 
 class TraitError(Exception):
@@ -39,6 +40,14 @@ class TraitError(Exception):
         body: dict[str, Any] = {"code": self.code.value, "detail": self.detail}
         if self.fields:
             body["fields"] = self.fields
+        # The id of the request that produced this refusal, so the agent holding
+        # it and the operator reading the console row are naming the same
+        # attempt. Omitted outside a request — a sweeper tick has no request
+        # behind it, and an id there would look correlatable and correlate to
+        # nothing.
+        current = request_id()
+        if current:
+            body["request_id"] = current
         return {"error": body}
 
     @classmethod

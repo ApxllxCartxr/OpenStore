@@ -152,7 +152,7 @@ here is a red build (SPEC §12). Generated from `core/codes.py`, diffed in CI.
 - `cancel-order`
 - `request-refund`
 
-## Reason codes (33)
+## Reason codes (34)
 - `sold-out`
 - `variant-required`
 - `addon-without-parent`
@@ -180,6 +180,7 @@ here is a red build (SPEC §12). Generated from `core/codes.py`, diffed in CI.
 - `signature-invalid`
 - `no-hold`
 - `rate-limited`
+- `idempotency-conflict`
 - `profile-refused`
 - `agent-blocked`
 - `not-found`
@@ -219,6 +220,7 @@ The call site never chooses a status; this table does.
 | `signature-invalid` | 401 |
 | `no-hold` | 409 |
 | `rate-limited` | 429 |
+| `idempotency-conflict` | 409 |
 | `profile-refused` | 403 |
 | `agent-blocked` | 403 |
 | `not-found` | 404 |

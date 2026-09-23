@@ -19,6 +19,7 @@ from typing import Any
 
 from openstore.sidecar.admission.oauth import AgentToken
 from openstore.sidecar.core.codes import TOOL_SCOPES, Protocol, ReasonCode, Scope, ToolName
+from openstore.sidecar.core.correlation import request_id
 from openstore.sidecar.protocols.core import refusal_envelope
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -27,7 +28,11 @@ PROTOCOL_VERSION = "2025-06-18"
 #: only free text, and they say what the tool does for a Consumer rather than
 #: what it does to the system.
 _DESCRIPTIONS: dict[ToolName, str] = {
-    ToolName.SEARCH: "Search this shop's catalogue. An empty query lists everything in one go.",
+    ToolName.SEARCH: (
+        "Search this shop's catalogue. An empty query lists everything, a page at a "
+        "time: pass the `next_cursor` from a result back as `cursor` for the next page, "
+        "and `total` says how many matched in all."
+    ),
     ToolName.READ_ITEM: "Read one product group, its options and its availability.",
     ToolName.ADD_LINE: "Add one resolved variant to the basket.",
     ToolName.REMOVE_LINE: "Remove a line from the basket.",
@@ -50,7 +55,7 @@ _DESCRIPTIONS: dict[ToolName, str] = {
 #: descriptions because both are hand-authored per tool; `_input_schema`
 #: below is what actually leaves the process.
 _FIELDS: dict[ToolName, dict[str, str]] = {
-    ToolName.SEARCH: {"query": "string"},
+    ToolName.SEARCH: {"query": "string", "limit": "integer?", "cursor": "string?"},
     ToolName.READ_ITEM: {"group": "string"},
     ToolName.ADD_LINE: {"sku": "string", "qty": "integer", "parent": "string?"},
     ToolName.REMOVE_LINE: {"sku": "string"},
@@ -152,7 +157,12 @@ def call_error(code: ReasonCode, detail: str, **fields: Any) -> dict[str, Any]:
     *transport* worked), `isError: true` per the MCP spec, so a generic client
     doesn't need this repo's `ReasonCode` enum to know something went wrong —
     it only needs one it already does need it to show why."""
-    error = {"code": code.value, "detail": detail, **fields}
+    error: dict[str, Any] = {"code": code.value, "detail": detail, **fields}
+    # Same id the console row carries. An agent that reports a refusal to a
+    # Merchant can now name the attempt instead of the minute it happened.
+    current = request_id()
+    if current:
+        error["request_id"] = current
     return {
         "content": [{"type": "text", "text": f"{code.value}: {detail}"}],
         "structuredContent": {"protocol": Protocol.MCP.value, "error": error},

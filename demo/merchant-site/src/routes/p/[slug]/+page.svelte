@@ -170,7 +170,7 @@
 </article>
 
 <section class="agent-panel">
-	<h2 style="font-size:1.0625rem">Buy via your agent</h2>
+	<h2 style="font-size:1.25rem">Buy via your agent</h2>
 	<p style="margin-top:var(--s-1)">
 		Paste this card into any agent that speaks the protocol. It can browse and build a basket; it
 		cannot spend. Every purchase ends with you approving the exact amount on this domain.

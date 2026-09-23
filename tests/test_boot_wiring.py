@@ -174,7 +174,7 @@ async def test_boot_offers_no_ceremony_when_the_merchant_has_not_enabled_it(
     from openstore.sidecar.app import app, lifespan
     from openstore.sidecar.console.approve import get_context as approve_context
     from openstore.sidecar.core.codes import AuthorityKind
-    from openstore.sidecar.gate.policy import Policy
+    from openstore.sidecar.gate.policy import Policy, set_current_policy
 
     monkeypatch.setenv("OPENSTORE_MERCHANT_DOMAIN", "spoiledduckie.localhost")
     monkeypatch.setenv("SIDECAR_SIGNING_KEY_PATH", str(tmp_path / "keys.json"))
@@ -185,9 +185,10 @@ async def test_boot_offers_no_ceremony_when_the_merchant_has_not_enabled_it(
             k for k in Policy().enabled_authority_kinds if k is not AuthorityKind.PASSKEY
         )
     )
-    # Patched at the source module: `lifespan` imports `Policy` when it runs, so
-    # a name patched on `app` is never the one it looks up.
-    monkeypatch.setattr("openstore.sidecar.gate.policy.Policy", lambda: without)
+    # Set the live Policy rather than patching the constructor. Boot no longer
+    # builds a Policy of its own — it reads the one holder every surface reads,
+    # so a patched `Policy` name is now a constructor nothing calls.
+    set_current_policy(without)
     async with lifespan(app):
         assert flow.get_context().passkey_rp is None
         assert approve_context().passkey_enabled is False

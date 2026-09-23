@@ -5,6 +5,14 @@
     "self_registration": true,
     "signature": "RFC 9421 over @method, @target-uri and content-digest"
   },
+  "api": {
+    "current": "2026-09-23",
+    "deprecation_notice_days": 180,
+    "note": "Dated, not numbered. Additive changes \u2014 a new result field, a new refusal field \u2014 ship without a new version; a removal or a changed meaning gets one, and the version it replaces keeps answering for 180 days after the successor ships.",
+    "supported": [
+      "2026-09-23"
+    ]
+  },
   "authority": {
     "completion": "redirect-only",
     "kinds_accepted": [
@@ -96,6 +104,61 @@
     "tools": "http://spoiledduckie.localhost/agent/tools",
     "ucp_checkout": "http://spoiledduckie.localhost/agent/ucp/checkout"
   },
+  "events": {
+    "backoff_seconds": [
+      10,
+      30,
+      120,
+      300,
+      900,
+      1800
+    ],
+    "declared_in": "agent profile: callback_url",
+    "delivery": "POST, at least once, retried with backoff",
+    "kinds": [
+      "order.pending",
+      "order.confirmed",
+      "order.paid",
+      "order.cancelled",
+      "order.expired",
+      "order.failed",
+      "order.refunded",
+      "order.completed"
+    ],
+    "max_attempts": 6,
+    "note": "At least once, so deduplicate on `event_id`. The body carries an order id, a kind and a receipt id \u2014 never PII and never a total; call `order-status` with your own token for anything more. Answer 410 to stop delivery: it parks after 6 failed attempts.",
+    "signature": {
+      "algorithm": "Ed25519 over the canonical body",
+      "header": "x-openstore-signature",
+      "key_id_header": "x-openstore-key-id",
+      "verify_with": "/.well-known/jwks.json"
+    },
+    "supported": true
+  },
+  "idempotency": {
+    "max_length": 200,
+    "not_stored_for": [
+      "search",
+      "read-item",
+      "order-status"
+    ],
+    "note": "A repeat of the same call with the same key returns the first answer, marked `replayed: true`. The same key with different arguments is refused with `idempotency-conflict` rather than answered \u2014 returning the first result for a second, different request would answer a question nobody asked. Refusals are not stored, so correcting your arguments and retrying with the same key works.",
+    "parameter": "params.idempotency_key",
+    "replay_marker": "replayed",
+    "retention_hours": 6,
+    "scope": "per agent",
+    "supported": true
+  },
+  "limits": {
+    "blocked_tag_rules": 1,
+    "currency": "INR",
+    "note": "Enforced by the Gate on every basket. An agent that plans inside these spends no round trips discovering them; exceeding one is refused with a named code and never silently trimmed.",
+    "per_group_qty": 5,
+    "per_group_qty_overrides": 1,
+    "per_order_cap_minor": 2500000,
+    "per_order_line_count": 10,
+    "window_open": true
+  },
   "merchant": {
     "domain": "spoiledduckie.localhost",
     "name": "SpoiledDuckie"
@@ -114,6 +177,52 @@
     "ap2",
     "acp"
   ],
+  "requires": {
+    "contact": {
+      "any_of": [
+        "email",
+        "phone"
+      ],
+      "note": "A Contact Point is an email, a phone, or both \u2014 and one is needed."
+    },
+    "destination": {
+      "fields": [
+        {
+          "name": "line1",
+          "required": true
+        },
+        {
+          "name": "line2",
+          "required": false
+        },
+        {
+          "name": "city",
+          "required": true
+        },
+        {
+          "name": "state",
+          "pattern": "^[A-Z]{2}$",
+          "required": true
+        },
+        {
+          "name": "postal_code",
+          "pattern": "^[0-9]{6}$",
+          "required": true
+        },
+        {
+          "default": "IN",
+          "name": "country",
+          "required": false
+        }
+      ]
+    },
+    "note": "Fill these in this order. Changing the basket un-chooses fulfillment, so an option picked before the last line went in has to be picked again.",
+    "order": [
+      "lines",
+      "destination",
+      "fulfillment"
+    ]
+  },
   "scopes": [
     "search",
     "build-basket",

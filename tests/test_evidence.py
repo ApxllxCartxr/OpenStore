@@ -457,13 +457,92 @@ async def test_the_receipt_viewer_is_outside_the_console_auth_boundary(
             # database — and a test has none.
             point_stores_at(sessionmaker)
             await get_receipt_store().put(bundle)
-            response = client.get(f"/receipt/{bundle.receipt_id}")
+            response = client.get(f"/receipt/{bundle.receipt_id}.json")
             assert response.status_code == 200
             body = response.json()
             assert body["verification"]["status"] == "VALID"
             assert body["verification"]["claims"]["authority"] == "upi-pin"
             assert sorted(body["verification"]["unopened"]) == ["contact", "destination"]
             assert not response.request.headers.get("cookie"), "no session was needed"
+
+            page = client.get(f"/receipt/{bundle.receipt_id}")
+            assert page.status_code == 200
+            assert page.headers["content-type"].startswith("text/html")
+            assert not page.request.headers.get("cookie"), "no session was needed"
+    finally:
+        point_stores_at(None)
+
+
+async def test_the_html_receipt_states_the_authority_kind_and_the_total(
+    keyring: Keyring, sessionmaker
+) -> None:  # type: ignore[no-untyped-def]
+    """The page a Consumer actually opens.
+
+    The two facts it exists to carry are the kind of Authority and the amount,
+    and both must be on the page as text — a viewer that rendered a verdict but
+    left the claim in a JSON blob would be the JSON response with a stylesheet.
+    """
+    from fastapi.testclient import TestClient
+    from openstore.sidecar.app import app
+    from openstore.sidecar.evidence.store import get_receipt_store
+
+    bundle = _seal(keyring)
+    try:
+        with TestClient(app) as client:
+            point_stores_at(sessionmaker)
+            await get_receipt_store().put(bundle)
+            body = client.get(f"/receipt/{bundle.receipt_id}").text
+            sealed_total = bundle.section("bought").payload["quote"]["total_minor"]
+
+            assert "upi-pin" in body, "the receipt must name which Authority happened"
+            assert "amount bound by payer-bank" in body, "and what that Authority bound"
+            assert format_rupees(sealed_total) in body
+            assert "Intact" in body
+            # Never 'verified' unqualified (ADR-0017).
+            assert ">Verified<" not in body
+            # The offline route out, or the page is the only checker there is.
+            assert f"/receipt/{bundle.receipt_id}.json" in body
+            assert "openstore-verify" in body
+            # Demo receipts say so on the page, not only in the JSON.
+            assert "Demo" in body
+    finally:
+        point_stores_at(None)
+
+
+async def test_a_tampered_receipt_does_not_print_an_approval_claim(
+    keyring: Keyring, sessionmaker
+) -> None:  # type: ignore[no-untyped-def]
+    """`verify()` stops at the broken link and never reads the claims, so the
+    page must not print an empty one. An approval line with a dash where the
+    kind goes states an absence as a fact."""
+    from fastapi.testclient import TestClient
+    from openstore.sidecar.app import app
+    from openstore.sidecar.evidence.store import get_receipt_store
+
+    # Its own id, re-signed before the edit: the receipt store is shared across
+    # this module and reusing the fixture's id would hand this test back the
+    # pristine bundle an earlier test put there.
+    bundle = _seal(keyring)
+    bundle.receipt_id = "rcpt_00112233445566aa"
+    bundle.signature = sign(keyring.keys["k1"], bundle.signing_payload())
+    # A NEW dict rather than an in-place edit: `QUOTE` is module-level and shared
+    # by every bundle this file seals, so mutating it through one bundle edits
+    # the fixture for the whole module — which is why the same edit written the
+    # obvious way silently does nothing here.
+    bought = bundle.section("bought").payload
+    bought["quote"] = {**bought["quote"], "total_minor": 424242}
+    try:
+        with TestClient(app) as client:
+            point_stores_at(sessionmaker)
+            await get_receipt_store().put(bundle)
+            body = client.get(f"/receipt/{bundle.receipt_id}").text
+
+            assert "Altered" in body
+            assert "Approved by" not in body
+            assert "Verification stopped at the failing check" in body
+            # The figures stay on the page — hiding them would hide the evidence
+            # of what was changed — but they are labelled.
+            assert "Unverified." in body
     finally:
         point_stores_at(None)
 
@@ -474,6 +553,15 @@ async def test_an_unknown_receipt_id_is_not_found(sessionmaker) -> None:  # type
 
     with TestClient(app) as client:
         point_stores_at(sessionmaker)
-        response = client.get("/receipt/rcpt_doesnotexist")
+        response = client.get("/receipt/rcpt_doesnotexist.json")
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "not-found"
+
+        page = client.get("/receipt/rcpt_doesnotexist")
+        assert page.status_code == 404
+        assert page.headers["content-type"].startswith("text/html")
+        # The HTML 404 must not become the friendlier oracle the JSON one was
+        # careful not to be: a missing receipt and a wrong id answer identically,
+        # so nothing on the page may hint at which this was.
+        for leak in ("expired", "deleted", "no longer", "was sealed", "existed"):
+            assert leak not in page.text.lower(), f"the 404 page hints at {leak!r}"

@@ -263,3 +263,55 @@ async def run_forever(
             continue
         if swept:
             _log.warning("sweep acted on %d order(s)", len(swept))
+        # Deliveries ride the same tick rather than a second loop: they are the
+        # same kind of work — something due, retried with a backoff — and one
+        # timer is one thing an operator has to reason about.
+        try:
+            sent, parked = await drain_events(ctx)
+        except Exception as exc:  # noqa: BLE001 - the loop outlives any one pass
+            _log.warning("event drain failed entirely: %s", exc)
+            continue
+        if sent or parked:
+            _log.warning("events: %d delivered, %d parked", sent, parked)
+
+
+async def drain_events(ctx: CheckoutContext) -> tuple[int, int]:
+    """Deliver every event that is due. Returns (delivered, parked).
+
+    Never raises for one bad endpoint: an agent whose callback is down must not
+    stop delivery to every other agent, so each send is guarded and a failure is
+    a backoff on that row alone.
+    """
+    from openstore.sidecar.evidence.keys import sign
+    from openstore.sidecar.protocols.agent_routes import get_surface
+    from openstore.sidecar.protocols.events import deliver, signing_payload
+
+    surface = get_surface()
+    if not surface.events.enabled or surface.keyring is None:
+        # No keyring means nothing can be signed, and an unsigned event is one
+        # an agent has no reason to believe. Not sending is the honest outcome.
+        return 0, 0
+
+    delivered = parked = 0
+    for event in await surface.events.due():
+        try:
+            await deliver(
+                event,
+                signature=sign(surface.keyring.current, signing_payload(event.body)),
+                kid=surface.keyring.current.kid,
+                fetcher=surface.fetcher,
+            )
+        except Exception as exc:  # noqa: BLE001 - one dead endpoint is not the queue
+            state = await surface.events.failed(event.event_id, event.attempts + 1, str(exc))
+            parked += state == "parked"
+            _log.warning(
+                "event %s to %s failed (attempt %d): %s",
+                event.event_id,
+                event.agent_id,
+                event.attempts + 1,
+                exc,
+            )
+            continue
+        await surface.events.delivered(event.event_id)
+        delivered += 1
+    return delivered, parked

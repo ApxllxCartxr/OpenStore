@@ -55,7 +55,7 @@
 </section>
 
 <section class="agent-panel">
-	<h2 style="font-size:1.0625rem">Buying through an agent</h2>
+	<h2 style="font-size:1.25rem">Buying through an agent</h2>
 	<p style="margin-top:var(--s-1)">
 		This shop publishes a card any agent can read. It can search the catalogue and build a
 		basket. It cannot spend: the last step is always you, approving one exact amount on this

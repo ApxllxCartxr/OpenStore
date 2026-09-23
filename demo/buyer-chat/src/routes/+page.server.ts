@@ -38,6 +38,7 @@ import {
 	READS,
 	TOOLS,
 	ToolError,
+	answeredAlready,
 	assertAddonHasParent,
 	assertDestinationFromConsumer,
 	assertResolvedVariant,
@@ -49,6 +50,7 @@ import {
 	reachableTools,
 	requiresFreshConsent,
 	schemasFor,
+	shopRoster,
 	shopsFor,
 	validate,
 	type Seen,
@@ -67,11 +69,24 @@ import { db } from '$lib/session.ts';
  *  or can only mean). */
 function knownShops(): Shop[] {
 	const rows = db
-		.prepare(`SELECT domain, name, kind, mcp_endpoint, tools FROM contacts ORDER BY added_at ASC`)
-		.all() as { domain: string; name: string; kind: string; mcp_endpoint: string; tools: string }[];
+		.prepare(
+			`SELECT domain, name, description, category, kind, mcp_endpoint, tools
+			   FROM contacts ORDER BY added_at ASC`
+		)
+		.all() as {
+		domain: string;
+		name: string;
+		description: string;
+		category: string;
+		kind: string;
+		mcp_endpoint: string;
+		tools: string;
+	}[];
 	return rows.map((row) => ({
 		domain: row.domain,
 		name: row.name,
+		description: row.description,
+		category: row.category,
 		kind: row.kind === 'generic' ? 'generic' : 'openstore',
 		tools: row.kind === 'generic' ? (JSON.parse(row.tools) as Shop['tools']) : undefined
 	}));
@@ -337,7 +352,12 @@ async function runReads(reads: readonly ToolCall[], seen: Seen, shops: readonly 
 			recordToolCall(THREAD, '', read.name, read.args, { error: domains.code, detail: domains.message });
 			return [];
 		}
-		return domains.map((domain) => ({ call: { ...read, args: withoutShopArg(read.args) }, domain }));
+		return domains
+			.map((domain) => ({ call: { ...read, args: withoutShopArg(read.args) }, domain }))
+			// Already asked, nothing written since, answer still in the model's
+			// own context. Dropped silently: a card saying "asked again, same
+			// answer" is the noise this exists to remove.
+			.filter((job) => !answeredAlready(recordedCalls(), job.domain, job.call));
 	});
 	const settled = await Promise.allSettled(
 		jobs.map((job) => dispatch(job.domain, shops, job.call.name, job.call.args))
@@ -359,6 +379,25 @@ async function runAndSay(domain: string, shops: readonly Shop[], call: ToolCall)
 	const before = previousNeedsOf(recordedCalls());
 	const result = await runCall(domain, shops, call);
 	addMessage(THREAD, 'agent', describe(call.name, result, before));
+}
+
+/** Has the agent actually said anything since the Consumer last spoke?
+ *
+ *  Reasoning-only rows carry empty text and do not count — they are a thinking
+ *  disclosure, not an answer. Neither do the tool cards: a Consumer who asked a
+ *  question and got only cards is owed a sentence. This is what decides whether
+ *  an empty completion needs covering or is simply the model having nothing to
+ *  add to a line the app already wrote. */
+function hasSpokenSince(): boolean {
+	const messages = thread(THREAD).messages;
+	let last = -1;
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		if (messages[i]?.role === 'consumer') {
+			last = i;
+			break;
+		}
+	}
+	return messages.slice(last + 1).some((m) => m.role === 'agent' && m.text.trim().length > 0);
 }
 
 /** The tool calls of this thread, parsed — the transcript is the only record
@@ -462,7 +501,12 @@ async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promi
 	for (let step = 0; step < MAX_STEPS; step += 1) {
 		let turn;
 		try {
-			turn = await driver.step(turns(), [...reachableTools(shops)], schemasFor(shops));
+			turn = await driver.step(
+				turns(),
+				[...reachableTools(shops)],
+				schemasFor(shops),
+				shopRoster(shops)
+			);
 		} catch (error) {
 			addMessage(THREAD, 'agent', `I could not reach my model: ${(error as Error).message}`);
 			return;
@@ -475,6 +519,23 @@ async function runAgent(shops: readonly Shop[], driver: OpenRouterDriver): Promi
 			// rides beside the response it led to — the same interleaving
 			// Claude.ai shows a thinking block in.
 			const said = composeMessage(turn.text);
+			if (!said.text) {
+				// The model had nothing to add. It routinely does after an
+				// approved write, because the app has already said what the shop
+				// reported — so the turn ends here rather than filling the
+				// silence. A stock "I am not sure what to do next." under a
+				// correct "Basket updated!" reads as the agent losing the thread
+				// it had not lost. The reasoning still lands, if there was any.
+				if (turn.reasoning) addMessage(THREAD, 'agent', '', null, turn.reasoning);
+				if (!hasSpokenSince()) {
+					addMessage(
+						THREAD,
+						'agent',
+						'I am not sure what to do next — tell me what you would like.'
+					);
+				}
+				return;
+			}
 			addMessage(THREAD, 'agent', said.text, said.widget, turn.reasoning);
 			return;
 		}

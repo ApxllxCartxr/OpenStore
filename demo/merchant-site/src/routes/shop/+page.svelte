@@ -35,7 +35,7 @@
 
 {#if data.results.length === 0}
 	<div class="empty">
-		<h2 style="font-size:1.0625rem">Nothing matches that search.</h2>
+		<h2 style="font-size:1.25rem">Nothing matches that search.</h2>
 		<p class="meta">Try a shorter word, or clear the filters to see the whole catalogue.</p>
 		<a class="button secondary" href="/shop">See everything</a>
 	</div>

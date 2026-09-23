@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     webauthn_rp_id: str = ""
     webauthn_rp_name: str = ""
 
+    # What this shop sells, for the discovery card (ADR-0027). Declared by the
+    # Merchant, never derived: the card is the one document that must answer
+    # even when the catalogue service is down, and a summary computed from the
+    # trait would make discovery fail whenever stock did.
+    openstore_merchant_description: str = ""
+    openstore_merchant_categories: str = ""
+
     # Service wiring (§16.1).
     sidecar_port: int = 8000
     store_port: int = 3000
@@ -98,6 +105,18 @@ class Settings(BaseSettings):
     @property
     def dev_profile_hosts(self) -> tuple[str, ...]:
         return tuple(h.strip() for h in self.openstore_dev_profile_hosts.split(",") if h.strip())
+
+    @property
+    def merchant_categories(self) -> tuple[str, ...]:
+        """Lowercased and de-duplicated, order kept. An agent comparing
+        `Kitchenware` against `kitchenware` and deciding they are different
+        shops' worth of difference is a bug nobody would find."""
+        out: list[str] = []
+        for raw in self.openstore_merchant_categories.split(","):
+            value = raw.strip().lower()
+            if value and value not in out:
+                out.append(value)
+        return tuple(out)
 
     @property
     def webhook_secret(self) -> str:

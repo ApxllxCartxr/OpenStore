@@ -290,7 +290,49 @@ export type GenericTool = {
  *  14-tool set applies unconditionally, the way it always has. A `'generic'`
  *  shop carries its own `tools/list` answer, cached at add time, because
  *  that — not `TOOLS` — is the only true source for what it offers. */
-export type Shop = { domain: string; name: string; kind?: 'openstore' | 'generic'; tools?: GenericTool[] };
+export type Shop = {
+	domain: string;
+	name: string;
+	/** What the shop's own card says it sells. Declared by that Merchant and
+	 *  verified by nobody, which is exactly how it is used: to decide who to
+	 *  ask FIRST, never to decide a shop has nothing. */
+	description?: string;
+	category?: string;
+	kind?: 'openstore' | 'generic';
+	tools?: GenericTool[];
+};
+
+/**
+ * The shops this chat holds, as a line each, for the model's context.
+ *
+ * The model previously learned a shop existed only by seeing its domain come
+ * back in a result — so the only way to find out who stocks mugs was to ask all
+ * ten. Given the roster up front it can address the likely one or two by name,
+ * and the fan-out becomes the fallback it was meant to be rather than the
+ * opening move.
+ *
+ * **Framed as a hint on purpose.** These descriptions are the Merchants' own
+ * words about themselves; the card says as much in its `note`. Four SKUs in
+ * this demo deliberately sit in two shops at once, so a roster read as a filter
+ * gets a confident "we don't stock that" about stock that is right there.
+ */
+export function shopRoster(shops: readonly Shop[]): string {
+	if (!shops.length) return 'No shops have been added yet.';
+	const lines = shops.map((shop) => {
+		const about = [shop.description, shop.category].filter(Boolean).join(' · ');
+		return `- ${shop.name} (${shop.domain})${about ? ` — ${about}` : ''}`;
+	});
+	return (
+		`The shopper has added ${shops.length} shop${shops.length === 1 ? '' : 's'}:\n` +
+		`${lines.join('\n')}\n\n` +
+		'Each shop wrote its own line above and nobody checked it. Use them to pick ' +
+		'which shop to ask first — put its domain in `"shop"` — and never to decide a ' +
+		'shop does not stock something. Shops here carry overlapping stock, and the ' +
+		'only way to establish that a shop lacks an item is to search it. If the ' +
+		'likely shops come back empty, widen to the rest before telling the shopper ' +
+		'it cannot be found.'
+	);
+}
 
 function genericTool(shops: readonly Shop[], name: string): { shop: Shop; tool: GenericTool } | null {
 	for (const shop of shops) {
@@ -378,6 +420,60 @@ export type Seen = {
 	 *  what lets a call name no shop and still reach the right one. */
 	sources: ReadonlyMap<string, ReadonlySet<string>>;
 };
+
+/** Arguments as a comparable string. Key order is whatever the model happened
+ *  to emit, so `{sku, qty}` and `{qty, sku}` are the same question and must
+ *  compare equal. */
+function canonicalArgs(args: Record<string, unknown> | undefined): string {
+	const entries = Object.entries(args ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+	return JSON.stringify(entries);
+}
+
+/**
+ * Has this exact read already been asked of this exact shop and answered, with
+ * nothing written since?
+ *
+ * Catalogue reads are idempotent: the same question to the same shop with no
+ * write in between returns the same bytes, and the model already holds them
+ * verbatim in its own context. Models re-read anyway — they re-derive rather
+ * than look back — and every repeat is a round trip the shopper waits through
+ * and a card they watch scroll past.
+ *
+ * **Bounded by the last write, deliberately.** A write can move stock, empty a
+ * basket or invalidate a quote, so a read after one is a genuinely new question
+ * and is asked again. This only removes work that provably cannot have a
+ * different answer.
+ *
+ * `order-status` is never skipped: an order's fate moves on the shop's side
+ * without this chat doing anything, so "nothing written here" says nothing
+ * about whether the answer changed.
+ */
+export function answeredAlready(
+	calls: readonly SeenCall[],
+	domain: string,
+	call: ToolCall
+): boolean {
+	if (call.name === 'order-status') return false;
+	let from = 0;
+	for (let i = calls.length - 1; i >= 0; i -= 1) {
+		if (!READS.has(calls[i]!.name)) {
+			from = i + 1;
+			break;
+		}
+	}
+	const wanted = canonicalArgs(call.args);
+	return calls.slice(from).some(
+		(prior) =>
+			prior.shop === domain &&
+			prior.name === call.name &&
+			canonicalArgs(prior.args) === wanted &&
+			prior.result !== null &&
+			prior.result !== undefined &&
+			// A refusal is not an answer worth reusing: a shop that was rate
+			// limited or briefly unreachable should be asked again.
+			!(prior.result as Record<string, unknown>).error
+	);
+}
 
 export function catalogueFrom(calls: readonly SeenCall[]): Seen {
 	const groups = new Set<string>();
@@ -467,16 +563,12 @@ export function shopsFor(
 		throw new ToolError('unknown-tool', `${call.name} is not a tool any known shop offers.`);
 	}
 
-	// A read with no shop named goes to every shop: "find me a notebook" is a
-	// question about the shops the Consumer has, not about whichever one was
-	// added last. Reads change nothing, so asking all of them costs only the
-	// round trips — which run concurrently.
-	if (READS.has(call.name) && !call.args?.order_id) {
-		return shops.map((shop) => shop.domain);
-	}
-
-	// A write has to land somewhere exact. The SKU it names usually says
-	// where: an id seen at one shop and nowhere else can only mean that shop.
+	// The id a call names usually says where it goes: an id seen at one shop
+	// and nowhere else can only mean that shop. Consulted for reads as well as
+	// writes, and BEFORE the fan-out below — a `read-item` for a group the
+	// transcript already located at Kettle & Grain was being asked of every
+	// shop, so two thirds of the cards a Consumer watched go past were
+	// `not-found` for a question nobody had.
 	const ids = [call.args?.sku, call.args?.group, call.args?.parent, call.args?.order_id]
 		.filter((value): value is string => typeof value === 'string' && value.length > 0);
 	const candidates = new Set<string>();
@@ -484,6 +576,19 @@ export function shopsFor(
 		for (const shop of seen.sources.get(id) ?? []) candidates.add(shop);
 	}
 	if (candidates.size === 1) return [...candidates];
+
+	// A read whose id is genuinely at more than one shop asks exactly those —
+	// the overlapping SKUs are the case this exists for, and asking the two
+	// that stock it still beats asking all ten.
+	if (READS.has(call.name) && candidates.size > 1) return [...candidates];
+
+	// A read that names nothing to resolve by goes to every shop: "find me a
+	// notebook" is a question about the shops the Consumer has, not about
+	// whichever one was added last. Reads change nothing, so asking all of
+	// them costs only the round trips — which run concurrently.
+	if (READS.has(call.name) && !call.args?.order_id) {
+		return shops.map((shop) => shop.domain);
+	}
 
 	// No id at all names a shop — `set-destination`, `set-contact`,
 	// `start-checkout` and `place-order` never carry one. These are the steps
@@ -802,6 +907,23 @@ Hard rules, and they are not style preferences:
   recommend across groups using your judgment of what fits. Never recommend a
   product you have not seen in a tool result.
 - When a tool refuses, tell the shopper the shop's reason in plain words. Do not retry blindly.
+
+Work you have already done is in front of you. Every tool call in this
+conversation is shown with its full result, so before you call anything, look
+back:
+- If a previous result already carries the SKU, options, price or stock you
+  need, use it. Re-reading the same group returns the same bytes and the
+  shopper waits through it for nothing.
+- Once you know which shop holds something, put its domain in \`"shop"\` on
+  every later call about it. A read with no shop named asks every shop, and the
+  ones that do not stock it answer \`not-found\` in front of the shopper.
+- \`search\` with an empty query returns a shop's whole catalogue. Once you have
+  it, browse it from the transcript — do not search again for each new idea.
+- Ask for everything you need in one turn. Independent reads in a single turn
+  are sent together and come back together; the same reads spread over four
+  turns are four waits.
+- A tool result you can quote beats a tool call you can make. The shortest path
+  to an answer the shopper can act on is the right one.
 
 Be warm and conversational, like a good shop assistant: greet, acknowledge,
 and sound glad to help. Keep replies short — one or two sentences — and stay

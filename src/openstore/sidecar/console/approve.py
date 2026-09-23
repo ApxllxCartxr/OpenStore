@@ -274,9 +274,9 @@ purchase.</p>
 <link rel="stylesheet" href="/agentic/static/tokens.css">
 <style>{CONSOLE_CSS}
 main {{ max-width: 34rem; margin: 0 auto; }}
-.total td {{ font-weight: 600; border-top: 2px solid var(--line, #e2e0da); }}
+.total td {{ font-weight: 600; border-top: 2px solid var(--line); }}
 .method {{ display: flex; align-items: center; gap: 0.5rem; min-height: 44px; }}
-.tap {{ width: 100%; min-height: 52px; background: var(--accent, #c2415a); color: var(--paper, #f6f5f2);
+.tap {{ width: 100%; min-height: 52px; background: var(--accent); color: var(--bg);
        border: 0; font: inherit; font-weight: 600; cursor: pointer; }}
 #countdown {{ font-variant-numeric: tabular-nums; }}
 </style>
@@ -304,7 +304,7 @@ calculated by the agent that built this basket.</p>
 <section>
 <h2>Have a code?</h2>
 <input name="code" placeholder="Private code" autocomplete="off"
-  style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line,#e2e0da);background:var(--raised,#fffdfa);color:inherit">
+  style="width:100%;min-height:44px;padding:0 0.75rem;border:1px solid var(--line);background:var(--bg-raised);color:inherit">
 <p class="note muted">A private code is entered here and never travels through the agent.
 Applying one re-prices the basket and you will approve the new total.</p>
 </section>

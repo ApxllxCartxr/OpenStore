@@ -1,6 +1,6 @@
 """The `/agentic` console, rendered server-side as an instrument panel.
 
-Mono-dominant, hairline rules, `--bg-sunken` panels, tabular figures, **no
+Tabular figures, hairline rules, `--bg-sunken` panels, **no
 animation** (§4). Data density over whitespace, because SPEC §14 says this is
 what somebody checks at 2am — and at 2am you want the numbers, not the easing
 curves.
@@ -17,7 +17,8 @@ policy could disagree with the Gate.
 from __future__ import annotations
 
 import html
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from typing import Any
 
 from openstore.sidecar.evidence.bundle import format_rupees
@@ -26,57 +27,127 @@ from openstore.sidecar.evidence.bundle import format_rupees
 #: served alongside; these are the density rules that make it an instrument
 #: panel rather than the shop.
 CONSOLE_CSS = """
-:root { color-scheme: light dark; }
+:root { color-scheme: light; }
 * { box-sizing: border-box; }
 
 /* The app ground is the SUNKEN token and cards are the RAISED one, which is
-   what makes this read as a console rather than a document: in light that is
-   grey paper under white cards, and in dark it is near-black under slate. One
-   rule, both themes, no second palette.
+   what makes this read as a console rather than a document: grey paper under
+   white cards. One rule, no second palette.
 
    Nothing here carries a literal-colour fallback. It used to, and because
    `--paper` and `--ink` are not token names the fallbacks were what ALWAYS
-   rendered — so the console's dark theme never once worked, and a dark visitor
-   got light paper with dark-theme rules drawn on it. */
+   rendered — a surface drawing its own colours beside the ones it imported. */
 body {
   margin: 0;
   background: var(--bg-sunken);
   color: var(--fg);
-  font-family: 'Iosevka Term SS08', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+  font-family: var(--font-body);
+  font-size: 15px;
   line-height: 1.5;
+  /* Figures line up column-wise everywhere in here. This is a screen people
+     read down, not across. */
   font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Sidebar and content. The nav is a column because the console has nine
-   destinations and a horizontal strip of nine tabs wraps to two rows on a
-   laptop, which is where an operator actually reads this. */
+/* Two faces, each with one job. EB Garamond is the wordmark and the page
+   title — the only two places a serif appears, so it reads as identity rather
+   than as decoration. Open Sauce Sans carries every number, label and control,
+   because a dashboard is read at a glance and a serif at 13px in a table is a
+   serif nobody can scan.
+
+   Every family here is named as a token ROLE and never as a face: the token
+   layer decides which font a role resolves to, so a swap there cannot leave
+   this console drawing its own typography beside the one it imported. */
+.brand b, h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* The figure-bearing surfaces take the mono ROLE. It resolves to the same sans
+   in this token layer — the columns are held in line by `tabular-nums` rather
+   than by a monospaced face — but naming the role is what keeps a future
+   monospaced token landing on the tables and not on the prose. */
+table, .tile .v, .chip, code {
+  font-family: var(--font-mono);
+}
+
+/* Sidebar and content. The nav is a column because the console has eleven
+   destinations and a horizontal strip of eleven wraps to two rows on a laptop,
+   which is where an operator actually reads this. */
 .shell { display: grid; grid-template-columns: 1fr; min-height: 100vh; }
 .side {
   background: var(--bg);
   border-right: 1px solid var(--line);
-  padding: 12px 0;
+  padding: 14px 0 20px;
 }
-.brand { padding: 4px 16px 14px; }
-.brand b { display: block; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
-.brand span { color: var(--muted); font-size: 11px; }
+.brand { padding: 4px 16px 16px; }
+.brand b { display: block; font-size: 22px; line-height: 1.1; }
+.brand span {
+  color: var(--muted); font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.14em;
+}
+
 nav { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 8px; }
+/* The group label is the whole reason this is navigable at a glance: it turns
+   eleven equal links into four short lists with a subject each. */
+.nav-group { display: contents; }
+.nav-head {
+  flex: 1 0 100%;
+  padding: 12px 8px 4px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--comment);
+}
 nav a {
   display: flex; align-items: center; gap: 8px;
-  padding: 0 8px; min-height: 34px; flex: 1 1 auto;
+  padding: 0 10px; min-height: 32px; flex: 1 1 auto;
   color: var(--muted); text-decoration: none;
   border-radius: var(--radius);
+  font-size: 14px;
 }
 nav a:hover { background: var(--bg-sunken); color: var(--fg); }
-nav a[aria-current='page'] { background: var(--bg-sunken); color: var(--fg); font-weight: 600; }
+/* The current tab is marked by a rule at its edge as well as by weight and
+   ground: three signals, none of them colour alone. */
+nav a[aria-current='page'] {
+  background: var(--bg-sunken); color: var(--fg); font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent-2);
+}
 nav a:focus-visible, a:focus-visible, button:focus-visible {
   outline: 2px solid var(--accent-2); outline-offset: 2px;
 }
 
+/* The top bar: who this deployment is, and whether it can do its job. Sticky,
+   because the answer to "which shop am I looking at" must not scroll away on a
+   screen where every shop's console looks alike. */
+.topbar {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; flex-wrap: wrap; gap: 10px 16px;
+  align-items: baseline; justify-content: space-between;
+  margin: -16px -16px 18px;
+  padding: 12px 16px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .who b { font-size: 15px; font-weight: 600; }
+.eyebrow {
+  display: block; color: var(--muted);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+}
+.status { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 2px 10px; font-size: 13px; color: var(--muted);
+  background: var(--bg);
+  white-space: nowrap;
+}
+.chip-warn { border-color: var(--accent); color: var(--accent); }
+
 main { padding: 16px; min-width: 0; }
-.page-head { margin-bottom: 16px; }
-h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: 0.01em; }
-.page-head p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.page-head { margin-bottom: 18px; }
+h1 { font-size: 30px; margin: 0; line-height: 1.15; }
+.page-head p { margin: 4px 0 0; color: var(--muted); font-size: 14px; max-width: 68ch; }
 
 /* A card is the unit of the dashboard. Sections keep their own heading so the
    markup still reads as a document with stylesheets off. */
@@ -87,28 +158,27 @@ section, .card {
   padding: 14px;
   margin-bottom: 12px;
 }
-h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 10px;
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 10px;
      color: var(--muted); font-weight: 600; }
 
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 tr:last-child td { border-bottom: 0; }
-th { font-weight: 600; color: var(--muted); font-size: 10px;
+th { font-weight: 600; color: var(--muted); font-size: 13px;
      text-transform: uppercase; letter-spacing: 0.06em; }
 td.num, th.num { text-align: right; }
 
-/* Stat tiles. The value is the one place the console drops mono: a standalone
-   figure set in tabular digits looks loose, because every glyph is padded to
+/* Stat tiles. The value is the one place the console drops tabular figures: a
+   standalone number set in them looks loose, because every glyph is padded to
    the width of a zero. */
 .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
          margin-bottom: 12px; }
 .tile { background: var(--bg-raised); border: 1px solid var(--line);
         border-radius: var(--radius-lg); padding: 14px; }
-.tile .k { color: var(--muted); font-size: 11px; }
-.tile .v { font-family: 'Open Sauce Sans', ui-sans-serif, system-ui, sans-serif;
-           font-variant-numeric: proportional-nums; font-size: 26px; font-weight: 600;
+.tile .k { color: var(--muted); font-size: 14px; }
+.tile .v { font-variant-numeric: proportional-nums; font-size: 32px; font-weight: 600;
            line-height: 1.15; margin-top: 4px; letter-spacing: -0.02em; }
-.tile .s { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.tile .s { color: var(--muted); font-size: 14px; margin-top: 2px; }
 
 /* Charts. One hue for every mark: these are single-series plots, so a second
    colour would encode nothing, and colouring bars by height double-encodes the
@@ -117,10 +187,22 @@ td.num, th.num { text-align: right; }
 .chart .grid-line { stroke: var(--line); stroke-width: 1; }
 .chart .mark { fill: var(--accent-2); }
 .chart .mark:hover { fill: var(--fg); }
-.chart .tick { fill: var(--muted); font-size: 10px; }
-.chart .val { fill: var(--fg); font-size: 10px; font-weight: 600; }
+.chart .tick { fill: var(--muted); font-size: 13px; }
+.chart .val { fill: var(--fg); font-size: 13px; font-weight: 600; }
 .chart-empty { color: var(--muted); padding: 18px 0; text-align: center; }
 .two-up { display: grid; gap: 12px; grid-template-columns: 1fr; }
+
+/* Raw documents. The console shows the bytes an agent is served, folded away
+   by default: the rendered table is what an operator reads, and the JSON is
+   what they paste into a bug report. */
+details { margin-top: 10px; }
+summary { cursor: pointer; color: var(--accent-2); font-size: 14px; }
+summary:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+pre {
+  background: var(--bg-sunken); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px; overflow-x: auto; margin: 8px 0 0; font-size: 13px;
+  max-height: 24rem; overflow-y: auto;
+}
 
 .banner { border: 1px solid var(--accent); border-radius: var(--radius-lg);
           background: var(--bg-raised); padding: 10px 12px; margin-bottom: 12px; }
@@ -132,27 +214,42 @@ td.num, th.num { text-align: right; }
 p.note { margin: 10px 0 0; }
 
 @media (min-width: 900px) {
-  .shell { grid-template-columns: 190px 1fr; }
-  .side { position: sticky; top: 0; height: 100vh; }
+  .shell { grid-template-columns: 208px 1fr; }
+  .side { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
   nav { flex-direction: column; }
-  main { padding: 20px 24px; }
+  main { padding: 20px 28px 40px; }
+  .topbar { margin: -20px -28px 22px; padding: 14px 28px; }
   .two-up { grid-template-columns: 1fr 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 """
 
-TABS = (
-    ("overview", "Overview"),
-    ("keys", "Keys"),
-    ("policy", "Policy"),
-    ("provider", "Provider"),
-    ("authority", "Authority"),
-    ("exposure", "Exposure"),
-    ("agents", "Agents"),
-    ("receipts", "Receipts"),
-    ("refunds", "Refunds"),
-    ("health", "Health"),
+#: The nav, grouped. Eleven destinations in one flat column is a list you read
+#: top to bottom every time because nothing tells you where to look; four short
+#: groups is a place you learn. The grouping is by *who the screen is about* —
+#: the trade, the strangers calling in, the limits the Merchant set, and the
+#: machinery underneath — not by how often a tab is opened, which is a ranking
+#: that goes stale and that nobody can verify.
+TAB_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "Trade",
+        (("overview", "Overview"), ("receipts", "Receipts"), ("refunds", "Refunds")),
+    ),
+    (
+        "Agents",
+        (("agents", "Registered"), ("discovery", "Discovery"), ("exposure", "Exposure")),
+    ),
+    (
+        "Limits",
+        (("policy", "Policy"), ("authority", "Authority"), ("provider", "Provider")),
+    ),
+    ("Operations", (("keys", "Keys"), ("health", "Health"))),
 )
+
+#: The flat view, which is what routing and the tab dispatch read. Derived, so a
+#: tab added to a group above is routable without a second edit — and a tab that
+#: exists in one and not the other cannot happen.
+TABS = tuple(tab for _group, tabs in TAB_GROUPS for tab in tabs)
 
 
 #: One line under each page title. The console has nine destinations and the
@@ -165,6 +262,7 @@ _SUBTITLES = {
     "authority": "Which kinds of human approval this shop accepts",
     "exposure": "Which policies Buyer Agents are allowed to see",
     "agents": "Who has registered, and what their tier buys them",
+    "discovery": "The documents an agent reads before it ever calls a tool",
     "receipts": "Sealed, hash-chained, verifiable without this server",
     "refunds": "What agents asked for, and what the shop did",
     "health": "Clocks, holds, and where the counters live",
@@ -358,6 +456,10 @@ class ConsoleState:
     overdue_holds: list[dict[str, Any]]
     dev_profile_hosts: tuple[str, ...] = ()
     export_acknowledged: bool = True
+    #: The public documents, as served. Keyed by path so the tab can print the
+    #: URL an agent actually fetches rather than a name the console invented.
+    discovery: dict[str, Any] = field(default_factory=dict)
+    tools: list[dict[str, Any]] = field(default_factory=list)
 
 
 def page(state: ConsoleState, tab: str) -> str:
@@ -374,10 +476,20 @@ def page(state: ConsoleState, tab: str) -> str:
 <body>
 <div class="shell">
 <div class="side">
-<div class="brand"><b>{_e(state.merchant_domain)}</b><span>/agentic</span></div>
-<nav>{"".join(_tab_link(name, label, tab) for name, label in TABS)}</nav>
+<div class="brand">
+<b>OpenStore</b>
+<span>console</span>
+</div>
+<nav>{_nav(tab)}</nav>
 </div>
 <main>
+<header class="topbar">
+<div class="who">
+<span class="eyebrow">Merchant</span>
+<b>{_e(state.merchant_domain)}</b>
+</div>
+{_status(state)}
+</header>
 <div class="page-head"><h1>{_e(dict(TABS)[tab])}</h1><p>{_e(_SUBTITLES.get(tab, ""))}</p></div>
 {_banners(state)}
 {body}
@@ -387,9 +499,38 @@ def page(state: ConsoleState, tab: str) -> str:
 </html>"""
 
 
+def _nav(current: str) -> str:
+    out = []
+    for group, tabs in TAB_GROUPS:
+        links = "".join(_tab_link(name, label, current) for name, label in tabs)
+        out.append(f'<div class="nav-group"><span class="nav-head">{_e(group)}</span>{links}</div>')
+    return "".join(out)
+
+
 def _tab_link(name: str, label: str, current: str) -> str:
     marker = ' aria-current="page"' if name == current else ""
     return f'<a href="/agentic/{name}"{marker}>{_e(label)}</a>'
+
+
+def _status(state: ConsoleState) -> str:
+    """The three facts an operator checks before reading anything else: can this
+    deployment sign, what rail is it on, and is it pretending to be live.
+
+    Derived from the same state the tabs render, never a second source. A status
+    strip that agreed with nothing else on the page would be worse than none.
+    """
+    live = [k for k in state.keys if not k.get("revoked_at")]
+    signing = (
+        f"{len(live)} signing key{'s' if len(live) != 1 else ''}"
+        if live
+        else "no signing key — nothing can be sealed"
+    )
+    chips = [
+        f'<span class="chip{"" if live else " chip-warn"}">{_e(signing)}</span>',
+        f'<span class="chip">rail: {_e(state.provider.get("adapter", "unknown"))}</span>',
+        f'<span class="chip">{len(state.receipts)} sealed</span>',
+    ]
+    return f'<div class="status">{"".join(chips)}</div>'
 
 
 def _banners(state: ConsoleState) -> str:
@@ -659,6 +800,56 @@ this build.</p>
 </section>"""
 
 
+def _discovery(state: ConsoleState) -> str:
+    """The public documents and the tool surface, rendered.
+
+    **A second rendering of the same bytes, never a second document.** These are
+    read from the very functions that serve `/.well-known/*` and `tools/list`,
+    so this tab cannot drift from what an agent is handed. The alternative —
+    content-negotiating the real paths on `Accept` — would make the bytes a
+    Merchant inspected differ from the bytes an agent received, decided by a
+    header and a `Vary` that some proxy in the middle may not honour.
+    """
+    docs = []
+    for path, document in state.discovery.items():
+        body = json.dumps(document, indent=2, sort_keys=True)
+        docs.append(
+            f"<section><h2>{_e(path)}</h2>"
+            f'<p class="note muted">Public and unauthenticated by design — a card behind a '
+            f"login is a card no new agent can read. "
+            f'<a href="{_e(path)}">Open the raw document</a></p>'
+            f"<details><summary>Show the bytes as served</summary>"
+            f"<pre>{_e(body)}</pre></details></section>"
+        )
+
+    rows = []
+    for tool in state.tools:
+        annotations = tool.get("annotations", {})
+        money = annotations.get("moneyPathHint")
+        flags = []
+        if annotations.get("readOnlyHint"):
+            flags.append('<span class="ok">read-only</span>')
+        if annotations.get("destructiveHint"):
+            flags.append('<span class="warn">destructive</span>')
+        rows.append(
+            f'<tr><td><code>{_e(tool["name"])}</code></td>'
+            f'<td>{_e(annotations.get("scope", ""))}</td>'
+            f'<td>{"<span class=\"warn\">yes</span>" if money else "no"}</td>'
+            f"<td>{' · '.join(flags) or '—'}</td></tr>"
+        )
+    tools_table = f"""<section>
+<h2>Tool surface</h2>
+<table><thead><tr><th>tool</th><th>scope</th><th>money path</th><th>hints</th></tr></thead>
+<tbody>{"".join(rows) or '<tr><td colspan="4" class="muted">No tools exposed.</td></tr>'}</tbody></table>
+<p class="note muted"><code>moneyPathHint</code> is this sidecar's own annotation, not a
+standard MCP one. It is what lets a client offer standing approval for everything except the
+scopes that move toward a spend — a permission UI that has to hardcode tool names is a
+permission UI that breaks on the next tool.</p>
+</section>"""
+
+    return "".join(docs) + tools_table
+
+
 _TABS = {
     "overview": _overview,
     "keys": _keys,
@@ -667,6 +858,7 @@ _TABS = {
     "authority": _authority,
     "exposure": _exposure,
     "agents": _agents,
+    "discovery": _discovery,
     "receipts": _receipts,
     "refunds": _refunds,
     "health": _health,

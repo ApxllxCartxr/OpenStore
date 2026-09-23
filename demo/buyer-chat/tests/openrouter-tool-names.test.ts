@@ -63,7 +63,12 @@ describe('OpenRouterDriver tool name round-trip', () => {
 			roll_dice: { description: 'Roll a die.', parameters: { type: 'object' } }
 		});
 		const turn = await driver.step([], ['roll_dice']);
-		expect(turn).toEqual({ kind: 'text', text: 'I am not sure what to do next.', reasoning: null });
+		// The call is dropped and the driver reports what it actually received:
+		// nothing. It used to substitute "I am not sure what to do next." here,
+		// which the loop then printed underneath whatever the app had just said.
+		// Deciding whether silence needs covering is the loop's job, not this
+		// function's — see `hasSpokenSince` in `+page.server.ts`.
+		expect(turn).toEqual({ kind: 'text', text: '', reasoning: null });
 	});
 });
 

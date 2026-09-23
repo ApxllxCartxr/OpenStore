@@ -149,6 +149,11 @@ async function defaultResolver(host: string): Promise<string[]> {
 
 export type Card = {
 	name: string;
+	/** What the shop says it sells, from its own card. A hint for deciding
+	 *  which shops to ask first and **never** grounds for concluding one has
+	 *  nothing — the card says as much itself, and overlapping stock across
+	 *  shops is the ordinary case. */
+	description: string;
 	category: string;
 	domain: string;
 	protocols: string[];
@@ -226,7 +231,12 @@ export async function fetchCard(
 
 export function parseCard(document: unknown, domain: string): CardMeta {
 	const card = document as {
-		merchant?: { name?: unknown; domain?: unknown };
+		merchant?: {
+			name?: unknown;
+			domain?: unknown;
+			description?: unknown;
+			categories?: unknown;
+		};
 		category?: unknown;
 		protocols?: unknown;
 		endpoints?: { jwks?: unknown };
@@ -266,9 +276,17 @@ export function parseCard(document: unknown, domain: string): CardMeta {
 		);
 	}
 
+	// `merchant.categories` is the card's own list; `card.category` is the older
+	// single-value spelling this chat has always read. Both are accepted so a
+	// shop that has not redeployed still lands somewhere sensible.
+	const categories = Array.isArray(card.merchant?.categories)
+		? card.merchant.categories.map(String).filter(Boolean)
+		: [];
+
 	return {
 		name: String(card.merchant?.name ?? domain),
-		category: String(card.category ?? ''),
+		description: String(card.merchant?.description ?? ''),
+		category: categories.length ? categories.join(', ') : String(card.category ?? ''),
 		domain,
 		protocols: Array.isArray(card.protocols) ? card.protocols.map(String) : [],
 		jwksUrl
@@ -320,12 +338,20 @@ export function confirmRotation(
 
 export function saveContact(card: Card, cardUrl: string): void {
 	db.prepare(
-		`INSERT INTO contacts (domain, name, category, card_url, jwks_url, jwks, protocols, added_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT (domain) DO UPDATE SET name = excluded.name, card_url = excluded.card_url`
+		`INSERT INTO contacts (domain, name, description, category, card_url, jwks_url, jwks, protocols, added_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 -- Re-adding a shop refreshes what it says about itself. The hint is the
+		 -- Merchant's to change, and a card re-read that kept the old wording
+		 -- would leave this chat routing on a description the shop has retired.
+		 ON CONFLICT (domain) DO UPDATE SET
+		   name = excluded.name,
+		   description = excluded.description,
+		   category = excluded.category,
+		   card_url = excluded.card_url`
 	).run(
 		card.domain,
 		card.name,
+		card.description,
 		card.category,
 		cardUrl,
 		card.jwksUrl,
@@ -399,6 +425,7 @@ export function getContact(domain: string): (Card & { card_url: string }) | null
 		| {
 				domain: string;
 				name: string;
+				description: string;
 				category: string;
 				card_url: string;
 				jwks_url: string;
@@ -410,6 +437,7 @@ export function getContact(domain: string): (Card & { card_url: string }) | null
 	return {
 		domain: row.domain,
 		name: row.name,
+		description: row.description,
 		category: row.category,
 		card_url: row.card_url,
 		jwksUrl: row.jwks_url,

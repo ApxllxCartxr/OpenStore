@@ -9,7 +9,7 @@
 
 {#each data.matrix as group (group.group)}
 	<section style="margin-bottom:2rem">
-		<h2 style="font-size:1rem">{group.name}</h2>
+		<h2 style="font-size:1.15rem">{group.name}</h2>
 		<table class="mono" style="width:100%;border-collapse:collapse">
 			<thead><tr>
 				{#each group.axes as axis (axis)}<th style="text-align:left">{axis}</th>{/each}

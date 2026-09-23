@@ -31,6 +31,7 @@ of them.
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -50,11 +51,12 @@ from openstore.sidecar.core.codes import (
 from openstore.sidecar.evidence.bundle import BundleBuilder, attestation_digest
 from openstore.sidecar.evidence.keys import Keyring, sign
 from openstore.sidecar.gate.decide import Authority, Decision, DecisionInput, Gate
-from openstore.sidecar.gate.policy import Policy
+from openstore.sidecar.gate.policy import Policy, current_policy
 from openstore.sidecar.gate.settle import ProviderRecord, collect, settle
 from openstore.sidecar.gate.transcript import binding_for
 from openstore.sidecar.ledger.entries import Ledger
 from openstore.sidecar.protocols.core import run_core
+from openstore.sidecar.protocols.events import event_body
 from openstore.sidecar.trait.client import TraitClient
 from openstore.sidecar.trait.errors import TraitError
 from openstore.sidecar.trait.models import Destination, Line, Quote
@@ -122,7 +124,14 @@ class CheckoutContext:
     """Everything the money path needs, injected so it can be driven directly."""
 
     trait: TraitClient | None = None
-    policy: Policy = field(default_factory=Policy)
+
+    @property
+    def policy(self) -> Policy:
+        """The live Policy, read per decision. Never a field: a copy taken when
+        this context was built is a copy that stops tracking the Merchant's
+        edits the moment they make one."""
+        return current_policy()
+
     tokens: TokenStore = field(default_factory=TokenStore)
     provider: Any = None
     keyring: Keyring | None = None
@@ -280,8 +289,22 @@ _STATUS_ATTEMPT: dict[OrderStatus, int] = {
 
 
 async def set_status(
-    ctx: CheckoutContext, order_id: str, status: OrderStatus, reason: str = ""
+    ctx: CheckoutContext,
+    order_id: str,
+    status: OrderStatus,
+    reason: str = "",
+    *,
+    agent_id: str = "",
+    receipt_id: str = "",
 ) -> None:
+    """The one place an order changes state, and therefore the one place an
+    event is raised.
+
+    Emitting from here rather than from each caller is what makes "an agent
+    hears about every transition" true instead of intended: a new call site that
+    forgot to publish would be a status the agent only learns by polling, which
+    is the thing events exist to remove.
+    """
     assert ctx.trait is not None
     order = await ctx.trait.orders_set_status(
         order_id, status.value, reason, attempt=_STATUS_ATTEMPT[status]
@@ -294,6 +317,12 @@ async def set_status(
             f"The shop kept {order_id} at {order.status.value} rather than moving it to "
             f"{status.value}.",
         )
+    # Only after the Merchant took the transition. An event published on the
+    # attempt would tell an agent an order moved when it had not — and the
+    # Merchant is truth here, which is the whole reason the check above exists.
+    await publish_order_event(
+        ctx, order_id=order_id, status=status, agent_id=agent_id, receipt_id=receipt_id
+    )
 
 
 # ── 1. start ─────────────────────────────────────────────────────────────────
@@ -476,7 +505,7 @@ async def tap(
     # Stock is held here and nowhere earlier: `pending` holds none, and an agent
     # that never reaches a human tap must not be able to reserve inventory.
     await ctx.trait.reserve(checkout.order_id, checkout.lines, discount_code=checkout.discount_code)
-    await set_status(ctx, checkout.order_id, OrderStatus.CONFIRMED)
+    await set_status(ctx, checkout.order_id, OrderStatus.CONFIRMED, agent_id=checkout.agent_id)
     checkout.status = OrderStatus.CONFIRMED
     checkout.confirmed_at = datetime.now(UTC)
 
@@ -556,6 +585,7 @@ async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = ""
             checkout.order_id,
             settlement.status,
             settlement.reason_code.value if settlement.reason_code else "",
+            agent_id=checkout.agent_id,
         )
         raise CheckoutRefused(
             settlement.reason_code or ReasonCode.NOT_FOUND,
@@ -563,7 +593,7 @@ async def complete(ctx: CheckoutContext, link_id: str, *, payer_handle: str = ""
         )
 
     await ctx.trait.commit(checkout.order_id)
-    await set_status(ctx, checkout.order_id, OrderStatus.PAID)
+    await set_status(ctx, checkout.order_id, OrderStatus.PAID, agent_id=checkout.agent_id)
     checkout.status = OrderStatus.PAID
     checkout.receipt_id = await _seal(ctx, checkout, decision, entries=entries)
     await ctx.store.save(checkout)
@@ -654,7 +684,13 @@ async def cancel(ctx: CheckoutContext, order_id: str, *, reason: str = "") -> Pe
                     # close escrow-zero on an entry that balances nothing.
                     await ledger.release(checkout.order_id, held, checkout.quote.currency)
 
-    await set_status(ctx, checkout.order_id, OrderStatus.CANCELLED, reason or "cancelled")
+    await set_status(
+        ctx,
+        checkout.order_id,
+        OrderStatus.CANCELLED,
+        reason or "cancelled",
+        agent_id=checkout.agent_id,
+    )
     checkout.status = OrderStatus.CANCELLED
     if checkout.link_id:
         await ctx.provider.cancel(checkout.link_id)
@@ -681,7 +717,50 @@ async def collect_cash(ctx: CheckoutContext, order_id: str) -> Pending:
     assert ctx.trait is not None
     async with session_scope(ctx.sessionmaker) as session:
         await collect(decision, Ledger(session))
-    await set_status(ctx, order_id, OrderStatus.PAID)
+    await set_status(ctx, order_id, OrderStatus.PAID, agent_id=checkout.agent_id)
     checkout.status = OrderStatus.PAID
     await ctx.store.save(checkout)
     return checkout
+
+
+async def publish_order_event(
+    ctx: CheckoutContext,
+    *,
+    order_id: str,
+    status: OrderStatus,
+    agent_id: str = "",
+    receipt_id: str = "",
+) -> None:
+    """Queue an order event for the agent that placed the order, if it wants one.
+
+    Every reason to skip is a quiet one, so each is checked rather than caught:
+    no event store (a sidecar with no database), no agent (a Consumer-initiated
+    change), no record, or an agent that declared no callback. A `try/except`
+    around this would turn all four into the same shrug.
+    """
+    from openstore.sidecar.protocols.agent_routes import get_surface
+
+    surface = get_surface()
+    if not surface.events.enabled or not agent_id:
+        return
+    record = surface.admission.seen.get(agent_id)
+    if record is None or not record.callback_url:
+        return
+
+    event_id = f"evt_{secrets.token_hex(8)}"
+    body = event_body(
+        event_id=event_id,
+        merchant_domain=ctx.merchant_domain,
+        order_id=order_id,
+        kind=f"order.{status.value}",
+        at=datetime.now(UTC).isoformat(),
+        receipt_id=receipt_id,
+    )
+    await surface.events.enqueue(
+        event_id=event_id,
+        agent_id=agent_id,
+        order_id=order_id,
+        kind=body["kind"],
+        body=body,
+        callback_url=record.callback_url,
+    )

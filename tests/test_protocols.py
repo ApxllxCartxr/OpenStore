@@ -35,6 +35,12 @@ from openstore.sidecar.protocols.registry import (
     badge,
     toggle_labels,
 )
+from openstore.sidecar.protocols.tools import ToolRefused
+from openstore.sidecar.protocols.wellknown import (
+    agent_commerce_card,
+    checkout_requirements,
+    policy_limits,
+)
 from openstore.sidecar.trait.client import TraitClient
 from openstore.sidecar.trait.models import Destination, Line
 from openstore.sidecar.trait.seed import SEED_ITEMS
@@ -547,3 +553,177 @@ def test_there_is_only_one_jwt_verifier() -> None:
     source = Path("src/openstore/sidecar/protocols/ap2.py").read_text(encoding="utf-8")
     assert "from openstore.sidecar.evidence.keys import" in source
     assert not re.search(r"\bec\.ECDSA\b", source), "ap2.py is doing its own curve maths"
+
+
+# ── The discovery hint (ADR-0027) ────────────────────────────────────────────
+
+
+def test_the_card_publishes_what_the_shop_says_it_sells() -> None:
+    """So an agent holding ten shops can ask the likely ones first instead of
+    asking all ten about a mug."""
+    card = agent_commerce_card(
+        merchant_domain="kettleandgrain.localhost",
+        merchant_name="Kettle & Grain",
+        origin="http://kettleandgrain.localhost",
+        enabled_methods=frozenset({PaymentMethod.UPI}),
+        enabled_authority_kinds=frozenset({AuthorityKind.PASSKEY}),
+        demo=True,
+        description="Kitchenware and brewing gear.",
+        categories=("kitchenware", "homeware"),
+    )
+    assert card["merchant"]["description"] == "Kitchenware and brewing gear."
+    assert card["merchant"]["categories"] == ["kitchenware", "homeware"]
+
+
+def test_the_card_says_the_hint_is_unverified_and_never_a_filter() -> None:
+    """The one thing an integrator must not conclude from this field.
+
+    It is the Merchant's own words about itself, checked by nobody, and this
+    demo deliberately puts four SKUs in two shops at once. An agent that reads
+    the hint as authoritative answers "they do not stock that" about stock that
+    is there — which is worse than the extra round trip the field exists to
+    save, because a slow answer is still a right one.
+    """
+    card = agent_commerce_card(
+        merchant_domain="x.test",
+        merchant_name="X",
+        origin="http://x.test",
+        enabled_methods=frozenset(),
+        enabled_authority_kinds=frozenset(),
+        demo=True,
+        description="Anything.",
+    )
+    note = card["merchant"]["note"].lower()
+    assert "verified by no one" in note
+    assert "never grounds for concluding" in note
+    assert "only a search can establish" in note
+
+
+def test_a_shop_that_declares_nothing_carries_no_empty_hint() -> None:
+    """Absent, not blank. An empty description is a claim that the shop said
+    something; leaving the key out says it did not."""
+    card = agent_commerce_card(
+        merchant_domain="x.test",
+        merchant_name="X",
+        origin="http://x.test",
+        enabled_methods=frozenset(),
+        enabled_authority_kinds=frozenset(),
+        demo=True,
+    )
+    assert card["merchant"] == {"name": "X", "domain": "x.test"}
+
+
+# ── Limits, requirements and structured refusals ─────────────────────────────
+
+
+def test_the_card_publishes_the_limits_the_gate_enforces() -> None:
+    """Each of these is otherwise learned by building a basket and being turned
+    away at `decide()` — the most expensive way to learn a number nobody was
+    keeping secret."""
+    limits = policy_limits(Policy())
+    assert limits["per_order_cap_minor"] == Policy().per_order_cap_minor
+    assert limits["per_order_line_count"] == Policy().per_order_line_count
+    assert limits["per_group_qty"] == Policy().per_group_qty
+    assert limits["window_open"] is True
+    assert limits["currency"] == "INR"
+
+
+def test_the_limits_report_the_merchants_refusal_rules_as_counts() -> None:
+    """An agent needs to know a tag rule exists so it can read the refusal when
+    one fires. Nobody outside needs the list of what this shop will not sell."""
+    limits = policy_limits(Policy(blocked_tags=frozenset({"recalled", "adult"})))
+    assert limits["blocked_tag_rules"] == 2
+    assert "recalled" not in str(limits)
+
+
+def test_a_closed_window_is_visible_before_an_agent_spends_a_conversation() -> None:
+    """The sharpest case for publishing limits at all: a closed shop answers
+    searches normally and refuses at checkout, so without this an agent spends a
+    whole conversation to find out the door was shut."""
+    assert policy_limits(Policy(window_open=False))["window_open"] is False
+
+
+def test_the_published_destination_shape_is_the_one_that_is_validated() -> None:
+    """Derived from `Destination`, never retyped.
+
+    A hand-written copy would be a second statement of the same rule, and the
+    interesting failure is the one where an agent builds exactly what the card
+    described and is refused for it.
+    """
+    from openstore.sidecar.trait.models import Destination
+
+    published = {f["name"] for f in checkout_requirements()["destination"]["fields"]}
+    assert published == set(Destination.model_fields)
+
+    by_name = {f["name"]: f for f in checkout_requirements()["destination"]["fields"]}
+    assert by_name["state"]["pattern"] == "^[A-Z]{2}$"
+    assert by_name["postal_code"]["pattern"] == "^[0-9]{6}$"
+    assert by_name["line2"]["required"] is False
+    assert by_name["line1"]["required"] is True
+
+
+def test_the_contact_rule_is_published_as_any_of_rather_than_a_field_list() -> None:
+    """ "Email or phone, at least one" is not something a field list can say, and
+    it is the only thing an agent needs before asking a person for details."""
+    contact = checkout_requirements()["contact"]
+    assert contact["any_of"] == ["email", "phone"]
+
+
+def test_a_refusal_carries_the_facts_needed_to_retry_correctly() -> None:
+    """`call_error` always accepted extra keys and nothing ever passed any, so an
+    agent wanting the number in a refusal had to parse English — which makes the
+    wording of a message load-bearing in a way nobody intended."""
+    refusal = ToolRefused(
+        ReasonCode.SOLD_OUT, "Only 2 left.", {"sku": "SD-TOTE-BLK-M", "available": 2}
+    )
+    payload = mcp.call_error(refusal.code, refusal.detail, **refusal.fields)
+    error = payload["structuredContent"]["error"]
+    assert error["code"] == "sold-out"
+    assert error["available"] == 2
+    assert error["sku"] == "SD-TOTE-BLK-M"
+    # The human sentence is still there; the fields are beside it, not instead.
+    assert payload["content"][0]["text"].startswith("sold-out: ")
+
+
+def test_a_refusal_with_no_fields_is_shaped_exactly_as_before() -> None:
+    """Additive, so nothing that reads `{code, detail}` notices."""
+    refusal = ToolRefused(ReasonCode.NOT_FOUND, "No such SKU.")
+    assert refusal.fields == {}
+    error = mcp.call_error(refusal.code, refusal.detail, **refusal.fields)
+    assert error["structuredContent"]["error"] == {
+        "code": "not-found",
+        "detail": "No such SKU.",
+    }
+
+
+def test_every_policy_limit_the_gate_enforces_is_published() -> None:
+    """The guardrail, not the feature.
+
+    A limit added to `Policy` and enforced by the Gate, with nothing added here,
+    is a refusal an agent can only discover by tripping it — which is the exact
+    state this work existed to end. Publishing is therefore the default and an
+    omission has to be argued for in `_UNPUBLISHED` below, by name.
+    """
+    from dataclasses import fields as dataclass_fields
+
+    #: Policy fields deliberately not in the card's `limits`, each with its
+    #: reason. Payment methods and Authority kinds are published, just under
+    #: their own keys (`payment.methods_enabled`, `authority.kinds_accepted`)
+    #: because they were there before `limits` existed and agents read them.
+    _UNPUBLISHED = {
+        "enabled_methods": "published as payment.methods_enabled",
+        "enabled_authority_kinds": "published as authority.kinds_accepted",
+        "enabled_intent_mechanisms": "published as authority.kinds_accepted's mechanisms",
+        "blocked_tags": "published as a count — the list is the Merchant's own",
+        "per_group_qty_overrides": "published as a count — naming a group leaks which",
+    }
+
+    published = set(policy_limits(Policy()))
+    for field_ in dataclass_fields(Policy):
+        if field_.name in published or field_.name in _UNPUBLISHED:
+            continue
+        raise AssertionError(
+            f"Policy.{field_.name} is enforced by the Gate and appears nowhere on the "
+            f"card. Publish it in `policy_limits`, or name it in _UNPUBLISHED with the "
+            f"reason an agent is better off discovering it by being refused."
+        )

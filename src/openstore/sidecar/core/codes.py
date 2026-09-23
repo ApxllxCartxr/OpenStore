@@ -352,6 +352,10 @@ class ReasonCode(StrEnum):
     SIGNATURE_INVALID = "signature-invalid"
     NO_HOLD = "no-hold"
     RATE_LIMITED = "rate-limited"
+    IDEMPOTENCY_CONFLICT = "idempotency-conflict"
+    """One key, two different questions. Never returned for a genuine replay —
+    a repeat of the same call with the same key is a success carrying the first
+    answer, because that is the whole point of the key."""
     PROFILE_REFUSED = "profile-refused"
     AGENT_BLOCKED = "agent-blocked"
     NOT_FOUND = "not-found"
@@ -409,6 +413,10 @@ HTTP_STATUS: dict[ReasonCode, int] = {
     # Lookup and limits.
     ReasonCode.NOT_FOUND: 404,
     ReasonCode.RATE_LIMITED: 429,
+    # 409: the request is well formed and the shop will not answer it, which is
+    # exactly the "business refusal" bucket above. The caller fixes it by
+    # choosing a new key, not by retrying this one.
+    ReasonCode.IDEMPOTENCY_CONFLICT: 409,
 }
 
 #: Every closed set in this module, by the name `docs/CODES.md` prints. The

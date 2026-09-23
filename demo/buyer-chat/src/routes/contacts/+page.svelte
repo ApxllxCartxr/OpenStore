@@ -28,7 +28,7 @@
 		<p class="mono" style="color:{form.code ? 'var(--accent)' : 'var(--ok)'}">{form.message}</p>
 	{/if}
 
-	<h2 style="font-size:1.05rem;margin-top:var(--s-5)">Spending</h2>
+	<h2 style="font-size:1.2rem;margin-top:var(--s-5)">Spending</h2>
 	<p class="meta" style="margin-top:var(--s-1)">
 		Miro cannot spend and holds no payment credential, whatever you set below — every purchase
 		still ends with you approving the exact amount on the shop's own page. This only tells Miro

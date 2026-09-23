@@ -59,6 +59,9 @@ db.exec(`
 	  domain      TEXT PRIMARY KEY,
 	  name        TEXT NOT NULL,
 	  category    TEXT NOT NULL DEFAULT '',
+	  -- What the shop's own card says it sells. A hint for choosing which
+	  -- shops to ask first; never grounds for deciding one has nothing.
+	  description TEXT NOT NULL DEFAULT '',
 	  card_url    TEXT NOT NULL,
 	  jwks_url    TEXT NOT NULL DEFAULT '',
 	  jwks        TEXT NOT NULL,
@@ -122,6 +125,9 @@ if (!contactColumns.includes('mcp_endpoint')) {
 }
 if (!contactColumns.includes('tools')) {
 	db.exec(`ALTER TABLE contacts ADD COLUMN tools TEXT NOT NULL DEFAULT '[]'`);
+}
+if (!contactColumns.includes('description')) {
+	db.exec(`ALTER TABLE contacts ADD COLUMN description TEXT NOT NULL DEFAULT ''`);
 }
 
 const messageColumns = (db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[]).map(

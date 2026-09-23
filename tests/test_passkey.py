@@ -326,9 +326,7 @@ async def test_the_stored_sign_count_advances_after_an_assertion(
     _, _, challenge = await _begin(rp, token="tok1")
     created = device.create(challenge, attestation="none")
     raw_id = base64url_to_bytes(str(created["id"]))
-    await rp.verify_enrollment(
-        token="tok1", credential=created, cart_hash=CART, total_minor=TOTAL
-    )
+    await rp.verify_enrollment(token="tok1", credential=created, cart_hash=CART, total_minor=TOTAL)
     after_enrollment = (await rp.credential(raw_id)).sign_count
     assert after_enrollment > 0, "enrollment's own counter was dropped, not just left unmoved"
 
@@ -350,9 +348,7 @@ async def test_an_assertion_without_user_verification_is_refused(sessionmaker) -
     rp = PasskeyRP(rp_id=RP_ID, origin=ORIGIN, rp_name="SpoiledDuckie", sessionmaker=sessionmaker)
     _, _, challenge = await _begin(rp, token="tok1")
     created = device.create(challenge, attestation="none")
-    await rp.verify_enrollment(
-        token="tok1", credential=created, cart_hash=CART, total_minor=TOTAL
-    )
+    await rp.verify_enrollment(token="tok1", credential=created, cart_hash=CART, total_minor=TOTAL)
 
     device.user_verified = False
     _, _, challenge2 = await _begin(rp, token="tok2")

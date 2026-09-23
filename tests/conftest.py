@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import httpx
 import pytest
@@ -43,6 +43,23 @@ async def session(
 @pytest.fixture
 async def ledger(session: AsyncSession) -> Ledger:
     return Ledger(session)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_policy() -> Iterator[None]:
+    """One live Policy per process means one Policy shared between tests.
+
+    That is the right shape for the product — the Gate, the console and the card
+    must never disagree about a limit — and it makes policy a global that a test
+    editing it would otherwise leave behind. One test setting `window_open=False`
+    used to end there; now it would close the agent window for every test after
+    it in the file order.
+    """
+    from openstore.sidecar.gate.policy import Policy, set_current_policy
+
+    set_current_policy(Policy())
+    yield
+    set_current_policy(Policy())
 
 
 @pytest.fixture

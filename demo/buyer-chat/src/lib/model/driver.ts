@@ -355,7 +355,7 @@ export class OpenRouterDriver implements ModelDriver {
 	 *  servers are connected can change between one message and the next. A
 	 *  driver instance is cached per model choice (driver.ts's `byChoice`),
 	 *  so its own tool schemas cannot be — those live in the caller. */
-	async step(turns: Turn[], tools: string[], schemas?: Record<string, { description: string; parameters: object }>): Promise<ToolTurn> {
+	async step(turns: Turn[], tools: string[], schemas?: Record<string, { description: string; parameters: object }>, context?: string): Promise<ToolTurn> {
 		const toolSchemas = schemas ?? this.toolSchemas;
 		// The closed set's own names are hyphenated (`add-line`); a generic
 		// MCP server's are whatever that server chose, underscores as often
@@ -368,7 +368,16 @@ export class OpenRouterDriver implements ModelDriver {
 		const openaiNames = new Map<string, string>();
 		const body = {
 			model: this.model,
-			messages: [{ role: 'system', content: this.systemPrompt }, ...toOpenAI(turns)],
+			// Two system messages: the standing rules, then what is true right now.
+			// The roster cannot live in the first one — drivers are built once and
+			// cached per model choice, while the shopper adds and removes shops
+			// between turns, so a roster baked in at construction would go stale the
+			// first time they added a shop.
+			messages: [
+				{ role: 'system', content: this.systemPrompt },
+				...(context ? [{ role: 'system', content: context }] : []),
+				...toOpenAI(turns)
+			],
 			tools: tools.flatMap((name) => {
 				const schema = toolSchemas[name];
 				if (!schema) return [];
@@ -439,9 +448,15 @@ export class OpenRouterDriver implements ModelDriver {
 			}
 			if (calls.length) return { kind: 'calls', calls, reasoning };
 		}
+		// An empty completion is reported as empty, never as a sentence this file
+		// invented. Models that route their whole turn through `reasoning` leave
+		// `content` blank routinely, and substituting "I am not sure what to do
+		// next." put that line under a message the app had just written — the
+		// agent contradicting itself about a basket it had correctly updated.
+		// Whether silence needs covering is the caller's call, not the wire's.
 		return {
 			kind: 'text',
-			text: String(choice?.content ?? '').trim() || 'I am not sure what to do next.',
+			text: String(choice?.content ?? '').trim(),
 			reasoning
 		};
 	}

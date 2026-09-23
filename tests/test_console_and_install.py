@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -55,6 +56,42 @@ def test_every_shipped_tab_renders_against_seeded_data(client: TestClient, tab: 
     assert 'aria-current="page"' in response.text
 
 
+def test_the_discovery_tab_shows_the_same_bytes_the_agent_is_served(
+    client: TestClient,
+) -> None:
+    """The tab is a second *rendering*, never a second document.
+
+    The reason it exists at all is that the real paths must keep answering raw
+    JSON: content-negotiating `/.well-known/agent-commerce.json` on `Accept`
+    would mean the bytes a Merchant inspected differ from the bytes an agent
+    received, decided by a header and a `Vary` some proxy may not honour. That
+    guarantee is only worth anything if the console cannot drift from the route,
+    so this asserts the card on the page is the card on the wire.
+    """
+    import json
+
+    body = client.get("/agentic/discovery").text
+    for path in (
+        "/.well-known/agent-commerce.json",
+        "/.well-known/ucp.json",
+        "/.well-known/jwks.json",
+    ):
+        served = client.get(path)
+        assert served.status_code == 200
+        rendered = json.dumps(served.json(), indent=2, sort_keys=True)
+        assert html.escape(rendered) in body, f"{path} on the page is not what the route serves"
+
+
+def test_the_discovery_tab_names_the_money_path_tools(client: TestClient) -> None:
+    """`moneyPathHint` is this sidecar's own annotation and the whole reason a
+    client can offer standing approval for everything else. A tab that listed
+    tool names without it would be a tool list, not a disclosure."""
+    body = client.get("/agentic/discovery").text
+    assert "place-order" in body
+    assert "moneyPathHint" in body
+    assert "read-only" in body
+
+
 def test_the_cut_tabs_are_absent_rather_than_empty(client: TestClient) -> None:
     """Attribution and the full health panel were cut to fund A6's four
     protocols. A tab that renders an empty panel would look broken; an absent
@@ -64,18 +101,49 @@ def test_the_cut_tabs_are_absent_rather_than_empty(client: TestClient) -> None:
     assert client.get("/agentic/attribution").status_code == 404
 
 
-def test_the_console_is_mono_dominant_with_no_animation(client: TestClient) -> None:
+def test_the_token_layer_needs_no_build_step_to_define_a_token() -> None:
+    """`design/tokens.css` is served RAW by the sidecar, with no bundler in the
+    path.
+
+    The two SvelteKit roots run it through Tailwind, which compiles an `@theme`
+    block into `:root` — so a token declared there works at `/` and is invisible
+    here, because a browser skips an at-rule it does not know. That is not a
+    hypothetical: the font tokens lived in `@theme`, every `--font-*` came back
+    undefined on this origin, and the console rendered in the browser's default
+    serif while the shop looked correct.
+    """
+    css = Path("design/tokens.css").read_text(encoding="utf-8")
+    assert "@theme" not in css.replace(
+        "`@theme`", ""
+    ), "tokens.css is served unbuilt; a token inside @theme is invisible to the console"
+    for token in ("--font-display", "--font-title", "--font-body", "--font-serif", "--font-mono"):
+        assert token in css, f"{token} is referenced by a surface and must be defined here"
+
+
+def test_the_console_serves_the_token_layer_it_links(client: TestClient) -> None:
+    """A 404 here is silent — the page still renders, just with every custom
+    property undefined — so it is asserted rather than noticed."""
+    response = client.get("/agentic/static/tokens.css")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/css")
+    assert "--font-mono" in response.text
+
+
+def test_the_console_is_figure_dominant_with_no_animation(client: TestClient) -> None:
     """§4: it should read like something you check at 2am."""
     body = client.get("/agentic/health").text
-    assert "Iosevka Term SS08" in body
+    # The console names the mono ROLE and never a family: the token layer is
+    # what decides which face that is, so a font swap there cannot leave the
+    # console drawing its own typography beside the one it imported.
+    assert "var(--font-mono)" in body
     assert "tabular-nums" in body
     assert "prefers-reduced-motion" in body
     assert "@keyframes" not in body
 
 
 def test_no_component_references_a_literal_colour(client: TestClient) -> None:
-    """Every value is a token, so the console inherits the palette and the dark
-    theme without knowing either."""
+    """Every value is a token, so the console inherits the palette without
+    knowing it."""
     import re
 
     from openstore.sidecar.console.render import CONSOLE_CSS
@@ -98,7 +166,19 @@ def test_a_policy_edit_changes_gate_outcomes_without_a_restart(client: TestClien
     after = client.get("/agentic/policy").text
     assert "₹1,000.00" in after
     assert "closed" in after
-    # And the Gate reads the same object, not a copy.
+
+    # And the GATE sees it. Reading `get_console_store().policy` back is what
+    # this assertion used to do, which is the object `set_policy` had just
+    # written — it checked the console against itself and passed for as long as
+    # the console, the Gate and the card each held a Policy of their own. They
+    # did, and an edit moved only the console's: the number on the screen
+    # changed and nothing was enforced differently.
+    from openstore.sidecar.checkout import get_context
+    from openstore.sidecar.protocols.agent_routes import get_surface
+
+    assert get_context().policy.per_order_cap_minor == 100_000
+    assert get_context().policy.window_open is False
+    assert get_surface().policy.per_order_cap_minor == 100_000
     assert get_console_store().policy.per_order_cap_minor == 100_000
 
 

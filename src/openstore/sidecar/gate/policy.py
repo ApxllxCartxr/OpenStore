@@ -37,3 +37,31 @@ class Policy:
 
     def qty_cap_for(self, group_id: str) -> int:
         return self.per_group_qty_overrides.get(group_id, self.per_group_qty)
+
+
+#: The one live Policy this process enforces.
+#:
+#: `Policy` is frozen, so an edit is a replacement rather than a mutation — and
+#: a replacement is only visible to whoever reads *through* this holder. Every
+#: surface that shows or applies a limit reads `current_policy()` at the moment
+#: it needs one: the Gate when it decides, the console when it renders, the card
+#: when it is fetched.
+#:
+#: They used to hold their own references instead. `ConsoleStore` and
+#: `CheckoutContext` each built a `Policy()`, and `set_policy` swapped only the
+#: console's, so a Merchant editing their cap changed the number on the screen
+#: and nothing the Gate evaluated. `AgentSurface` was a third copy that nothing
+#: ever set from a Policy at all — the card agreed with the Gate only because
+#: three sets of defaults happened to match.
+_live = Policy()
+
+
+def current_policy() -> Policy:
+    return _live
+
+
+def set_current_policy(policy: Policy) -> None:
+    """Replace the live Policy. Takes effect on the next read, with no restart
+    and nothing to keep in step, because there is only one of these."""
+    global _live
+    _live = policy

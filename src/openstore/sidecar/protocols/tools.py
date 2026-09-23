@@ -35,10 +35,26 @@ from openstore.sidecar.trait.models import Destination
 
 
 class ToolRefused(Exception):
-    def __init__(self, code: ReasonCode, detail: str) -> None:
+    """A refusal, optionally carrying the facts needed to fix it.
+
+    `fields` is the difference between an agent retrying blindly and retrying
+    correctly. `mcp.call_error` has always accepted extra keys and nothing ever
+    passed any, so every refusal arrived as a code plus a sentence and an agent
+    wanting the number in it had to parse English — which it will do badly, and
+    which makes the wording of a message load-bearing in a way nobody intended.
+
+    **Only facts the agent could already have.** These are computed from what it
+    sent and what this shop publishes; a refusal is not a side channel for
+    anything the tool surface would not have answered anyway. That is why a
+    blocked tag reports that a rule matched and not which rule, and why an
+    unserviceable address does not come back with the serviceable list.
+    """
+
+    def __init__(self, code: ReasonCode, detail: str, fields: dict[str, Any] | None = None) -> None:
         super().__init__(f"{code.value}: {detail}")
         self.code = code
         self.detail = detail
+        self.fields = fields or {}
 
 
 async def _buckets(trait: TraitClient, skus: list[str], low: dict[str, int]) -> dict[str, str]:
@@ -47,7 +63,25 @@ async def _buckets(trait: TraitClient, skus: list[str], low: dict[str, int]) -> 
     return {sku: bucket_for(count, low.get(sku, 3)).value for sku, count in stock.items()}
 
 
-async def search(trait: TraitClient, query: str) -> dict[str, Any]:
+#: The most groups one `search` will return. A shop with fifty thousand SKUs
+#: answering every query with all of them is not a catalogue endpoint, it is an
+#: amplification surface on a public route — and the agent on the other end has
+#: to hold the whole thing in a context window to use any of it.
+#:
+#: Fifty rather than a round ten: a shopper asking for "notebook" wants the
+#: shortlist in one call, and a page size that forces a second round trip for an
+#: ordinary query has moved the cost rather than removed it.
+SEARCH_PAGE_SIZE = 50
+
+#: The ceiling on what a caller may ask for. A `limit` an agent chooses is a
+#: number an agent can get wrong, and a shop is entitled to a bound on the work
+#: one call makes it do.
+SEARCH_MAX_PAGE_SIZE = 200
+
+
+async def search(
+    trait: TraitClient, query: str, *, limit: int | None = None, cursor: str = ""
+) -> dict[str, Any]:
     """Match on any word, across the group and the variants under it.
 
     A whole-phrase match against the group name alone finds nothing for "black
@@ -99,9 +133,29 @@ async def search(trait: TraitClient, query: str) -> dict[str, Any]:
                 "image": group.media[0] if group.media else None,
             }
         )
-    # Ordered, always: an agent that re-reads a shop must see the same order.
-    results.sort(key=lambda r: str(r["name"]))
-    return {"results": results, "query": query}
+    # Ordered, always: an agent that re-reads a shop must see the same order —
+    # and a cursor is only meaningful against a stable one. Ties on name are
+    # broken by group id so two groups sharing a name cannot swap places between
+    # pages and hide a row.
+    results.sort(key=lambda r: (str(r["name"]), str(r["group"])))
+
+    size = SEARCH_PAGE_SIZE if limit is None else max(1, min(int(limit), SEARCH_MAX_PAGE_SIZE))
+    start = 0
+    if cursor:
+        # The cursor is the last group id of the previous page, not an offset:
+        # an offset shifts under an insert and silently skips a row. Resolved by
+        # lookup, so a cursor from a stale ordering restarts rather than
+        # truncating — an agent that pages through a catalogue being edited
+        # under it should see too much, never too little.
+        ids = [str(r["group"]) for r in results]
+        start = ids.index(cursor) + 1 if cursor in ids else 0
+
+    page = results[start : start + size]
+    next_cursor = str(page[-1]["group"]) if page and start + size < len(results) else ""
+    body: dict[str, Any] = {"results": page, "query": query, "total": len(results)}
+    if next_cursor:
+        body["next_cursor"] = next_cursor
+    return body
 
 
 async def read_item(trait: TraitClient, group_id: str) -> dict[str, Any]:
@@ -144,10 +198,15 @@ async def add_line(
     if item is None:
         group = next((g for g in catalogue.groups if g.id == sku or g.slug == sku), None)
         if group is not None:
+            variants = [i.sku for i in catalogue.items if i.group_id == group.id]
             raise ToolRefused(
                 ReasonCode.VARIANT_REQUIRED,
                 f"{sku!r} is a product group, not something that can be bought. Choose one "
-                f"of its variants: {', '.join(i.sku for i in catalogue.items if i.group_id == group.id)}",
+                f"of its variants: {', '.join(variants)}",
+                # The same list the sentence names, as data. An agent that has
+                # to regex a comma-separated tail out of a message is an agent
+                # this shop can break by rewording an error.
+                {"group": group.id, "variants": variants, "option_axes": group.option_axes},
             )
         raise ToolRefused(ReasonCode.NOT_FOUND, f"{sku!r} is not a SKU this shop sells.")
 
@@ -157,7 +216,14 @@ async def add_line(
     available = stock.get(sku, 0)
     wanted = qty + sum(ln.qty for ln in basket.lines if ln.sku == sku)
     if available < wanted:
-        raise ToolRefused(ReasonCode.SOLD_OUT, quantity_refusal_detail(available, wanted))
+        raise ToolRefused(
+            ReasonCode.SOLD_OUT,
+            quantity_refusal_detail(available, wanted),
+            # `available` is already public through the availability bucket; the
+            # exact count is what turns "sold out" into "ask for two instead of
+            # three" without another round trip.
+            {"sku": sku, "available": available, "requested": wanted},
+        )
 
     basket.add(sku, qty, parent)
     return await summary(trait, basket)
