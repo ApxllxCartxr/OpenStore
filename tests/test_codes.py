@@ -1,4 +1,4 @@
-"""The registry holds together, and `docs/CODES.md` is not stale."""
+"""The registry holds together, and `docs/Closed-Sets.md` is not stale."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def test_no_member_value_collides_across_sets() -> None:
 
 
 def test_every_closed_set_is_registered_for_the_doc() -> None:
-    """A new enum that is not in CLOSED_SETS never reaches `docs/CODES.md`, and a
+    """A new enum that is not in CLOSED_SETS never reaches `docs/Closed-Sets.md`, and a
     code nobody can see is a code nobody reviews."""
     import openstore.sidecar.core.codes as codes
 
@@ -98,7 +98,7 @@ def test_values_are_lowercase_kebab_except_ledger_kinds(enum_cls: type[StrEnum])
 
 
 def test_generated_doc_is_not_stale() -> None:
-    """`docs/CODES.md` is generated. Editing it by hand instead of the enum is the
+    """`docs/Closed-Sets.md` is generated. Editing it by hand instead of the enum is the
     drift this whole file exists to prevent."""
     result = subprocess.run(
         [sys.executable, "scripts/registry_diff.py", "--check"],
@@ -109,7 +109,7 @@ def test_generated_doc_is_not_stale() -> None:
 
 
 def test_no_code_appears_in_spec_prose_without_being_registered() -> None:
-    """SPEC §12: a code named in prose but missing from the registry is a red
+    """Specification §12: a code named in prose but missing from the registry is a red
     build. Scoped to the normative files — `docs/` holds review findings that
     name rejected candidates on purpose."""
     result = subprocess.run(

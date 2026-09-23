@@ -1,0 +1,1311 @@
+<title>Proof-Carrying Commerce</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #F6F8F7;
+    --surface:     #FFFFFF;
+    --surface-sunk:#EDF1F0;
+    --ink:         #14191A;
+    --ink-soft:    #3E4749;
+    --ink-mute:    #6B7679;
+    --rule:        #D9E1DF;
+    --rule-soft:   #E8EEED;
+    --accent:      #0E6B68;
+    --accent-soft: #E0EFEE;
+    --gap:         #A8452B;
+    --gap-soft:    #F6E7E2;
+
+    --serif: "Newsreader", "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --mono:  "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+
+    --measure: 68ch;
+    --rail: 170px;
+
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1213;
+      --surface:     #161C1D;
+      --surface-sunk:#1B2223;
+      --ink:         #E7ECEA;
+      --ink-soft:    #BAC4C2;
+      --ink-mute:    #8A9694;
+      --rule:        #28312F;
+      --rule-soft:   #1E2625;
+      --accent:      #5CB8B2;
+      --accent-soft: #12302F;
+      --gap:         #DD8E74;
+      --gap-soft:    #2E1E18;
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1213;
+    --surface:     #161C1D;
+    --surface-sunk:#1B2223;
+    --ink:         #E7ECEA;
+    --ink-soft:    #BAC4C2;
+    --ink-mute:    #8A9694;
+    --rule:        #28312F;
+    --rule-soft:   #1E2625;
+    --accent:      #5CB8B2;
+    --accent-soft: #12302F;
+    --gap:         #DD8E74;
+    --gap-soft:    #2E1E18;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.62;
+    font-weight: 380;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: calc(var(--rail) + var(--measure) + 48px);
+    margin-inline: auto;
+    padding-inline: 20px;
+    padding-block: 0 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-block: 56px 22px;
+    margin-bottom: 8px;
+  }
+
+  .wordmark {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 22px;
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(2.4rem, 6.2vw, 3.7rem);
+    line-height: 1.04;
+    font-weight: 500;
+    letter-spacing: -0.021em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+    max-width: 16ch;
+  }
+
+  h1 em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--accent);
+  }
+
+  .standfirst {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    max-width: 58ch;
+    margin: 0 0 28px;
+  }
+
+  .masthead-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+
+  .masthead-meta span strong {
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+
+  /* ---------- section scaffolding ---------- */
+
+  section {
+    display: grid;
+    grid-template-columns: var(--rail) minmax(0, 1fr);
+    gap: 0 48px;
+    padding-block: 44px 8px;
+    border-top: 1px solid var(--rule);
+  }
+
+  section:first-of-type { border-top: none; }
+
+  .rail {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.5;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    padding-top: 0.75em;
+  }
+
+  .rail b {
+    display: block;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .body > * { max-width: var(--measure); }
+
+  h2 {
+    font-size: clamp(1.55rem, 3.4vw, 2rem);
+    line-height: 1.16;
+    font-weight: 500;
+    letter-spacing: -0.014em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-size: 1.14rem;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.006em;
+    margin: 34px 0 10px;
+  }
+
+  p { margin: 0 0 17px; }
+
+  .body > p:last-child { margin-bottom: 28px; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  strong { font-weight: 600; }
+
+  code, .kbd {
+    font-family: var(--mono);
+    font-size: 0.855em;
+    background: var(--surface-sunk);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: 0.08em 0.36em;
+    white-space: nowrap;
+  }
+
+  ul.plain {
+    margin: 0 0 20px;
+    padding-left: 1.15em;
+  }
+
+  ul.plain li { margin-bottom: 9px; }
+
+  /* ---------- protocol entries ---------- */
+
+  .protocols {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: var(--measure);
+  }
+
+  .protocol {
+    border-top: 1px solid var(--rule-soft);
+    padding-block: 26px;
+  }
+
+  .protocol:first-child { border-top: none; padding-top: 6px; }
+
+  .protocol-name {
+    font-size: 1.22rem;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.008em;
+    margin: 0 0 4px;
+  }
+
+  .protocol-name .short {
+    font-family: var(--mono);
+    font-size: 0.66em;
+    font-weight: 500;
+    color: var(--ink-mute);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .steward {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+
+  .protocol p { margin-bottom: 13px; }
+  .protocol p:last-child { margin-bottom: 0; }
+
+  .gap-note {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0 12px;
+    background: var(--gap-soft);
+    border-left: 2px solid var(--gap);
+    padding: 13px 16px;
+    margin-top: 14px;
+  }
+
+  .gap-note .gap-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gap);
+    padding-top: 0.42em;
+    white-space: nowrap;
+  }
+
+  .gap-note p {
+    grid-column: 2;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.96rem;
+    line-height: 1.55;
+    color: var(--ink-soft);
+  }
+
+  .gap-note p + p { margin-top: 8px; }
+
+  /* ---------- table ---------- */
+
+  .table-scroll {
+    overflow-x: auto;
+    margin: 6px 0 26px;
+    border-top: 1.5px solid var(--ink);
+    border-bottom: 1.5px solid var(--ink);
+    max-width: var(--measure);
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 560px;
+    font-size: 0.93rem;
+  }
+
+  thead th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--ink-mute);
+    padding: 12px 14px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: bottom;
+  }
+
+  tbody td {
+    padding: 13px 14px 13px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-soft);
+    line-height: 1.45;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  tbody th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 13px 20px 13px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    line-height: 1.35;
+  }
+
+  tbody tr:last-child th { border-bottom: none; }
+
+  td.mark { font-family: var(--mono); font-size: 0.86rem; white-space: nowrap; }
+  .yes { color: var(--accent); font-weight: 600; }
+  .no  { color: var(--gap); font-weight: 600; }
+  .part { color: var(--ink-mute); font-weight: 500; }
+
+  /* ---------- flow sequence ---------- */
+
+  ol.flow {
+    list-style: none;
+    counter-reset: step;
+    margin: 4px 0 26px;
+    padding: 0;
+    max-width: var(--measure);
+    display: flex;
+    flex-direction: column;
+  }
+
+  ol.flow li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 0 16px;
+    padding-block: 16px;
+    border-top: 1px solid var(--rule-soft);
+  }
+
+  ol.flow li:first-child { border-top: none; padding-top: 4px; }
+
+  ol.flow li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    padding-top: 0.5em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  ol.flow li > * {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  ol.flow .step-title {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  ol.flow p { margin: 0; font-size: 0.97rem; color: var(--ink-soft); line-height: 1.55; }
+
+  /* ---------- stakeholder grid ---------- */
+
+  .payoffs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    max-width: var(--measure);
+    margin: 4px 0 26px;
+  }
+
+  .payoff {
+    background: var(--surface);
+    padding: 20px 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .payoff h4 {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  .payoff p { margin: 0; font-size: 0.97rem; line-height: 1.5; color: var(--ink-soft); }
+
+  /* ---------- definition list ---------- */
+
+  .defs { margin: 0 0 26px; max-width: var(--measure); }
+
+  .defs dt {
+    font-weight: 600;
+    margin-top: 22px;
+    line-height: 1.35;
+  }
+
+  .defs dt:first-of-type { margin-top: 0; }
+
+  .defs dt .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  .defs dd { margin: 6px 0 0; color: var(--ink-soft); }
+
+  /* ---------- pull statement ---------- */
+
+  .thesis {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 22px 24px;
+    margin: 0 0 26px;
+    max-width: var(--measure);
+  }
+
+  .thesis p {
+    margin: 0;
+    font-size: 1.1rem;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+
+  .thesis p + p { margin-top: 12px; }
+
+  /* ---------- limits ---------- */
+
+  .limits { list-style: none; margin: 0 0 26px; padding: 0; max-width: var(--measure); }
+
+  .limits li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0 14px;
+    padding-block: 14px;
+    border-top: 1px solid var(--rule-soft);
+    color: var(--ink-soft);
+  }
+
+  .limits li:first-child { border-top: none; }
+
+  .limits li > span:last-child { min-width: 0; }
+
+  .limits .x {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gap);
+    padding-top: 0.42em;
+    white-space: nowrap;
+  }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    margin-top: 48px;
+    padding-top: 20px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    max-width: calc(var(--rail) + var(--measure) + 48px);
+  }
+
+  @media (max-width: 860px) {
+    :root { --rail: 0px; }
+    section { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .rail {
+      padding-top: 0;
+      margin-bottom: 14px;
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+    }
+    .rail b { display: inline; }
+  }
+
+  @media (max-width: 520px) {
+    body { font-size: 17px; }
+    .payoffs { grid-template-columns: minmax(0, 1fr); }
+    ol.flow li { grid-template-columns: 30px minmax(0, 1fr); gap: 0 12px; }
+    .gap-note { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .gap-note .gap-label { padding-top: 0; }
+    .gap-note p { grid-column: 1; }
+    ol.flow li > * { grid-column: 2; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="wordmark">OpenStore &nbsp;/&nbsp; Stakeholder Briefing</p>
+    <h1>Proof-Carrying <em>Commerce</em></h1>
+    <p class="standfirst">
+      Software agents now buy things for people. The same companies that own
+      demand wrote the protocols that let them do this. OpenStore is the
+      verification and discovery layer. It makes a purchase by an agent
+      provable to anyone. It puts no new platform between buyer and merchant.
+    </p>
+    <div class="masthead-meta">
+      <span><strong>Prepared</strong> 20 September 2026</span>
+      <span><strong>Audience</strong> New stakeholder, no prior context</span>
+      <span><strong>Scope</strong> Concept, problem, landscape</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="rail"><b>In brief</b>The short version</div>
+    <div class="body">
+      <div class="thesis">
+        <p>
+          When an artificial intelligence agent buys for you, three questions
+          lack a machine-checkable answer today:
+        </p>
+        <ul class="plain">
+          <li>Did a human actually authorize this exact purchase, at this exact price, from this exact merchant?</li>
+          <li>Was the bought item the item the merchant actually offered?</li>
+          <li>When the order goes wrong, what evidence exists and who is liable?</li>
+        </ul>
+        <p>
+          The current answer to all three is trust the platform. OpenStore
+          replaces that answer with signed portable proof. The proof travels
+          with the order. Any third party can verify it offline without trust
+          in OpenStore:
+        </p>
+        <ul class="plain">
+          <li>Merchant</li>
+          <li>Bank</li>
+          <li>Payment service provider</li>
+          <li>Insurer</li>
+          <li>Court</li>
+          <li>The buyer</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><b>Part one</b>The problem</div>
+    <div class="body">
+      <h2>Agentic commerce is arriving with a weaker trust model than the web it replaces</h2>
+
+      <p>
+        For thirty years, authority for online payment rested on a human present
+        at purchase. The human typed a card number. The human entered a One-Time
+        Password. The human confirmed a Unified Payments Interface Personal
+        Identification Number.
+      </p>
+
+      <p>
+        Every dispute-resolution process rests on that presence. Every
+        chargeback rule rests on it. Every liability-shift framework in card
+        and account payments rests on it.
+      </p>
+
+      <p>
+        An autonomous agent breaks the assumption. The agent is not the human.
+        It can act minutes or weeks after the last message from the human. It
+        can act on a loose instruction such as restock my kitchen under four
+        thousand rupees. The record it leaves is a conversation transcript
+        inside a proprietary product. No party outside that product can check
+        that transcript as evidence.
+      </p>
+
+      <h3>Problem one: authority is a platform assertion, not a fact</h3>
+      <p>
+        In every shipping agentic-commerce system today, the merchant must
+        trust the demand platform. The platform signs the request with its own
+        credential. The statement has the form we, a large company, assert a
+        user approved this.
+      </p>
+      <p>
+        That statement is a contractual assurance. It is not a cryptographic
+        fact. The merchant cannot check it independently. The merchant cannot
+        re-check it six months later during a dispute. The merchant cannot
+        check it at all if the platform declines to cooperate.
+      </p>
+
+      <h3>Problem two: the merchant integrates once per aggregator, forever</h3>
+      <p>
+        A merchant who wants reach by agents needs separate work for each
+        demand platform. The work includes:
+      </p>
+      <ul class="plain">
+        <li>A separate catalogue feed</li>
+        <li>A separate checkout endpoint</li>
+        <li>A separate agent-profile registration</li>
+        <li>A separate commercial agreement</li>
+      </ul>
+      <p>
+        Discovery is granted, not earned. If the platform did not on-board a
+        merchant, agents of that platform never find the merchant. For the
+        small and medium merchant, the cost exceeds the revenue it unlocks.
+        Examples include a Shopify store, a WooCommerce install, a WhatsApp
+        Business catalogue, or a spreadsheet. These merchants stay absent from
+        the agentic channel.
+      </p>
+
+      <h3>Problem three: Payment rules in India do not bend for agents</h3>
+      <p>
+        The Reserve Bank of India mandates an Additional Factor of
+        Authentication for digital payment transactions. In practice, the
+        factor is a Unified Payments Interface Personal Identification Number
+        entered in a certified application. An equivalent device-bound factor
+        also satisfies the rule.
+      </p>
+      <p>
+        No regulator-blessed path exists today for silent completion of an
+        arbitrary purchase by an agent with no human factor. Systems built on
+        card-network delegation assumptions do not transfer cleanly to this
+        rule. An honest agentic-commerce design in India must treat the human
+        tap as a constraint. Teams must engineer around it, not ignore it.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><b>Part two</b>The landscape, protocol by protocol</div>
+    <div class="body">
+      <h2>The landscape: what each protocol does and where each one stops</h2>
+      <p>
+        These are not competitors in a single category. They occupy different
+        layers. A working system needs several of them at once. The layers
+        include:
+      </p>
+      <ul class="plain">
+        <li>Transport</li>
+        <li>Catalogue</li>
+        <li>Payment authorization</li>
+        <li>Settlement rail</li>
+      </ul>
+      <p>
+        Each protocol below states what it does and the specific gap it leaves.
+      </p>
+
+      <div class="protocols">
+
+        <article class="protocol">
+          <h3 class="protocol-name">Model Context Protocol <span class="short">(MCP)</span></h3>
+          <p class="steward">Steward: Anthropic &middot; Open specification, November 2024</p>
+          <p>
+            Model Context Protocol is an open standard. It connects a language
+            model to external systems. It defines a JavaScript Object Notation
+            Remote Procedure Call (version 2.0) message format. The format
+            travels over standard input/output streams or streamable Hypertext
+            Transfer Protocol.
+          </p>
+          <p>
+            A server exposes three kinds of capability to a client:
+            <strong>tools</strong> (callable functions with typed input
+            schemas), <strong>resources</strong> (readable data addressed by a
+            Uniform Resource Identifier), and <strong>prompts</strong>
+            (reusable templates). It is now the de-facto way for an agent to
+            reach any external system, commerce included.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              Model Context Protocol is a connection protocol with no commerce
+              semantics. It has no concept of money, price, inventory,
+              identity, authorization, consent, or proof. It tells you how to
+              call a function. It says nothing about permission to spend eight
+              thousand rupees. Every commerce guarantee must be built on top
+              of it.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">Agent-to-Agent Protocol <span class="short">(published as &ldquo;A2A&rdquo;)</span></h3>
+          <p class="steward">Steward: Google, contributed to the Linux Foundation</p>
+          <p>
+            Agent-to-Agent Protocol is a peer protocol. It lets independent
+            agents from different vendors discover each other and delegate
+            work. Each agent publishes an Agent Card. Agent Card means a
+            machine-readable document at a well-known Uniform Resource
+            Locator. The document declares identity, skills, endpoints, and
+            authentication requirements.
+          </p>
+          <p>
+            Work moves as a task with a defined lifecycle over JavaScript
+            Object Notation Remote Procedure Call. Lifecycle states are
+            submitted, working, input-required, completed, and failed.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              Like Model Context Protocol, it transports capability, not
+              authority over money. It discovers capability, not payment
+              permission. It is a necessary base for multi-party agent
+              commerce. It is not sufficient alone. Payment work by Google
+              sits as an extension on top of it.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">Agentic Commerce Protocol <span class="short">(ACP)</span></h3>
+          <p class="steward">Steward: OpenAI with Stripe &middot; Open specification, 2025</p>
+          <p>
+            Agentic Commerce Protocol powers Instant Checkout inside ChatGPT.
+            It has three distinct parts.
+          </p>
+          <ul class="plain">
+            <li>A product feed specification. The merchant publishes a structured catalogue. The assistant surfaces items from it.</li>
+            <li>A Checkout Session application programming interface over Representational State Transfer. The agent creates a session. The agent updates it with buyer address and selected fulfillment. The agent completes it. The merchant returns authoritative pricing, tax, and availability at every step. The agent never invents a price.</li>
+            <li>The Delegated Payment Specification. The system exchanges the stored payment method of the buyer for a Shared Payment Token. Shared Payment Token means a single-use credential scoped to amount and merchant. The merchant charges through its own payment service provider. The merchant stays the merchant of record. The merchant keeps the customer relationship and bears the settlement.</li>
+          </ul>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              The buyer-agent side belongs in practice to one company. Trust
+              is bilateral and contractual. The merchant trusts an assertion
+              by OpenAI that a human approved the order. The protocol produces
+              no artefact for handoff to a third party months later. It
+              cannot prove what the human agreed to.
+            </p>
+            <p>
+              Payment is card-rail-shaped through a Shared Payment Token. That
+              shape does not map onto the Unified Payments Interface. There,
+              no card exists to delegate. The authentication factor must be
+              collected inside a certified application.
+            </p>
+            <p>
+              Discovery also stays with the aggregator to grant. A place in
+              the catalogue is an onboarding decision by the platform. It is
+              not a property a merchant can establish alone.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">Universal Commerce Protocol <span class="short">(UCP)</span></h3>
+          <p class="steward">Steward: Shopify, with Google and other launch partners &middot; 2025</p>
+          <p>
+            Universal Commerce Protocol is an agent-facing surface over
+            commerce primitives that Shopify already operates. It covers
+            catalogue and product data. It covers a cart that an agent can
+            construct and mutate. It covers a checkout hand-off. Agents
+            authenticate as registered clients under OAuth 2.0. Merchants opt
+            in to agents that can transact against the store.
+          </p>
+          <p>
+            Its strength is real inventory behind it. Millions of live
+            storefronts provide accurate stock, pricing, tax, and fulfillment.
+            That is a working commerce network, not a specification exercise.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              Any buyer agent cannot yet participate in practice. OAuth 2.0
+              clients need advance registration. Participation is a
+              permissioned club with an application process. Dynamic Client
+              Registration (Internet Engineering Task Force Request for
+              Comments 7591) is not the operative path. That registration
+              standard will make any agent literally true. It does not yet do
+              so.
+            </p>
+            <p>
+              Completion is also not agent-native. The flow ends in a redirect
+              to a hosted checkout. The human taps there every single time.
+              That choice is defensible. But the protocol does not solve
+              unattended purchase. Systems built on it must state this fact
+              rather than imply otherwise.
+            </p>
+            <p>
+              Its center of gravity is the Shopify-hosted merchant. The
+              WooCommerce store, the custom site, and the WhatsApp Business
+              catalogue are not first-class citizens.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">Agent Payments Protocol <span class="short">(published as &ldquo;AP2&rdquo;)</span></h3>
+          <p class="steward">Steward: Google, as an extension to the Agent-to-Agent Protocol &middot; 2025</p>
+          <p>
+            Agent Payments Protocol is the most advanced of the group in
+            concept. It is closest in spirit to OpenStore. Its central idea is
+            the mandate. Mandate means a cryptographically signed verifiable
+            credential that captures authority. It takes three forms:
+          </p>
+          <ul class="plain">
+            <li>
+              The Intent Mandate. It captures what the human authorized in the
+              abstract before the specific item is known. Example: buy these
+              running shoes in size nine if they drop below six thousand
+              rupees in the next thirty days. It makes delegated human-absent
+              purchase expressible.
+            </li>
+            <li>
+              The Cart Mandate. It captures the exact basket with exact line
+              items and exact prices. The human signs it while present. It is
+              the non-repudiable record of yes, this, at this price.
+            </li>
+            <li>
+              The Payment Mandate. It passes to the payment network. It signals
+              agent involvement and human presence. Issuers and networks use it
+              to price risk.
+            </li>
+          </ul>
+          <p>
+            Mandates build on World Wide Web Consortium Verifiable
+            Credentials. The protocol is deliberately rail-agnostic. It is
+            designed to carry card payments, real-time account-to-account
+            payments, and stablecoin settlement equally.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              It is a specification and a reference sample, not a running
+              network. It has no discovery layer. It has no merchant
+              on-boarding path. It has no catalogue. It has no verifier.
+            </p>
+            <p>
+              The protocol describes proofs that a verifier can check. It
+              names nobody to check them. No merchant back-office today
+              consumes a Cart Mandate.
+            </p>
+            <p>
+              It leaves merchant-side integration deliberately open. That part
+              is the hardest and least glamorous work.
+            </p>
+            <p>
+              Its story in India is unwritten. Nobody did the work to map an
+              Intent Mandate onto a Unified Payments Interface mandate, a fund
+              block, or an Additional Factor of Authentication event.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">x402 <span class="short">(over Hypertext Transfer Protocol status 402)</span></h3>
+          <p class="steward">Steward: Coinbase &middot; Open specification, 2025</p>
+          <p>
+            x402 revives the long-reserved Hypertext Transfer Protocol status
+            code 402 Payment Required. A server responds to an unpaid request
+            with 402 plus a machine-readable description of wanted payment.
+            The client pays and retries with a payment header. Payment is
+            typically in a dollar-denominated stablecoin on a low-fee chain.
+          </p>
+          <p>
+            Settlement is near-instant. Fees are fractions of a cent. No
+            account or subscription exists. It fits machine-to-machine
+            micropayments, paid application programming interface calls, and
+            per-inference billing.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              It is not consumer retail commerce. It has no chargeback. It has
+              no dispute process. It has no consumer-protection framework. It
+              has no Goods and Services Tax invoice.
+            </p>
+            <p>
+              A consumer in India buying groceries will not settle in
+              stablecoin. A merchant in India cannot legally price in one. It
+              solves payment by an agent for a data feed. It does not solve
+              purchase by an agent of a kilogram of coffee.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">Unified Payments Interface <span class="short">(UPI)</span></h3>
+          <p class="steward">Steward: National Payments Corporation of India &middot; Live at national scale</p>
+          <p>
+            Unified Payments Interface is the real-time account-to-account
+            payment rail in India. It is the rail that matters for this
+            project. Three facilities are directly relevant:
+          </p>
+          <ul class="plain">
+            <li>Unified Payments Interface Autopay. It creates a recurring electronic mandate with a ceiling amount and a validity period. The payer approves once. Debits follow on schedule.</li>
+            <li>Unified Payments Interface Reserve Pay. It provides the single-block, multiple-debit facility. The payer blocks funds in its own account. The money stays with the payer and earns interest until debit.</li>
+            <li>The Unified Payments Interface Personal Identification Number. Entered in a certified application, it serves as the Additional Factor of Authentication.</li>
+          </ul>
+          <p>
+            Two details matter enormously and many misunderstand them. Reserve
+            Pay is not card-style authorize-then-capture. The semantics
+            differ. The reversal behavior differs. The permitted debit patterns
+            differ. A design that treats it as a hold on a card fails in
+            production.
+          </p>
+          <p>
+            An Autopay mandate binds the payer to a payee with a cap. By
+            itself, it does not encode what was bought.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              Unified Payments Interface knows that money moved from one
+              account to another. It knows nothing about carts, items, prices,
+              agents, or consent. A mandate proves permission by a payer for a
+              payee to draw up to a limit. It does not prove agreement by the
+              human to three specific bought items. That gap between payment
+              authorized and purchase authorized is the gap OpenStore fills.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">Web Authentication <span class="short">(World Wide Web Consortium &ldquo;WebAuthn&rdquo;, part of FIDO2)</span></h3>
+          <p class="steward">Steward: World Wide Web Consortium and the FIDO Alliance &middot; Universally deployed</p>
+          <p>
+            Web Authentication is the standard behind passkeys. A device
+            generates a private key in hardware. The key never leaves the
+            device. The server issues a random challenge. The authenticator
+            signs it after verification of the user by biometric or device
+            Personal Identification Number. The signature binds to the
+            challenge and to the requesting origin.
+          </p>
+          <p>
+            The signature carries a user-verified flag. The flag distinguishes
+            active confirmation by a human from mere presence of a key. The
+            design resists phishing by construction. A signature made for one
+            origin has no value at another.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              Web Authentication proves approval by a human of a challenge. It
+              says nothing about the meaning of that challenge. A useful
+              signature must bind to a specific canonically-serialized
+              statement of purchase authority. That binding is an
+              application-layer design decision. The standard leaves it
+              entirely open. Almost everybody gets it wrong by signing an
+              opaque nonce with no committed content.
+            </p>
+          </div>
+        </article>
+
+        <article class="protocol">
+          <h3 class="protocol-name">Verifiable Credentials and JSON Web Signature</h3>
+          <p class="steward">Steward: World Wide Web Consortium and the Internet Engineering Task Force</p>
+          <p>
+            These are the envelope formats. The Verifiable Credentials Data
+            Model defines an issuer, a subject, a claim set, and a
+            cryptographic proof. A third party can check the credential
+            without contact with the issuer. JSON Web Signature and its
+            detached form provide the concrete signing container. These
+            formats make a proof portable. Anyone with the public key can
+            check it months later, offline.
+          </p>
+          <div class="gap-note">
+            <span class="gap-label">Where it stops</span>
+            <p>
+              They are containers, not content. They define how to sign a
+              claim. They leave the full question to the application. Which
+              claims constitute sufficient authority for a purchase. How a
+              verifier decides.
+            </p>
+          </div>
+        </article>
+
+      </div>
+
+      <h3>The landscape at a glance</h3>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Protocol</th>
+              <th scope="col">Layer it occupies</th>
+              <th scope="col">Third-party<br>verifiable proof</th>
+              <th scope="col">Open<br>discovery</th>
+              <th scope="col">Works on Unified<br>Payments Interface</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Model Context Protocol</th>
+              <td>Agent-to-system transport</td>
+              <td class="mark"><span class="no">None</span></td>
+              <td class="mark"><span class="part">n/a</span></td>
+              <td class="mark"><span class="part">n/a</span></td>
+            </tr>
+            <tr>
+              <th scope="row">Agent-to-Agent Protocol</th>
+              <td>Agent-to-agent transport</td>
+              <td class="mark"><span class="no">None</span></td>
+              <td class="mark"><span class="yes">Yes</span></td>
+              <td class="mark"><span class="part">n/a</span></td>
+            </tr>
+            <tr>
+              <th scope="row">Agentic Commerce Protocol</th>
+              <td>Catalogue, cart, checkout, payment delegation</td>
+              <td class="mark"><span class="no">Platform assertion</span></td>
+              <td class="mark"><span class="no">Aggregator-granted</span></td>
+              <td class="mark"><span class="no">Card-shaped</span></td>
+            </tr>
+            <tr>
+              <th scope="row">Universal Commerce Protocol</th>
+              <td>Catalogue, cart, checkout hand-off</td>
+              <td class="mark"><span class="no">Platform assertion</span></td>
+              <td class="mark"><span class="no">Pre-registered</span></td>
+              <td class="mark"><span class="no">Via redirect</span></td>
+            </tr>
+            <tr>
+              <th scope="row">Agent Payments Protocol</th>
+              <td>Payment authorization semantics</td>
+              <td class="mark"><span class="yes">By design</span></td>
+              <td class="mark"><span class="no">No layer</span></td>
+              <td class="mark"><span class="no">Unmapped</span></td>
+            </tr>
+            <tr>
+              <th scope="row">x402</th>
+              <td>Machine settlement rail</td>
+              <td class="mark"><span class="part">On-chain only</span></td>
+              <td class="mark"><span class="yes">Yes</span></td>
+              <td class="mark"><span class="part">n/a</span></td>
+            </tr>
+            <tr>
+              <th scope="row">Unified Payments Interface</th>
+              <td>Consumer settlement rail</td>
+              <td class="mark"><span class="no">Payment only</span></td>
+              <td class="mark"><span class="part">n/a</span></td>
+              <td class="mark"><span class="yes">Native</span></td>
+            </tr>
+            <tr>
+              <th scope="row">OpenStore</th>
+              <td>Proof, verification, discovery</td>
+              <td class="mark"><span class="yes">Core purpose</span></td>
+              <td class="mark"><span class="yes">Permissionless</span></td>
+              <td class="mark"><span class="yes">Native</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><b>Part three</b>What we are building</div>
+    <div class="body">
+      <h2>OpenStore is a proof layer and an index, not a marketplace</h2>
+
+      <p>
+        We are not building another demand platform. We do not compete head-on
+        with the Agentic Commerce Protocol or the Universal Commerce Protocol.
+        We speak them. We add what none of them provides: an independent
+        checkable record of authority, plus reach for any merchant, not only
+        pre-approved ones.
+      </p>
+
+      <dl class="defs">
+        <dt><span class="tag">Component one</span>The Intent Compiler</dt>
+        <dd>
+          Intent Compiler means a tool that turns loose instruction into
+          bounded policy. It takes input such as order the usual coffee if it
+          is under nine hundred rupees. It compiles a bounded machine-checkable
+          authorization object. The language model writes the policy but never
+          enforces it. The human reviews the compiled policy in plain words
+          before signing. The object holds a spending ceiling, a merchant
+          allow-list, a category restriction, a quantity limit, a validity
+          window, and a revocation handle.
+        </dd>
+
+        <dt><span class="tag">Component two</span>The Proof of Authorized Intent bundle</dt>
+        <dd>
+          Proof bundle means the artefact that travels with every order. It
+          contains four parts. A hash binds every element to the others. No
+          part can be swapped after the fact: the compiled intent policy
+          signed by the passkey of the human over a server-issued single-use
+          challenge; a cart snapshot that commits to exact line items,
+          quantities, prices, currency, and merchant identity; a signed
+          attestation by the merchant that this catalogue entry at this price
+          was genuinely offered; and the payment authorization reference.
+        </dd>
+
+        <dt><span class="tag">Component three</span>Deterministic authorization</dt>
+        <dd>
+          Deterministic authorization means a purchase decision as a pure
+          function of proof and policy. No language model sits in the
+          authorization path. This is the most important architectural
+          commitment. A model that can be persuaded cannot decide whether
+          money moves. The model composes, negotiates, and explains, while
+          arithmetic and signature checks authorize.
+        </dd>
+
+        <dt><span class="tag">Component four</span>An independent verifier</dt>
+        <dd>
+          Verifier means a standalone tool and library that returns a verdict
+          on a proof bundle. It uses only public keys. It needs no network
+          call to OpenStore, no account, and no trust in OpenStore. This lets
+          a lawyer for the merchant, a risk team of a bank, or a sceptical
+          stakeholder check claims directly. A protocol with proofs that only
+          its own author can verify is not a protocol.
+        </dd>
+
+        <dt><span class="tag">Component five</span>Merchant adapters</dt>
+        <dd>
+          Adapters are connectors for storefronts that already exist. They
+          cover Shopify, WooCommerce, and a plain comma-separated-values
+          catalogue upload for merchants with no platform at all. A merchant
+          becomes agent-reachable without a rebuild. Catalogue and stock are
+          handled separately. A stale price is a bug and a stale stock count
+          is a refund.
+        </dd>
+
+        <dt><span class="tag">Component six</span>Index, not mall</dt>
+        <dd>
+          We never take custody of funds. Money settles merchant-direct over
+          the Unified Payments Interface. The merchant remains the merchant of
+          record. This is a legal position as much as a technical one. A place
+          on the money path will make us an Electronic Commerce Operator under
+          Indian tax law. That status brings Tax Collected at Source and Goods
+          and Services Tax duties on every transaction. It will make us the
+          exact intermediary we exist to remove.
+        </dd>
+      </dl>
+
+      <h3>How a purchase actually flows</h3>
+      <ol class="flow">
+        <li>
+          <span class="step-title">State an intent</span>
+          <p>The human states it in natural language to the agent in current use. The agent need not be ours.</p>
+        </li>
+        <li>
+          <span class="step-title">Compile a bounded policy</span>
+          <p>The Intent Compiler produces ceiling, allow-list, category, quantity, and expiry. The human approves it in plain words.</p>
+        </li>
+        <li>
+          <span class="step-title">Sign once with a passkey</span>
+          <p>The human signs by Web Authentication over a single-use challenge. The challenge commits to the policy content. This signature is the root of all later authority.</p>
+        </li>
+        <li>
+          <span class="step-title">Shop against the index</span>
+          <p>The agent reads catalogues over Model Context Protocol. It can use merchants on any platform. That covers merchants no aggregator on-boarded.</p>
+        </li>
+        <li>
+          <span class="step-title">Obtain merchant attestation</span>
+          <p>The merchant signs that this item at this price with this availability was genuinely offered. A claim about price hallucination then becomes checkable, not an argument.</p>
+        </li>
+        <li>
+          <span class="step-title">Run deterministic authorization</span>
+          <p>Arithmetic and signature verification check the cart against the signed policy. The check passes or fails. No judgment call occurs.</p>
+        </li>
+        <li>
+          <span class="step-title">Complete payment by human tap</span>
+          <p>Today the human taps a Unified Payments Interface Personal Identification Number. The Additional Factor of Authentication requires it. We state this limit openly. We do not imply autonomy we lack.</p>
+        </li>
+        <li>
+          <span class="step-title">Seal the proof and hand it to both parties</span>
+          <p>Buyer and merchant each hold a complete independently verifiable record. If a dispute follows, evidence settles it, not the party with more lawyers.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><b>Part four</b>Why it matters</div>
+    <div class="body">
+      <h2>What each party actually gets</h2>
+      <div class="payoffs">
+        <div class="payoff">
+          <h4>The buyer</h4>
+          <p>
+            Agent spending that is bounded, revocable, and auditable.
+            Arithmetic enforces the ceiling, not good judgment by a model. A
+            receipt proves what you agreed to.
+          </p>
+        </div>
+        <div class="payoff">
+          <h4>The merchant</h4>
+          <p>
+            Reach by agents without loss of the customer relationship. No
+            per-aggregator integration work. No platform between merchant and
+            settlement. The merchant stays the merchant of record.
+          </p>
+        </div>
+        <div class="payoff">
+          <h4>The agent builder</h4>
+          <p>
+            One proof format and one verification routine. No separate
+            commercial agreement, credential, and checkout integration for
+            each demand platform.
+          </p>
+        </div>
+        <div class="payoff">
+          <h4>Banks and regulators</h4>
+          <p>
+            A machine-checkable answer to two questions. Was a human present.
+            What exactly did the human approve. Risk models, dispute
+            processes, and liability frameworks currently lack this input for
+            agent-initiated payments.
+          </p>
+        </div>
+      </div>
+
+      <h3>The structural argument</h3>
+      <p>
+        Every credible agentic-commerce protocol today comes from a party that
+        also owns demand. That is a conflict, not a conspiracy. Verifier and
+        gatekeeper are the same entity. Disputes resolve in favor of the
+        gatekeeper by default.
+      </p>
+      <p>
+        The web solved this once by separation of index from transaction, and
+        by records anyone can check. OpenStore applies that separation to
+        agentic commerce. It is built for the rail three hundred million
+        Indians already use.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><b>Part five</b>Honest limits</div>
+    <div class="body">
+      <h2>What we do not claim</h2>
+      <p>
+        A briefing that lists only strengths is a sales document. A new
+        stakeholder must know these constraints before forming a view.
+      </p>
+      <ul class="limits">
+        <li>
+          <span class="x">Not yet</span>
+          <span>
+            <strong>Fully unattended purchase.</strong> The Additional Factor
+            of Authentication requires a human tap at completion today.
+            Conformance reporting states this deviation explicitly. It does
+            not hide behind the word autonomous.
+          </span>
+        </li>
+        <li>
+          <span class="x">Not us</span>
+          <span>
+            <strong>Funds, escrow, or settlement.</strong> We deliberately
+            stay off the money path. That limits the business model. It is not
+            only a legal convenience. It rules out revenue designs that depend
+            on holding float.
+          </span>
+        </li>
+        <li>
+          <span class="x">Hard</span>
+          <span>
+            <strong>Merchant-side adoption.</strong> A proof is only as good
+            as the attestation inside it by the merchant. Merchants must sign
+            things. Near-zero-effort signing is the central adoption problem.
+            It is unglamorous work.
+          </span>
+        </li>
+        <li>
+          <span class="x">Open</span>
+          <span>
+            <strong>Who else verifies.</strong> Proofs gain value when banks,
+            insurers, and platforms check them independently. Until a second
+            verifier exists, portability is a property of the design, not a
+            fact of the market.
+          </span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    OpenStore &middot; Proof-carrying commerce &middot; Concept briefing, 20 September 2026
+  </footer>
+
+</div>

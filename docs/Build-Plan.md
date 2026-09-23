@@ -1,5 +1,7 @@
 # OpenStore MVP — 48-Hour Build Plan
 
+> Historical 48-hour build plan as executed. Formerly `SPECS/PLAN.md`. Frozen; internal references use pre-reorganisation filenames (`SPEC.md`, `CONTEXT.md`, `PLAN-*.md`, `LOGS.md`).
+
 One document, start to end. Scope is the whole product spine across all three surfaces, built in two days, reusing what already works on `main`. `SPEC.md` is the law this implements; `CONTEXT.md` is the vocabulary; `docs/adr/` are the settled decisions. Where this plan departs from `SPEC.md`, the departure is named in §2 with a reason — nowhere else.
 
 Read order for anyone picking this up cold: §0 (how to execute) → §1 (what ships) → §2 (decisions) → §3 (reuse map) → §6 (frozen contracts) → **§16 (every pinned constant)** → your surface (§7/§8/§9) → §12 (schedule).

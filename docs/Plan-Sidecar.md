@@ -1,5 +1,7 @@
 # Plan — Sidecar (`src/openstore/sidecar/`)
 
+> Historical phased plan. Formerly root `PLAN-sidecar.md`. Frozen; internal references use pre-reorganisation filenames.
+
 The product. Middleware only: no product info of its own, no shopping UI. One deploy serves one Merchant domain only (ADR-0007). Reads Merchant truth fresh at every Gate, mirrors moves back, signs with Merchant-held keys automatically. Serves `/.well-known/agent-commerce.json + /.well-known/ucp.json + /.well-known/jwks.json`, `/agent/*`, `/agentic/*` on the Merchant domain via reverse-proxy split.
 
 ## S1 — Skeleton + guardrail harness

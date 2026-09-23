@@ -5,7 +5,7 @@
 # Closed sets
 
 Every identifier the system is allowed to use. A code named in prose but absent
-here is a red build (SPEC §12). Generated from `core/codes.py`, diffed in CI.
+here is a red build (Specification §12). Generated from `core/codes.py`, diffed in CI.
 
 ## Ledger kinds (5)
 - `RESERVE`

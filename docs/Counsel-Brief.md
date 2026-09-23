@@ -1,5 +1,7 @@
 # Counsel brief — one engagement, four questions
 
+> Formerly `docs/COUNSEL-BRIEF.md`; renamed during the documentation reorganisation. References to `SPEC.md` mean `Specification.md`.
+
 Written 2026-09-19, from `docs/REVIEW-remediation.md` items #2, #5 and #8. These arrived as three separate findings from three reviewers and were priced as three engagements. They are one fact pattern asked by three regulators, and the first answer drives the third, so they go out together.
 
 Give counsel this file plus `SPEC.md` §2, §4, §8, §14, and ADRs 0007, 0013, 0018, 0021, 0023.

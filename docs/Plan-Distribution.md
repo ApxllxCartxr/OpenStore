@@ -1,5 +1,7 @@
 # Plan — Distribution (phase two, starts after the install gate)
 
+> Historical phase-two plan. Formerly root `PLAN-distribution.md`. Frozen; internal references use pre-reorganisation filenames.
+
 Not a fourth surface. A phase-two track that makes the three existing ones *reachable*, built on doors that need nobody's permission (ADR-0016). Every phase here obeys the same rails: no engine creep, no money-core change, no cross-root imports, DONE WHEN gates that only tighten.
 
 **Entry condition: `PLAN.md` step 7 is green.** A clean machine must go `openstore up` → verified receipt before any of this starts. Sending agents at a store a merchant cannot install spends the only first impression available.

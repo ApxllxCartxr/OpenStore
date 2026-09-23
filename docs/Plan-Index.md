@@ -1,15 +1,28 @@
 # Plan Index — 3 surfaces, one build order
 
-Full spec in `SPEC.md`, glossary in `CONTEXT.md`, decisions in `docs/adr/`. Each surface has its own plan file with phases, interfaces, and DONE WHEN gates. No phase starts until its dependencies below are green.
+> Historical record, kept in `docs/` after the documentation reorganisation
+> (formerly root `PLAN.md`). The build it indexes is complete; edit the
+> normative documents (`Architecture.md`, `Specification.md`, `Glossary.md`)
+> going forward, not this file. Internal references below use the
+> pre-reorganisation filenames.
 
-- [`PLAN-sidecar.md`](./PLAN-sidecar.md) — `src/openstore/sidecar/`: the product. Gate, Ledger, receipt, authority, protocols, `/agentic` console, install + operations.
-- [`PLAN-merchant-site.md`](./PLAN-merchant-site.md) — `demo/merchant-site/`: SpoiledDuckie SvelteKit + Postgres demo accessory shop proving a Merchant can operate it.
-- [`PLAN-buyer-chat.md`](./PLAN-buyer-chat.md) — `demo/buyer-chat/`: Ollama chat stranger proving the Consumer flow end to end.
-- [`PLAN-distribution.md`](./PLAN-distribution.md) — phase two, not a surface: the permissionless doors that make the three above reachable. Starts only after step 7 below is green.
+Full spec in `Specification.md` (formerly `SPEC.md`), glossary in `Glossary.md`
+(formerly `CONTEXT.md`), decisions in `adr/`. Each surface has its own plan file
+with phases, interfaces, and DONE WHEN gates. No phase starts until its
+dependencies below are green.
 
-Expanding a plan? Read [`docs/EXPANSION.md`](./docs/EXPANSION.md) first — ladder, contracts table, firewall, and grill rules.
+- [`Plan-Sidecar.md`](./Plan-Sidecar.md) — `src/openstore/sidecar/`: the product. Gate, Ledger, receipt, authority, protocols, `/agentic` console, install + operations.
+- [`Plan-Merchant-Site.md`](./Plan-Merchant-Site.md) — `demo/merchant-site/`: SpoiledDuckie SvelteKit + Postgres demo accessory shop proving a Merchant can operate it.
+- [`Plan-Buyer-Chat.md`](./Plan-Buyer-Chat.md) — `demo/buyer-chat/`: Ollama chat stranger proving the Consumer flow end to end.
+- [`Plan-Distribution.md`](./Plan-Distribution.md) — phase two, not a surface: the permissionless doors that make the three above reachable. Starts only after step 7 below is green.
 
-Open spec defects are registered in [`docs/REVIEW-findings.md`](./docs/REVIEW-findings.md) — breaks, gaps, and drift found in the pre-S1 review, each routed to the files it lands in. Clear the ones marked Break before the phase that freezes their bytes.
+Expanding a plan? Read [`Expansion-Guide.md`](./Expansion-Guide.md) (formerly
+`docs/EXPANSION.md`) first — ladder, contracts table, firewall, and grill rules.
+
+Open spec defects are registered in [`Review-Findings.md`](./Review-Findings.md)
+(formerly `docs/REVIEW-findings.md`) — breaks, gaps, and drift found in the
+pre-S1 review, each routed to the files it lands in. Clear the ones marked Break
+before the phase that freezes their bytes.
 
 ## Build order across surfaces
 

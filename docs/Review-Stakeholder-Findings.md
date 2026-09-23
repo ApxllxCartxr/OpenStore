@@ -1,5 +1,7 @@
 # Stakeholder validation — 2026-09-19
 
+> Historical stakeholder review. Formerly `docs/REVIEW-stakeholder-findings.md`. Frozen.
+
 Five adversarial reviews of `SPEC.md`, `CONTEXT.md`, the four `PLAN-*.md` files, `docs/EXPANSION.md`, `docs/REVIEW-findings.md`, `docs/DRAFT-discovery-registry.md`, and ADRs 0001–0022, each run from one stakeholder's seat: a merchant deciding whether to self-host, a payment-processor exec deciding whether to integrate as a Provider, a Shopify exec assessing UCP interop and competitive threat, a WooCommerce/Zoho exec assessing the D3 plugin track, and a regulator spanning GST/RBI/DPDP/consumer-protection. Each reviewer had full document context and was told to find real problems, not perform a courtesy pass; the payment-processor, Shopify, and regulator reviews additionally verified external claims against current sources (cited inline).
 
 This file is the raw output. See `docs/REVIEW-remediation.md` for proposed fixes. Same rule as `docs/REVIEW-findings.md`: this register routes work, it does not do it — delete a row's source finding here once its remediation lands.

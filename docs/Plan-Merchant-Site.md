@@ -1,5 +1,7 @@
 # Plan — Demo Merchant Site (`demo/merchant-site/`): SpoiledDuckie
 
+> Historical phased plan. Formerly root `PLAN-merchant-site.md`. Frozen; internal references use pre-reorganisation filenames.
+
 Surface 2. Proves a Merchant can operate the sidecar. SpoiledDuckie is a real accessory shop, not a CRUD demo: SvelteKit (`adapter-node`) + Postgres in its own container and compose service — deliberately a different stack from the sidecar to prove HTTP-only integration. Own DB is the Merchant truth the sidecar mirrors. Manually-set prices only — no offers/discounts *engine* (cut per grill Q44) — plus the pricing a real shop cannot skip: shipping zones with flat rates, per-item GST, and a hand-entered discount code table with no rules behind it, all served through door 9 `quote` (ADR-0010).
 
 ## M1 — SpoiledDuckie storefront + schema + seed

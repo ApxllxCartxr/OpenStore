@@ -1,5 +1,7 @@
 # LOGS
 
+> Historical running record of the MVP build. Formerly root `LOGS.md`. Frozen; new work is recorded in new documents, not appended here.
+
 Running record of changes and decisions for the OpenStore MVP build. Newest entry at the top. Every entry: what changed, why, and what it means for anyone executing `SPECS/PLAN.md`.
 
 ---

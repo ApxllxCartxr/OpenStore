@@ -53,7 +53,7 @@ def test_firewall_is_green_on_the_tree() -> None:
 def test_planted_unregistered_code_is_caught(tmp_path: Path) -> None:
     """A code that exists in prose and in no enum. The scanner reads the
     normative files, so the plant goes into a copy of one."""
-    plant = REPO / "PLAN-planted-violation.md"
+    plant = REPO / "docs/Plan-planted-violation.md"
     plant.write_text(
         "Refuses with `insufficient-vibes`, which is in no closed set.\n", encoding="utf-8"
     )
@@ -69,7 +69,7 @@ def test_planted_unregistered_code_is_caught(tmp_path: Path) -> None:
 
 def test_planted_stale_codes_doc_is_caught(tmp_path: Path) -> None:
     """Editing the generated doc instead of the enum."""
-    doc = REPO / "docs/CODES.md"
+    doc = REPO / "docs/Closed-Sets.md"
     original = doc.read_text(encoding="utf-8")
     doc.write_text(original + "\n- `hand-edited-code`\n", encoding="utf-8")
     try:

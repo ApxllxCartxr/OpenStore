@@ -1,5 +1,7 @@
 # Plan — Demo Buyer Chat (`demo/buyer-chat/`)
 
+> Historical phased plan. Formerly root `PLAN-buyer-chat.md`. Frozen; internal references use pre-reorganisation filenames.
+
 Surface 3. Proves the Consumer flow end to end. Claude-like chat over Ollama (swappable model) with tool calls. Air-gapped stranger: own folder/process/deps/DB (chat sessions only), zero sidecar/merchant-site imports, HTTP-only, admitted like any external agent — by its own published Agent Profile (ADR-0012), with the Merchant-issued OAuth client as the allowlisted alternative. The chat UI is dumb on purpose — convenience is sidecar-engineered (SPEC §11), the agent renders verbatim.
 
 ## B1 — Chat scaffold + model seam

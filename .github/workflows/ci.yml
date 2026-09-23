@@ -1,6 +1,6 @@
 name: CI
 
-# Every push (§10 CI): firewall · CODES.md diff · money lint · time lint ·
+# Every push (§10 CI): firewall · Closed-Sets.md diff · money lint · time lint ·
 # pytest. Any red is a stop.
 #
 # The vitest / svelte-check / golden-replay jobs land with the surfaces they
@@ -38,7 +38,7 @@ jobs:
       - name: Import firewall (all roots, both directions, design/ assets-only)
         run: uv run scripts/lint_firewall.py
 
-      - name: docs/CODES.md matches the enums
+      - name: docs/Closed-Sets.md matches the enums
         run: uv run scripts/registry_diff.py --check
 
       - name: No code in spec prose is missing from the registry

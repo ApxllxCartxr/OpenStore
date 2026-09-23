@@ -1,5 +1,7 @@
 # Remediation — stakeholder findings, 2026-09-19
 
+> Historical remediation register. Formerly `docs/REVIEW-remediation.md`. Frozen; references use pre-reorganisation filenames.
+
 Proposed fixes for every finding in `docs/REVIEW-stakeholder-findings.md`, written as an experienced legal/technical/finance reviewer would hand them back: what to do, who owns it, how urgent, and where it lands per `docs/EXPANSION.md`'s document ladder (ADR → SPEC → plan phase). Same rule as the findings file: this routes work, it doesn't do it — delete a row once its fix lands.
 
 Priority key: **P0** blocks any live merchant or live money (fix before real installs), **P1** blocks a specific phase (D3, D5, hosted-mode) from starting, **P2** correctness/positioning debt that should land before the claim is made externally, **P3** hygiene.

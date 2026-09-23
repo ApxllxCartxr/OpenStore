@@ -1,5 +1,7 @@
 # DRAFT — Discovery/registry mechanics (superseded)
 
+> Historical reasoning trail, superseded by ADR-0022 and `Plan-Distribution.md` D4. Formerly `docs/DRAFT-discovery-registry.md`. Frozen.
+
 Reviewed 2026-09-19. Written up as `docs/adr/0022-index-vs-mall.md` and `PLAN-distribution.md` D4. This file stays as the reasoning trail behind those two; edit them, not this, going forward.
 
 ## Where this came from

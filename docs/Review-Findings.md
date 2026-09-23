@@ -1,5 +1,7 @@
 # Spec review findings — 2026-09-17
 
+> Historical pre-build review register. Formerly `docs/REVIEW-findings.md`. Frozen; references use pre-reorganisation filenames.
+
 Review of `SPEC.md`, `CONTEXT.md`, the four plan files, `docs/EXPANSION.md`, and ADRs 0001–0016 on branch `rebuild`, taken before Slice 1 (Sidecar S1) starts. No code exists on this branch, so every finding below is a text edit today and a migration later.
 
 Each finding names where it lands under the `EXPANSION.md` §1 ladder. **None of them is closed by editing this file** — this register routes work, it does not do it. Delete a row when its files are touched.
