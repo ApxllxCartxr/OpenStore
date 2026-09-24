@@ -263,6 +263,36 @@ export type ToolDescriptor = {
 const MCP_FETCH_TIMEOUT_MS = 10_000;
 const MAX_MCP_RESPONSE_BYTES = 256 * 1024;
 
+// Streamable HTTP sessions (MCP 2025-06-18): a stateful server returns
+// `Mcp-Session-Id` on `initialize` and expects it back thereafter.
+const mcpSessions = new Map<string, string>();
+
+function parseSseBody(text: string): any {
+	// One SSE stream can carry several events; the JSON-RPC response is the
+	// last `data:` payload that parses as one. Anything else (pings,
+	// progress notices, `[DONE]`) is skipped, not fatal.
+	let candidate: any = null;
+	for (const event of text.split(/\r?\n\r?\n/)) {
+		const data = event
+			.split(/\r?\n/)
+			.filter((line) => line.startsWith('data:'))
+			.map((line) => line.slice(5).trimStart())
+			.join('\n');
+		if (!data || data === '[DONE]') continue;
+		try {
+			const parsed = JSON.parse(data);
+			if (parsed && typeof parsed === 'object' && ('result' in parsed || 'error' in parsed)) {
+				candidate = parsed;
+			}
+		} catch {
+			// Not JSON — keep looking at the next event.
+		}
+	}
+	if (candidate) return candidate;
+	// Some servers send a bare JSON body with an SSE content-type.
+	return JSON.parse(text);
+}
+
 async function rpc(
 	endpoint: string,
 	method: string,
@@ -271,11 +301,18 @@ async function rpc(
 ): Promise<any> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), MCP_FETCH_TIMEOUT_MS);
+	const headers: Record<string, string> = {
+		'content-type': 'application/json',
+		// Streamable HTTP requires both; without it strict servers 406.
+		accept: 'application/json, text/event-stream'
+	};
+	const session = mcpSessions.get(endpoint);
+	if (session) headers['mcp-session-id'] = session;
 	let response: Response;
 	try {
 		response = await fetcher(endpoint, {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers,
 			body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params }),
 			signal: controller.signal
 		});
@@ -284,6 +321,8 @@ async function rpc(
 	} finally {
 		clearTimeout(timer);
 	}
+	const returned = response.headers?.get?.('mcp-session-id');
+	if (returned) mcpSessions.set(endpoint, returned);
 	if (response.status === 401 || response.status === 403) {
 		throw new ShopError(
 			'auth-required',
@@ -294,9 +333,16 @@ async function rpc(
 	if (text.length > MAX_MCP_RESPONSE_BYTES) {
 		throw new ShopError('too-large', `${new URL(endpoint).hostname} answered with more than this chat will read.`);
 	}
+	// A notification acknowledgement (202, empty body) never reaches here
+	// through this path, but a server may also 202 a regular call with an
+	// empty stream — that is not a result.
+	if (!text) {
+		throw new ShopError('not-mcp', `${new URL(endpoint).hostname} did not answer with JSON-RPC.`);
+	}
 	let body: any;
 	try {
-		body = JSON.parse(text);
+		const contentType = response.headers?.get?.('content-type') ?? '';
+		body = contentType.includes('text/event-stream') ? parseSseBody(text) : JSON.parse(text);
 	} catch {
 		throw new ShopError('not-mcp', `${new URL(endpoint).hostname} did not answer with JSON-RPC.`);
 	}
@@ -307,6 +353,39 @@ async function rpc(
 		);
 	}
 	return body.result;
+}
+
+async function notify(
+	endpoint: string,
+	method: string,
+	params: Record<string, unknown> = {},
+	fetcher: typeof fetch = fetch
+): Promise<void> {
+	// JSON-RPC notification: no id, no response body expected (202).
+	// Best-effort: servers that do not need it answer 404/405, which is fine.
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), MCP_FETCH_TIMEOUT_MS);
+	try {
+		const headers: Record<string, string> = {
+			'content-type': 'application/json',
+			accept: 'application/json, text/event-stream'
+		};
+		const session = mcpSessions.get(endpoint);
+		if (session) headers['mcp-session-id'] = session;
+		const response = await fetcher(endpoint, {
+			method: 'POST',
+			headers,
+			body: JSON.stringify({ jsonrpc: '2.0', method, params }),
+			signal: controller.signal
+		});
+		const returned = response.headers?.get?.('mcp-session-id');
+		if (returned) mcpSessions.set(endpoint, returned);
+		await response.text().catch(() => '');
+	} catch {
+		// Notifications never fail the flow that sent them.
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 /** The handshake, and what the server says about itself — used once, at
@@ -322,6 +401,9 @@ export async function initializeGeneric(
 		{ protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'Miro', version: '1' } },
 		fetcher
 	);
+	// Stateful servers expect this before `tools/list`; stateless ones ignore
+	// it. Best-effort so a 404 here never fails the add.
+	await notify(endpoint, 'notifications/initialized', {}, fetcher);
 	const name = result?.serverInfo?.name;
 	return { name: typeof name === 'string' && name ? name : null };
 }
