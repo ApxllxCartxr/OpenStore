@@ -1,7 +1,7 @@
 name: CI
 
-# Every push (§10 CI): firewall · Closed-Sets.md diff · money lint · time lint ·
-# pytest. Any red is a stop.
+# Push to main + PRs (§10 CI): firewall · Closed-Sets.md diff · money lint ·
+# time lint · pytest. Any red is a stop. Docs/assets-only changes skip CI.
 #
 # The vitest / svelte-check / golden-replay jobs land with the surfaces they
 # test (B1, C1, A6). A job that passes because nothing exists to run is worse
@@ -9,7 +9,16 @@ name: CI
 
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'assets/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'assets/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
