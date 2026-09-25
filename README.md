@@ -1,6 +1,6 @@
 # OpenStore: Open-Source Storefronts for AI Agents
 
-![CI](https://github.com/ApxllxCartxr/OpenStore/actions/workflows/ci/badge.svg)
+![CI](https://github.com/ApxllxCartxr/OpenStore/actions/workflows/ci.yml/badge.svg)
 
 OpenStore is a self-hosted sidecar (a service that runs next to an existing shop) that makes one merchant site transactable by any AI buyer agent.
 It translates MCP, UCP, ACP, and AP2 into one money core, so a merchant integrates once instead of once per protocol.
