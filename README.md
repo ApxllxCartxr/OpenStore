@@ -6,6 +6,24 @@ OpenStore is a self-hosted sidecar (a service that runs next to an existing shop
 It translates MCP, UCP, ACP, and AP2 into one money core, so a merchant integrates once instead of once per protocol.
 Agents can search, build a basket, and start a checkout, but only a human tap on the merchant domain moves money. Every order ends in a signed receipt that anyone can verify offline.
 
+### Watch it work
+
+Twenty seconds, merchant-first: the agent shops, the human approves on the shop domain, the receipt seals. Click the poster for the full video with music.
+
+[![OpenStore launch video poster](assets/brag-poster.jpg)](assets/openstore-brag.mp4)
+
+**Agent builds the basket** — Quote rendered verbatim from the shop, never computed locally:
+
+![Quote built verbatim from the shop](assets/brag-quote.gif)
+
+**Human approves** — the exact total, on the merchant domain, UPI PIN or passkey:
+
+![Approve the exact total on the merchant domain](assets/brag-approve.gif)
+
+**Receipt seals** — hash-chained and signed, verifiable offline by anyone:
+
+![Hash-chained signed receipt](assets/brag-receipt.gif)
+
 ---
 
 ## Contents
@@ -302,16 +320,6 @@ Four products appear in two shops each, with different prices and stock: AA batt
 ### The import firewall
 
 The three surfaces never import each other at runtime, in types, or in tests. They communicate over HTTP and signed webhooks only. `scripts/lint_firewall.py` fails the build on any crossing. If the demo shop and the demo agent share a module, they prove nothing about integration. The firewall keeps the proof valid.
-
-### Watch it work
-
-Twenty seconds, merchant-first: the agent shops, the human approves on the shop domain, the receipt seals. Click the poster for the full video with music.
-
-[![OpenStore launch video poster](assets/brag-poster.jpg)](assets/openstore-brag.mp4)
-
-| Agent builds the basket | Human approves | Receipt seals |
-|---|---|---|
-| ![Quote built verbatim from the shop](assets/brag-quote.gif) | ![Approve the exact total on the merchant domain](assets/brag-approve.gif) | ![Hash-chained signed receipt](assets/brag-receipt.gif) |
 
 ---
 
